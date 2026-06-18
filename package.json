@@ -1,6 +1,6 @@
 {
   "name": "@scream-cli/monorepo",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -44,7 +44,9 @@
   },
   "simple-git-hooks": {},
   "pnpm": {
-    "onlyBuiltDependencies": ["onnxruntime-node"]
+    "onlyBuiltDependencies": [
+      "onnxruntime-node"
+    ]
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [
