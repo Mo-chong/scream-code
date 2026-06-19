@@ -94,7 +94,6 @@ describe('shell command nul-redirect non-rewrites (Windows Git Bash)', () => {
     'ls >null',
     'ls >nullable',
     'ls >nul.txt',
-    'cat nul.txt',
     'echo nul',
     "echo 'nul'",
     'ls > nul_file',

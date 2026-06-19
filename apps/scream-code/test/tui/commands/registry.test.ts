@@ -35,6 +35,9 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('mcp')?.name).toBe('mcp');
     expect(findBuiltInSlashCommand('status')?.name).toBe('status');
     expect(findBuiltInSlashCommand('usage')?.aliases).not.toContain('status');
+    expect(findBuiltInSlashCommand('make-skill')?.name).toBe('make-skill');
+    expect(findBuiltInSlashCommand('makeskill')?.name).toBe('make-skill');
+    expect(findBuiltInSlashCommand('craftskill')?.name).toBe('make-skill');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 
@@ -93,6 +96,7 @@ describe('built-in slash command registry', () => {
         'help',
         'init',
         'logout',
+        'make-skill',
         'mcp',
         'memory',
         'model',

@@ -71,6 +71,11 @@ export class TurnFlow {
   private activeTurn: 'resuming' | ActiveTurn | null = null;
   private readonly currentStepByTurn = new Map<number, number>();
   private currentStep = 0;
+  private todoSeenThisTurn = false;
+  private convergenceInjections = 0;
+  private currentStepHadContent = false;
+  private turnHadToolFailure = false;
+  private readonly MAX_CONVERGENCE_INJECTIONS = 5;
 
   constructor(protected readonly agent: Agent) {}
 
@@ -337,6 +342,10 @@ export class TurnFlow {
     standalone: boolean,
   ): Promise<TurnEndResult> {
     this.currentStep = 0;
+    this.todoSeenThisTurn = false;
+    this.convergenceInjections = 0;
+    this.currentStepHadContent = false;
+    this.turnHadToolFailure = false;
     this.agent.workingSet.decay(turnId);
     this.currentStepByTurn.set(turnId, 0);
     this.agent.fullCompaction.resetForTurn();
@@ -491,7 +500,22 @@ export class TurnFlow {
           hooks: {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
+              this.currentStepHadContent = false;
               await this.agent.fullCompaction.beforeStep(stepSignal);
+
+              const goal = this.agent.goal.getGoal().goal;
+              if (stepNumber === 1 && goal?.status === 'active' && !this.todoSeenThisTurn) {
+                this.agent.context.appendSystemReminder(
+                  'This turn is working toward an active goal. You MUST call TodoList to create or update the plan before making changes.',
+                  { kind: 'system_trigger', name: 'todo_required' },
+                );
+              }
+              if (stepNumber === 2 && !this.todoSeenThisTurn) {
+                this.agent.context.appendSystemReminder(
+                  'This task spans multiple steps. Use TodoList to track the remaining work and current phase.',
+                  { kind: 'system_trigger', name: 'todo_suggested' },
+                );
+              }
 
               // Inject session memory summary so the model retains context
               // after compaction strips detailed tool-call history.
@@ -525,6 +549,52 @@ export class TurnFlow {
             shouldContinueAfterStop: async ({ signal }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
+
+              // Hard convergence gate: never stop while there is unverified
+              // work, a failed tool, an empty assistant step, or a missing
+              // TodoList update for an active goal. This mirrors the oh-my-pi
+              // loop behavior where model-generated "I'm done" is not trusted.
+              if (this.convergenceInjections < this.MAX_CONVERGENCE_INJECTIONS) {
+                const reasons: string[] = [];
+
+                if (!this.currentStepHadContent) {
+                  reasons.push(
+                    'The last assistant step produced no content or tool calls. Continue the task.',
+                  );
+                }
+
+                const unverified = this.agent.workingSet.getUnverifiedPaths();
+                if (unverified.length > 0) {
+                  const suggestions = this.agent.workingSet.suggestVerificationCommands(
+                    this.agent.config.cwd,
+                  );
+                  reasons.push(
+                    `You have unverified changes in: ${unverified.join(', ')}.\n` +
+                      `The next step MUST be verification: ${suggestions.join(' OR ')}.`,
+                  );
+                }
+
+                const goal = this.agent.goal.getGoal().goal;
+                if (goal?.status === 'active' && !this.todoSeenThisTurn) {
+                  reasons.push(
+                    'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
+                  );
+                }
+
+                if (this.turnHadToolFailure) {
+                  reasons.push('A tool failed this turn. Analyze the error and fix it.');
+                }
+
+                if (reasons.length > 0) {
+                  this.convergenceInjections += 1;
+                  this.agent.context.appendSystemReminder(
+                    reasons.join('\n') +
+                      '\n\nDo not report completion until the above is resolved.',
+                    { kind: 'system_trigger', name: 'convergence_gate' },
+                  );
+                  return { continue: true };
+                }
+              }
 
               // Stop hooks get one continuation; otherwise a hook that always blocks would loop forever.
               if (stopHookContinuationUsed) return { continue: false };
@@ -585,6 +655,14 @@ export class TurnFlow {
                 Number(ctx.turnId),
               );
 
+              if (ctx.toolCall.name === 'TodoList') {
+                this.todoSeenThisTurn = true;
+              }
+
+              if (isError === true && ['Edit', 'Write', 'Bash'].includes(ctx.toolCall.name)) {
+                this.turnHadToolFailure = true;
+              }
+
               const event = isError === true ? 'PostToolUseFailure' : 'PostToolUse';
               void this.agent.hooks?.fireAndForgetTrigger(event, {
                 matcherValue: ctx.toolCall.name,
@@ -626,15 +704,18 @@ export class TurnFlow {
 
   private recordWorkingSetPaths(toolName: string, args: unknown, turnId: number): void {
     const workingSet = this.agent.workingSet;
-    if (toolName === 'Read' || toolName === 'Edit' || toolName === 'Grep' || toolName === 'Write' || toolName === 'ReadMediaFile') {
-      const record = (args as { path?: string }).path;
-      if (record !== undefined) workingSet.touch(record, turnId);
-    }
-    if (toolName === 'ReadGroup') {
-      const paths = (args as { paths?: string[] }).paths;
-      if (Array.isArray(paths)) {
-        for (const path of paths) workingSet.touch(path, turnId);
+    if (toolName === 'Read' || toolName === 'ReadGroup' || toolName === 'ReadMediaFile') {
+      const paths =
+        toolName === 'ReadGroup'
+          ? (args as { paths?: string[] }).paths
+          : [(args as { path?: string }).path];
+      for (const path of paths ?? []) {
+        if (path !== undefined) workingSet.markRead(path, turnId);
       }
+    }
+    if (toolName === 'Edit' || toolName === 'Write') {
+      const path = (args as { path?: string }).path;
+      if (path !== undefined) workingSet.touch(path, turnId);
     }
   }
 
@@ -656,13 +737,19 @@ export class TurnFlow {
       this.beginTrackedStep(turnId, event.step);
       return;
     }
+    if (
+      event.type === 'text.delta' ||
+      event.type === 'thinking.delta' ||
+      event.type === 'tool.call'
+    ) {
+      this.currentStepHadContent = true;
+    }
   }
 
   private beginTrackedStep(turnId: number, step: number): void {
     this.currentStepByTurn.set(turnId, step);
     this.currentStep = step;
   }
-
 }
 
 function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | undefined {

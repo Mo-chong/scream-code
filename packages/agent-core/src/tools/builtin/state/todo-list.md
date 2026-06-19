@@ -19,4 +19,5 @@ Use this tool to maintain a structured TODO list as you work through a multi-ste
 - Call with no arguments to retrieve the current list without changing it.
 - Call with `todos: []` to clear the list.
 - Keep titles short and actionable (e.g. "Read session-control.ts", "Add planMode flag to TurnManager").
+- For multi-phase work, set `phase` on each item. Items with the same phase are grouped together. Complete all items in a phase before marking items in the next phase as in_progress.
 - Update statuses as you make progress — mark one item in_progress at a time.

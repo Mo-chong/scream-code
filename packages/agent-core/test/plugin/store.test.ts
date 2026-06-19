@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -116,5 +116,53 @@ describe('plugin store', () => {
     expect(record?.id).toBe('demo');
     expect(record?.source).toBe('zip-url');
     expect((record as { github?: unknown } | undefined)?.github).toBeUndefined();
+  });
+  it('migrates legacy name/path records and resolves relative paths', async () => {
+    const home = await makeScreamHome();
+    const pluginDir = path.join(home, 'plugins', 'managed', 'legacy-skill');
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      path.join(home, 'plugins', 'installed.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            name: 'legacy-skill',
+            path: 'managed/legacy-skill',
+            enabled: true,
+            installedAt: '2026-05-01T00:00:00Z',
+          },
+        ],
+      }),
+      'utf8',
+    );
+    const result = await readInstalled(home);
+    expect(result.plugins).toHaveLength(1);
+    const record = result.plugins[0];
+    expect(record?.id).toBe('legacy-skill');
+    expect(record?.root).toBe(pluginDir);
+    expect(record?.source).toBe('local-path');
+  });
+
+  it('drops stale legacy records whose plugin directory is missing', async () => {
+    const home = await makeScreamHome();
+    await mkdir(path.join(home, 'plugins'), { recursive: true });
+    await writeFile(
+      path.join(home, 'plugins', 'installed.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          {
+            name: 'deleted-skill',
+            path: 'managed/deleted-skill',
+            enabled: true,
+            installedAt: '2026-05-01T00:00:00Z',
+          },
+        ],
+      }),
+      'utf8',
+    );
+    const result = await readInstalled(home);
+    expect(result.plugins).toEqual([]);
   });
 });

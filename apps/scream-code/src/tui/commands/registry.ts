@@ -71,6 +71,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 119,
   },
   {
+    name: 'make-skill',
+    aliases: ['makeskill', 'craftskill'],
+    description: '从当前会话沉淀工作流为 Skill',
+    priority: 118,
+    availability: 'idle-only',
+  },
+  {
     name: 'plan',
     aliases: [],
     description: '切换计划模式',

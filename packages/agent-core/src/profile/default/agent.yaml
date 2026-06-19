@@ -29,6 +29,8 @@ tools:
   - MemoryConsolidateApply
   - MemoryWrite
   - Skill
+  - MakeSkillPlan
+  - MakeSkillApply
   - WebSearch
   - Agent
   - WolfPack
@@ -48,5 +50,7 @@ subagents:
     description: Read-only implementation planning and architecture design.
   verify:
     description: Verification specialist. Runs build, test, and lint commands to validate code changes.
+  oracle:
+    description: Deep debugging, architecture decisions, and second opinions.
   writer:
     description: Content production and research specialist. Produces structured, data-driven reports, analyses, and Markdown documents.

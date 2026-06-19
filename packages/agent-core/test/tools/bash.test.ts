@@ -896,3 +896,50 @@ describe('BashTool prompt / runtime consistency', () => {
     expect(tool.description).not.toMatch(/exit code will be provided in a system tag/);
   });
 });
+
+
+describe('BashTool anti-pattern rejection', () => {
+  it.each([
+    { command: 'cat src/main.ts', name: 'read file via shell' },
+    { command: 'head -n 20 README.md', name: 'read file via shell' },
+    { command: 'tail -f logs/app.log', name: 'read file via shell' },
+    { command: 'grep -r foo src/', name: 'search code via shell' },
+    { command: 'rg className packages/', name: 'search code via shell' },
+    { command: 'find . -name "*.test.ts"', name: 'find files via shell' },
+    { command: "sed -i 's/old/new/g' file.txt", name: 'edit files via sed/perl/awk' },
+    { command: "echo 'hello' > file.txt", name: 'create file via echo redirection' },
+    { command: "echo 'hello' >> file.txt", name: 'create file via echo redirection' },
+    { command: 'git status && cat package.json', name: 'read file via shell' },
+  ])(
+    'rejects "$command" because of $name',
+    async ({ command, name }) => {
+      const tool = new BashTool(createFakeJian({ osEnv: posixEnv }), '/workspace');
+      const result = await executeTool(tool, context({ command }));
+      expect(result).toMatchObject({ isError: true });
+      expect(result.output).toContain('Tool-priority violation');
+      expect(result.output).toContain(name);
+    },
+  );
+
+  it.each([
+    'ls -la',
+    'git status',
+    'pnpm test',
+    'docker build -t app .',
+    "git log --oneline | grep 'fix'",
+    'echo "cat src/main.ts"',
+  ])(
+    'allows acceptable command: %s', async (command) => {
+      const execWithEnv = vi.fn().mockResolvedValue(
+        processWithOutput({ stdout: 'ok', exitCode: 0 }),
+      );
+      const tool = new BashTool(
+        createFakeJian({ execWithEnv, osEnv: posixEnv }),
+        '/workspace',
+      );
+      const result = await executeTool(tool, context({ command }));
+      expect(result).toMatchObject({ isError: false });
+      expect(execWithEnv).toHaveBeenCalled();
+    },
+  );
+});

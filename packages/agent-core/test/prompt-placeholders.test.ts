@@ -40,11 +40,15 @@ describe('prompt placeholders', () => {
   });
 
   it('static .md files contain no unrendered template syntax', () => {
+    const runtimePlaceholders = /\$\{SCREAM_SKILL_DIR\}|\$\{SCREAM_SESSION_ID\}/g;
     for (const file of mdFiles) {
       if (TEMPLATED.has(file)) continue;
       const content = readFileSync(join(SRC, file), 'utf-8');
+      // ${SCREAM_SKILL_DIR} and ${SCREAM_SESSION_ID} are runtime substitutions
+      // performed by the skill parser, not template placeholders.
+      const contentForTest = content.replaceAll(runtimePlaceholders, '');
       expect(
-        /\{\{|\{%|\$\{/.test(content),
+        /\{\{|\{%|\$\{/.test(contentForTest),
         `${file} is imported as raw text; it must not contain {{ }} / {% %} / \${ } ` +
           'or it would reach the model unrendered (route it through renderPrompt instead).',
       ).toBe(false);

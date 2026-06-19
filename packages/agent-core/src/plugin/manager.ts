@@ -57,6 +57,37 @@ export class PluginManager {
     return this.records.get(normalizePluginId(id));
   }
 
+  /**
+   * Register a plugin that was generated locally (e.g. via /make-skill).
+   * The caller is responsible for preparing `root` with a valid manifest.
+   * Throws if a plugin with the same id already exists.
+   */
+  async registerGenerated(root: string): Promise<PluginRecord> {
+    const parsed = await parseManifest(root);
+    if (parsed.manifest === undefined) {
+      const msg = parsed.diagnostics.find((d) => d.severity === 'error')?.message ?? 'no manifest';
+      throw new Error(`Cannot register generated plugin at ${root}: ${msg}`);
+    }
+    const id = normalizePluginId(parsed.manifest.name);
+    const existing = this.records.get(id);
+    if (existing !== undefined) {
+      throw new Error(`Plugin "${id}" already exists`);
+    }
+    const now = new Date().toISOString();
+    const record = await recordFrom({
+      id,
+      root,
+      enabled: true,
+      installedAt: now,
+      updatedAt: now,
+      source: 'local-path',
+      parsed,
+    });
+    this.records.set(id, record);
+    await this.persist();
+    return record;
+  }
+
   async install(source: string): Promise<PluginRecord> {
     const resolved = resolveInstallSource(source);
 

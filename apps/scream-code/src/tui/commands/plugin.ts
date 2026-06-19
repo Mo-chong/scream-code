@@ -270,6 +270,10 @@ async function loadInstalled(
   try {
     const session = host.session;
     if (!session) return [];
+    // /make-skill writes generated plugins directly to disk via a separate
+    // PluginManager instance, so the in-memory list may be stale. Refresh
+    // before showing the Skill Center so newly installed skills appear.
+    await session.reloadPlugins().catch(() => { /* ignore reload errors */ });
     return await session.listPlugins();
   } catch {
     return [];

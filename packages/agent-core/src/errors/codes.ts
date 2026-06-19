@@ -56,6 +56,8 @@ export const ErrorCodes = {
   SKILL_NOT_FOUND: 'skill.not_found',
   SKILL_TYPE_UNSUPPORTED: 'skill.type_unsupported',
   SKILL_NAME_EMPTY: 'skill.name_empty',
+  SKILL_ALREADY_EXISTS: 'skill.already_exists',
+  SKILL_INSTALL_FAILED: 'skill.install_failed',
 
   RECORDS_WRITE_FAILED: 'records.write_failed',
   COMPACTION_FAILED: 'compaction.failed',
@@ -345,6 +347,18 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Provide a non-empty skill name.',
+  },
+  'skill.already_exists': {
+    title: 'Skill already exists',
+    retryable: false,
+    public: true,
+    action: 'Choose a different skill name or delete the existing skill first.',
+  },
+  'skill.install_failed': {
+    title: 'Skill installation failed',
+    retryable: false,
+    public: true,
+    action: 'Check disk space, permissions, and the skill package contents.',
   },
 
   'records.write_failed': {

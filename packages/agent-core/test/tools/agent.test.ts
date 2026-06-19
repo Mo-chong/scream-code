@@ -63,6 +63,85 @@ describe('AgentTool', () => {
     });
   });
 
+  it('parses target, change, and acceptance structured fields', () => {
+    const parsed = AgentToolInputSchema.parse({
+      prompt: 'Update API',
+      description: 'Migrate endpoint',
+      target: 'src/api/users.ts',
+      change: 'Replace GET with POST and update types',
+      acceptance: 'pnpm test passes',
+    });
+
+    expect(parsed).toMatchObject({
+      prompt: 'Update API',
+      target: 'src/api/users.ts',
+      change: 'Replace GET with POST and update types',
+      acceptance: 'pnpm test passes',
+    });
+  });
+
+  it('composes structured fields into the subagent prompt', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        resumed: false,
+        completion: Promise.resolve({ result: 'done' }),
+      }),
+    });
+    const tool = new AgentTool(host);
+
+    await executeTool(
+      tool,
+      context({
+        prompt: 'Migrate the users endpoint.',
+        description: 'Migrate endpoint',
+        target: 'src/api/users.ts',
+        change: 'Replace GET with POST and update types',
+        acceptance: 'pnpm test passes',
+      }),
+    );
+
+    expect(host.spawn).toHaveBeenCalledWith(
+      'coder',
+      expect.objectContaining({
+        prompt: expect.stringContaining('# Target'),
+      }),
+    );
+    const callArgs = host.spawn.mock.calls[0] as [string, { prompt: string }];
+    expect(callArgs[1].prompt).toContain('src/api/users.ts');
+    expect(callArgs[1].prompt).toContain('# Change');
+    expect(callArgs[1].prompt).toContain('# Acceptance');
+    expect(callArgs[1].prompt).toContain('pnpm test passes');
+  });
+
+  it('leaves the prompt unchanged when no structured fields are provided', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        resumed: false,
+        completion: Promise.resolve({ result: 'done' }),
+      }),
+    });
+    const tool = new AgentTool(host);
+
+    await executeTool(
+      tool,
+      context({
+        prompt: 'Plain prompt',
+        description: 'Plain task',
+      }),
+    );
+
+    expect(host.spawn).toHaveBeenCalledWith(
+      'coder',
+      expect.objectContaining({
+        prompt: 'Plain prompt',
+      }),
+    );
+  });
+
   it('exposes run_in_background and not runInBackground in the JSON schema', () => {
     const host = mockSubagentHost({ spawn: vi.fn() });
     const tool = new AgentTool(host);

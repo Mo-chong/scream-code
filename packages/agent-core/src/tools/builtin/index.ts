@@ -19,6 +19,8 @@ export * from './memory/memory-write';
 export * from './lsp-tool';
 
 export * from './collaboration/skill-tool';
+export * from './skill/make-skill-apply';
+export * from './skill/make-skill-plan';
 export * from './collaboration/wolfpack';
 export * from './file/edit';
 export * from './file/glob';

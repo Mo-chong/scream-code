@@ -156,6 +156,60 @@ function rejectDangerousCommand(
       `Instead: ${hint}`,
   };
 }
+// Anti-patterns: shell commands that should be replaced by built-in tools.
+// These are not dangerous, but they bypass anchors, path policies, and
+// verification tracking. We reject them with a helpful hint.
+interface BashAntiPattern {
+  readonly name: string;
+  readonly pattern: RegExp;
+  readonly hint: string;
+}
+
+const ANTI_PATTERNS: readonly BashAntiPattern[] = [
+  // We flag file-reading and code-search commands when they are at the start
+  // of a command or after `;` / `&&` / `||` / `$()`. We deliberately do NOT
+  // flag them after `|`, because in that position they are filtering the
+  // output of another shell command (e.g. `ls 2>/dev/null | grep foo`) rather
+  // than reading or searching files directly.
+  {
+    name: 'read file via shell',
+    pattern: /(^|[;&]|\$\()\s*(cat|head|tail|less|more)\s+\S/i,
+    hint: 'Use the Read tool to read files instead of shell file-reading commands.',
+  },
+  {
+    name: 'search code via shell',
+    pattern: /(^|[;&]|\$\()\s*(grep|rg|ag|ack)\s+\S/i,
+    hint: 'Use the Grep or LSP tool to search code instead of shell search commands.',
+  },
+  {
+    name: 'find files via shell',
+    pattern: /(^|[;&]|\$\()\s*(find|fd)\s+\S/i,
+    hint: 'Use the Glob tool to find files instead of shell file-finding commands.',
+  },
+  {
+    name: 'edit files via sed/perl/awk',
+    pattern: /(^|[;&]|\$\()\s*(sed\s+(-i|--in-place)|perl\s+.*-i|awk\s+.*>>?)/i,
+    hint: 'Use the Edit tool to modify files instead of sed/perl/awk.',
+  },
+  {
+    name: 'create file via echo redirection',
+    pattern: /(^|[;&])\s*echo\s+['"][^'"]*['"]\s*>>?\s*\S/i,
+    hint: 'Use the Write tool to create files instead of echo redirection.',
+  },
+];
+
+function detectAntiPattern(command: string): ExecutableToolResult | null {
+  for (const antiPattern of ANTI_PATTERNS) {
+    if (antiPattern.pattern.test(command)) {
+      return {
+        isError: true,
+        output: `Tool-priority violation: ${antiPattern.hint} (detected pattern: ${antiPattern.name})`,
+      };
+    }
+  }
+  return null;
+}
+
 
 function validateCommand(command: string, isWindows: boolean): ExecutableToolResult | null {
   const cmd = command;
@@ -342,6 +396,9 @@ export class BashTool implements BuiltinTool<BashInput> {
 
     const validationError = validateCommand(args.command, this.isWindowsBash);
     if (validationError !== null) return validationError;
+
+    const antiPattern = detectAntiPattern(args.command);
+    if (antiPattern !== null) return antiPattern;
 
     if (args.run_in_background) {
       if (!this.allowBackground) {

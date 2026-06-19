@@ -35,6 +35,9 @@ describe('resolveSlashCommandInput', () => {
       args: 'New title',
     });
     expect(resolve('/init')).toMatchObject({ kind: 'builtin', name: 'init', args: '' });
+    expect(resolve('/make-skill')).toMatchObject({ kind: 'builtin', name: 'make-skill', args: '' });
+    expect(resolve('/makeskill')).toMatchObject({ kind: 'builtin', name: 'make-skill', args: '' });
+    expect(resolve('/craftskill')).toMatchObject({ kind: 'builtin', name: 'make-skill', args: '' });
   });
 
   it('blocks idle-only built-ins while streaming', () => {

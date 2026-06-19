@@ -36,6 +36,10 @@ function makeStore(initial: readonly TodoItem[] = []): {
   };
 }
 
+function context(args: { todos?: TodoItem[] }) {
+  return { turnId: '0', toolCallId: 'call_todo', args, signal };
+}
+
 function makeTool(initial: readonly TodoItem[] = []): {
   tool: TodoListTool;
   getTodos(): readonly TodoItem[];

@@ -501,6 +501,37 @@ Key files: `packages/agent-core/src/tools/builtin/lsp-tool.ts`,
 `packages/agent-core/src/lsp/client.ts`,
 `packages/agent-core/src/lsp/registry.ts`.
 
+### Tool Priority and BashTool Anti-Patterns
+
+The agent MUST prefer specialized built-in tools over shell equivalents. `BashTool` rejects commands that duplicate built-in functionality: `cat`/`head`/`tail`/`less`/`more`, `grep`/`rg`/`ag`/`ack`, `find`/`fd`, `sed -i`/`perl -i`/`awk`, and `echo ... > file`. Use `Read`, `Grep`/`LSP`, `Glob`, `Edit`, and `Write` instead. Bash is reserved for builds/tests, package managers, git, dev servers, and executing compiled programs.
+
+Key files: `packages/agent-core/src/tools/builtin/shell/bash.ts`, `packages/agent-core/src/profile/default/system.md`.
+
+### Subagent Standardization
+
+The `Agent` tool accepts optional `target`, `change`, and `acceptance` fields. When provided, they are composed into the required Target / Change / Acceptance structure and appended to the subagent prompt. This helps the parent agent include acceptance criteria without forgetting them. They can also be written directly into the `prompt` field.
+
+Key files: `packages/agent-core/src/tools/builtin/collaboration/agent.ts`, `packages/agent-core/src/tools/builtin/collaboration/agent.md`.
+
+### TodoList Phases
+
+`TodoList` items support an optional `phase` field. Items sharing the same phase are rendered together, while preserving input order within each phase. The phase is preserved across state round-trips.
+
+Key files: `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.md`.
+
+### Verification Protocol and Convergence Gate
+
+The turn loop enforces verification before a task can be declared complete. `WorkingSet` tracks files touched by `Write`/`Edit` and read by `Read`. `suggestVerificationCommands()` maps the project kind to appropriate build/test/lint commands. `TurnFlow` injects a `convergence_gate` system reminder when the model tries to stop while:
+
+- the last assistant step had no content,
+- a tool failed in the current turn,
+- there are unverified touched files, or
+- a TodoList update is missing for an active goal.
+
+The gate fires up to five times per turn. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
+
+Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/src/agent/working-set.ts`.
+
 ### WelcomeComponent Breathing
 
 The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps).

@@ -85,6 +85,21 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'Timeout in seconds for the agent task (min 30s, max 3600s / 1hr). When omitted, a foreground task runs until completion with no timeout. The agent is stopped if it exceeds this limit.',
       ),
+    // Optional structured fields. When provided, they are composed into the
+    // required Target / Change / Acceptance format before being sent to the
+    // subagent. The explicit fields help the parent agent not forget them.
+    target: z
+      .string()
+      .optional()
+      .describe('Exact files, symbols, or directories the subagent should touch.'),
+    change: z
+      .string()
+      .optional()
+      .describe('Step-by-step what the subagent should add, remove, or modify.'),
+    acceptance: z
+      .string()
+      .optional()
+      .describe('Observable result that proves completion, including any verification command.'),
   }),
 );
 
@@ -153,7 +168,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       display: {
         kind: 'agent_call',
         agent_name: profileName,
-        prompt: args.prompt,
+        prompt: composeSubagentPrompt(args),
         background: args.run_in_background,
       },
       approvalRule: this.name,
@@ -215,7 +230,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 
       const options = {
         parentToolCallId: toolCallId,
-        prompt: args.prompt,
+        prompt: composeSubagentPrompt(args),
         description: args.description,
         runInBackground,
         signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
@@ -341,6 +356,27 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       foregroundDeadline?.clear();
     }
   }
+}
+
+
+function composeSubagentPrompt(args: AgentToolInput): string {
+  const hasStructure =
+    args.target !== undefined || args.change !== undefined || args.acceptance !== undefined;
+  if (!hasStructure) {
+    return args.prompt;
+  }
+
+  const parts: string[] = [args.prompt, ''];
+  if (args.target !== undefined) {
+    parts.push('# Target', args.target, '');
+  }
+  if (args.change !== undefined) {
+    parts.push('# Change', args.change, '');
+  }
+  if (args.acceptance !== undefined) {
+    parts.push('# Acceptance', args.acceptance, '');
+  }
+  return parts.join('\n');
 }
 
 function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents']): string {

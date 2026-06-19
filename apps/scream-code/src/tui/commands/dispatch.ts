@@ -49,6 +49,7 @@ import { handleUpdateCommand } from './update';
 import { handleMcpCommand } from './mcp';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
+import { handleMakeSkillCommand } from './make-skill';
 import { handlePluginCommand } from './plugin';
 import { handleBtwCommand } from './btw';
 
@@ -312,6 +313,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'memory':
       await handleMemoryCommand(host, args);
+      return;
+    case 'make-skill':
+      await handleMakeSkillCommand(host, args);
       return;
     case 'plugin':
       await handlePluginCommand(host, args);

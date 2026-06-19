@@ -95,6 +95,7 @@ export class Agent {
   readonly jian: Jian;
   readonly screamConfig?: ScreamConfig;
   readonly homedir?: string;
+  readonly screamHomeDir?: string;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly toolServices?: ToolServices;
   readonly pluginSessionStarts: readonly EnabledPluginSessionStart[];
@@ -135,6 +136,7 @@ export class Agent {
     this.jian = options.jian;
     this.screamConfig = options.config;
     this.homedir = options.homedir;
+    this.screamHomeDir = options.screamHomeDir;
     this.rpc = options.rpc;
     this.toolServices = options.toolServices;
     this.pluginSessionStarts = options.pluginSessionStarts ?? [];

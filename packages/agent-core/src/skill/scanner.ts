@@ -392,7 +392,7 @@ async function defaultIsFile(p: string): Promise<boolean> {
   }
 }
 
-async function findProjectRoot(workDir: string): Promise<string> {
+export async function findProjectRoot(workDir: string): Promise<string> {
   const start = resolve(workDir);
   let current = start;
   while (true) {

@@ -28,6 +28,8 @@ export type TodoStatus = 'pending' | 'in_progress' | 'done';
 export interface TodoItem {
   readonly title: string;
   readonly status: TodoStatus;
+  /** Optional phase name. Items sharing the same phase are grouped together when rendered. */
+  readonly phase?: string;
 }
 
 declare module '../../store' {
@@ -41,10 +43,16 @@ declare module '../../store' {
 const TodoItemSchema = z.object({
   title: z.string().min(1).describe('Short, actionable title for the todo.'),
   status: z.enum(['pending', 'in_progress', 'done']).describe('Current status of the todo.'),
+  phase: z
+    .string()
+    .optional()
+    .describe(
+      'Optional phase/group for the todo. Items in the same phase are rendered together. Complete one phase before starting the next.',
+    ),
 });
 
 export interface TodoListInput {
-  todos?: Array<{ title: string; status: TodoStatus }>;
+  todos?: Array<{ title: string; status: TodoStatus; phase?: string }>;
 }
 
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
@@ -64,11 +72,30 @@ function renderTodoList(todos: readonly TodoItem[]): string {
   if (todos.length === 0) {
     return 'Todo list is empty.';
   }
-  const lines = todos.map((t) => {
-    const marker = statusMarker(t.status);
-    return `  ${marker} ${t.title}`;
-  });
-  return ['Current todo list:', ...lines].join('\n');
+
+  // Preserve input order within each phase while grouping by phase.
+  const groups = new Map<string | undefined, TodoItem[]>();
+  for (const todo of todos) {
+    const key = todo.phase ?? undefined;
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = [];
+      groups.set(key, group);
+    }
+    group.push(todo);
+  }
+
+  const lines: string[] = ['Current todo list:'];
+  for (const [phase, items] of groups) {
+    if (phase !== undefined) {
+      lines.push(`\n## ${phase}`);
+    }
+    for (const item of items) {
+      const marker = statusMarker(item.status);
+      lines.push(`  ${marker} ${item.title}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 function statusMarker(status: TodoStatus): string {
@@ -128,7 +155,7 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
   private setTodos(todos: readonly TodoItem[]): void {
     this.store.set(
       TODO_STORE_KEY,
-      todos.map((todo) => ({ title: todo.title, status: todo.status })),
+      todos.map((todo) => ({ title: todo.title, status: todo.status, phase: todo.phase })),
     );
   }
 }
