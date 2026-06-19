@@ -1,4 +1,5 @@
 const DECAY_TURNS = 10;
+const VERIFICATION_DEDUP_MS = 60_000;
 
 type ProjectKind = 'node' | 'rust' | 'python' | 'go' | 'unknown';
 
@@ -7,6 +8,15 @@ interface WorkingSetEntry {
   lastTurn: number;
   lastReadTurn?: number;
   verified: boolean;
+}
+
+export interface VerificationRecord {
+  readonly command: string;
+  readonly cwd: string;
+  readonly exitCode: number;
+  readonly outputDigest: string;
+  readonly timestamp: number;
+  readonly passed: boolean;
 }
 
 interface ProjectFingerprint {
@@ -37,9 +47,102 @@ const VERIFICATION_COMMANDS: Record<ProjectKind, readonly string[]> = {
  * A separate `lastReadTurn` tracks when a path was last read. Edit tools can
  * warn when the model attempts to edit a file that has not been read recently,
  * reducing anchor mismatches caused by stale reads.
+ *
+ * Verification deduplication: records of recent verification commands are kept
+ * so that the same successful command is not run repeatedly within
+ * VERIFICATION_DEDUP_MS. This prevents the convergence gate from causing
+ * redundant test/lint/typecheck invocations.
  */
 export class WorkingSet {
   private entries = new Map<string, WorkingSetEntry>();
+  private verifications: VerificationRecord[] = [];
+
+  /**
+   * Normalize a shell command for deduplication by stripping leading whitespace,
+   * trailing semicolons, and collapsing redundant spaces.
+   */
+  private normalizeCommand(command: string): string {
+    const strippedLeading = command.replace(/^\s+/, '');
+    const strippedTrailing = strippedLeading.replace(/[\s;]+$/, '');
+    return strippedTrailing
+      .replaceAll('\\\\', '/')
+      .replaceAll(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Computes a short digest of command output for change detection.
+   */
+  private digestOutput(output: string): string {
+    let hash = 0;
+    const text = output.slice(0, 2000);
+    for (let i = 0; i < text.length; i++) {
+      const char = text.codePointAt(i) ?? 0;
+      hash = Math.trunc((hash << 5) - hash + char);
+    }
+    return String(hash);
+  }
+
+  /**
+   * Returns a matching recent successful verification record, or null if none
+   * exists for the same command/cwd/output within the dedup window.
+   */
+  findRecentVerification(
+    command: string,
+    cwd: string,
+    output: string,
+  ): VerificationRecord | null {
+    const normalized = this.normalizeCommand(command);
+    const normalizedCwd = cwd.replaceAll('\\\\', '/');
+    const outputDigest = this.digestOutput(output);
+    const now = Date.now();
+    for (const record of this.verifications) {
+      if (
+        record.passed &&
+        this.normalizeCommand(record.command) === normalized &&
+        record.cwd.replaceAll('\\\\', '/') === normalizedCwd &&
+        record.outputDigest === outputDigest &&
+        now - record.timestamp < VERIFICATION_DEDUP_MS
+      ) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Records a verification command result and prunes stale entries.
+   */
+  recordVerification(
+    command: string,
+    cwd: string,
+    exitCode: number,
+    output: string,
+  ): VerificationRecord {
+    const now = Date.now();
+    const record: VerificationRecord = {
+      command: this.normalizeCommand(command),
+      cwd: cwd.replaceAll('\\\\', '/'),
+      exitCode,
+      outputDigest: this.digestOutput(output),
+      timestamp: now,
+      passed: exitCode === 0,
+    };
+    this.verifications = [
+      ...this.verifications.filter((r) => now - r.timestamp < VERIFICATION_DEDUP_MS),
+      record,
+    ];
+    return record;
+  }
+
+  clearVerifications(): void {
+    this.verifications = [];
+  }
+
+  getVerificationCount(): number {
+    return this.verifications.length;
+  }
 
   touch(path: string, turn: number): void {
     if (path.length === 0) return;
@@ -151,3 +254,18 @@ export class WorkingSet {
     this.entries.clear();
   }
 }
+
+// Recognized verification commands. These are checked for deduplication via
+// the WorkingSet so the convergence gate does not cause redundant runs.
+const VERIFICATION_PATTERNS = [
+  /\b(tsc|typecheck)\b/i,
+  /\b(test|jest|vitest|mocha|pytest)\b/i,
+  /\b(lint|eslint|oxlint|clippy)\b/i,
+  /\b(build|make|cargo build|go build)\b/i,
+];
+
+export function looksLikeVerificationCommand(command: string): boolean {
+  return VERIFICATION_PATTERNS.some((pattern) => pattern.test(command));
+}
+
+export { DECAY_TURNS, VERIFICATION_COMMANDS };

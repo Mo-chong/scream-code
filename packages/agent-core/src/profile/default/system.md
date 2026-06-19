@@ -84,16 +84,15 @@ After completing a code change (creating or modifying files), you MUST verify yo
 ## How to verify
 
 1. Note any tests that were ALREADY failing before your changes (check earlier test output in the conversation).
-
-2. Call:
-   `spawn_agent(type="verify", prompt="Verify the current changes. <list pre-existing failures if any>")`
-
+2. Call `spawn_agent(type="verify", prompt="Verify the current changes. <list pre-existing failures if any>")` once.
 3. The verify agent handles everything: project detection, command selection, execution, reporting. You do NOT need to detect the project type yourself.
-
-4. On pass: deliver to user.
-5. On fail: fix the issues, re-verify. Maximum 2 rounds.
+4. On pass: deliver to the user. Do NOT run the same verification command again in the same conversation unless files changed or the prior run failed.
+5. On fail: fix the issues, then re-verify. Maximum 2 rounds total (initial + one retry).
 6. Pre-existing failures: mark and report, but do NOT block delivery.
 
+## Verification deduplication
+
+The system records recent successful verification commands. If a command with the same output has already passed within the last 60 seconds, do not run it again. Trust the recorded result and deliver.
 # Memory Memos
 
 The memory memo store is a cross-session experience archive. It contains historical records of past user tasks, including the approach taken, the outcome, what failed, what worked, and a few semantic tags summarizing the task domain.

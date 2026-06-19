@@ -25,6 +25,7 @@ import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { abortable, userCancellationReason } from '../../utils/abort';
 import { USER_PROMPT_ORIGIN, type PromptOrigin } from '../context';
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
+import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
 
 interface ActiveTurn {
@@ -654,6 +655,25 @@ export class TurnFlow {
                 ctx.args,
                 Number(ctx.turnId),
               );
+
+              // Record successful verification commands so the convergence gate
+              // does not ask for the same passed check twice within the dedup window.
+              if (
+                ctx.toolCall.name === 'Bash' &&
+                isError !== true &&
+                typeof (ctx.args as { command?: string }).command === 'string'
+              ) {
+                const command = (ctx.args as { command: string }).command;
+                const cwd = (ctx.args as { cwd?: string }).cwd ?? this.agent.config.cwd;
+                if (looksLikeVerificationCommand(command)) {
+                  this.agent.workingSet.recordVerification(
+                    command,
+                    cwd,
+                    0,
+                    toolOutputText(output),
+                  );
+                }
+              }
 
               if (ctx.toolCall.name === 'TodoList') {
                 this.todoSeenThisTurn = true;
