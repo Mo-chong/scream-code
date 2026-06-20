@@ -76,7 +76,7 @@ export class TurnFlow {
   private todoSeenThisTurn = false;
   private convergenceInjections = 0;
   private currentStepHadContent = false;
-  private turnHadToolFailure = false;
+  private lastToolFailure: { toolName: string; isExploratory: boolean } | null = null;
   private readonly MAX_CONVERGENCE_INJECTIONS = 5;
   private summaryGuardInjected = false;
   private turnStartWorkingSetPathCount = 0;
@@ -351,7 +351,7 @@ export class TurnFlow {
     this.todoSeenThisTurn = false;
     this.convergenceInjections = 0;
     this.currentStepHadContent = false;
-    this.turnHadToolFailure = false;
+    this.lastToolFailure = null;
     this.currentTurnId = turnId;
     this.agent.workingSet.decay(turnId);
     this.summaryGuardInjected = false;
@@ -562,9 +562,10 @@ export class TurnFlow {
               signal.throwIfAborted();
 
               // Hard convergence gate: never stop while there is unverified
-              // work, a failed tool, an empty assistant step, or a missing
-              // TodoList update for an active goal. This mirrors the oh-my-pi
-              // loop behavior where model-generated "I'm done" is not trusted.
+              // work, a blocking tool failure, an empty assistant step, or a
+              // missing TodoList update for an active goal. Exploratory failures
+              // (e.g. probing for tsc, ls, which) do not block once the turn has
+              // produced a successful resolution.
               if (this.convergenceInjections < this.MAX_CONVERGENCE_INJECTIONS) {
                 const reasons: string[] = [];
 
@@ -584,17 +585,18 @@ export class TurnFlow {
                       `The next step MUST be verification: ${suggestions.join(' OR ')}.`,
                   );
                 }
-
                 const goal = this.agent.goal.getGoal().goal;
                 if (goal?.status === 'active' && !this.todoSeenThisTurn) {
                   reasons.push(
                     'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
                   );
                 }
-                if (this.turnHadToolFailure) {
-                  reasons.push('A tool failed this turn. Analyze the error and fix it.');
+                if (this.lastToolFailure?.isExploratory === false) {
+                  reasons.push(
+                    `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
+                      'Analyze the error and fix it before reporting completion.',
+                  );
                 }
-
                 const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
                 if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
                   this.verificationFailureInjected = true;
@@ -774,8 +776,20 @@ export class TurnFlow {
                 this.todoSeenThisTurn = true;
               }
 
-              if (isError === true && ['Edit', 'Write', 'Bash'].includes(ctx.toolCall.name)) {
-                this.turnHadToolFailure = true;
+              if (isError === true && ['Edit', 'Write', 'Bash', 'Agent'].includes(ctx.toolCall.name)) {
+                const command =
+                  ctx.toolCall.name === 'Bash'
+                    ? String((ctx.args as { command?: string }).command ?? '')
+                    : '';
+                const subagentType =
+                  ctx.toolCall.name === 'Agent'
+                    ? String((ctx.args as { subagent_type?: string }).subagent_type ?? '')
+                    : '';
+                const isExploratory =
+                  ctx.toolCall.name === 'Agent'
+                    ? subagentType !== 'verify' && subagentType !== 'reviewer'
+                    : this.isExploratoryBashCommand(command);
+                this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
               }
 
               const event = isError === true ? 'PostToolUseFailure' : 'PostToolUse';
@@ -889,6 +903,33 @@ export class TurnFlow {
     }
     return false;
   }
+
+  /**
+   * Classify a Bash command as "exploratory" (probing the environment) vs
+   * "blocking" (a command whose failure means the task cannot be delivered).
+   * Exploratory failures (e.g. `which tsc`, `ls bin/`) should not keep the turn
+   * alive once the agent has found a working alternative.
+   */
+  private isExploratoryBashCommand(command: string): boolean {
+    const exploratoryPatterns = [
+      /^\s*which\s+/,
+      /^\s*whereis\s+/,
+      /^\s*command\s+-v\s+/,
+      /^\s*type\s+/,
+      /^\s*ls\s+/,
+      /^\s*find\s+/,
+      /^\s*glob\s+/,
+      /^\s*npm\s+list\s+-g/,
+      /^\s*cat\s+/,
+      /^\s*head\s+/,
+      /^\s*tail\s+/,
+      /^\s*echo\s+/,
+      /^\s*test\s+-[efdx]/,
+      /^\s*\[\s+-[efdx]/,
+    ];
+    return exploratoryPatterns.some((pattern) => pattern.test(command));
+  }
+
 }
 function getAssistantMessageText(message: ContextMessage): string {
   if (message.role !== 'assistant') return '';
