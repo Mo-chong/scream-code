@@ -325,11 +325,17 @@ export class WorkingSet {
 // Recognized verification commands. These are checked for deduplication via
 // the WorkingSet so the convergence gate does not cause redundant runs.
 const VERIFICATION_PATTERNS = [
+  // TypeScript / JavaScript
   /\b(tsc|typecheck)\b/i,
-  /\b(test|jest|vitest|mocha|pytest|unittest)\b/i,
-  /\b(lint|eslint|oxlint|clippy|ruff)\b/i,
+  // Test runners (including language-specific ones)
+  /\b(test|jest|vitest|mocha|pytest|unittest|go test|go vet|cargo test|cargo check)\b/i,
+  // Linters / type checkers
+  /\b(lint|eslint|oxlint|clippy|ruff|mypy|pylint|flake8|black\s+--check|isort\s+--check)\b/i,
+  // Builds
   /\b(build|make|cargo build|go build)\b/i,
+  // Python module compilation
   /\bpy_compile\b/i,
+  // Python script/module execution
   /\bpython3?\s+(\S+\.(py|pyw)\b|-m\s+\w+)/i,
 ];
 

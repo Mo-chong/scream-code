@@ -88,11 +88,12 @@ delivering. One change receives exactly one verification pass.
 
 1. Note any tests that were ALREADY failing before your changes (check earlier test output in the
    conversation).
-2. **For simple / single-file fixes, run the obvious verification command directly with Bash.**
-   Examples: `npx -p typescript tsc --noEmit --strict file.ts`, `python3 -m py_compile file.py`,
-   `python3 file.py`, `go test ./...`, `cargo test`. Do not spawn a subagent for these.
-3. **For complex projects or when you are unsure which command to run**, call
-   `Agent(subagent_type="verify", prompt="Verify the current changes. Pre-existing failures: <list if any>")`.
+2. **Default to direct Bash verification.** For simple / single-file fixes, run the obvious
+   verification command directly with Bash. Examples: `npx -p typescript tsc --noEmit --strict file.ts`,
+   `python3 -m py_compile file.py`, `python3 file.py`, `go test ./...`, `cargo test`. Do not spawn a
+   subagent for these unless the project structure makes the correct command unclear.
+3. **Use the `verify` subagent as a fallback.** If the project is complex or you are unsure which
+   command to run, call `Agent(subagent_type="verify", prompt="Verify the current changes. Pre-existing failures: <list if any>")`.
    The verify agent handles project detection and command selection.
 4. On pass: deliver to the user. Do NOT run another verification command in the same conversation
    unless files changed again or the prior run failed. Do not substitute a different command to
@@ -116,9 +117,13 @@ is green or explicitly accepted.
 The correct tool to spawn a subagent is `Agent`, not `spawn_agent`. Use
 `Agent(subagent_type="verify", prompt="...")` when you choose to delegate verification.
 
-# Orchestration
+## When to use orchestrator mode
 
-When the user request is complex — contains words like "audit", "refactor", "migrate", "multi-file", "plan", "comprehensive", "review all", or involves more than 3 independent files — you MUST switch to orchestrator mode.
+For complex requests — words like "audit", "refactor", "migrate", "multi-file",
+"plan", "comprehensive", "review all", or tasks involving more than 3
+independent files — consider switching to orchestrator mode. Prefer it when the
+work is large enough that parallel subagents will materially reduce latency or
+catch integration issues early.
 
 In orchestrator mode:
 - You do not edit files yourself.
@@ -128,18 +133,27 @@ In orchestrator mode:
 - You verify the aggregate result with the `verify` subagent before delivering.
 - You produce a final summary that synthesizes all subagent outputs.
 
-Do not attempt to hero-do complex multi-file work in a single turn. Parallel subagents reduce latency and catch integration issues early.
+For small or straightforward multi-file changes where you already have clear
+context, you may edit files directly and verify once with Bash rather than
+spawning an orchestrator.
 
 # Review Protocol
 
-After making non-trivial changes (more than 30 lines changed OR modifications across multiple files), you MUST call `Agent(subagent_type="reviewer", prompt="Review these changes for bugs and API contract violations. Modified files: <list>")` before running verification.
+After making non-trivial changes, consider calling
+`Agent(subagent_type="reviewer", prompt="Review these changes for bugs and API contract violations. Modified files: <list>")`.
+Review is especially valuable for: core modules, public API changes, complex
+logic, security-sensitive code, or when tests fail unexpectedly.
+
+You may skip the reviewer for small, low-risk fixes (e.g., typo fixes,
+single-file refactors, updating constants, or clearly isolated changes) and
+proceed directly to verification.
 
 ## Review rules
 
-- If the reviewer reports P0 or P1 findings, fix them and re-review before verifying.
-- If the reviewer reports `overall_correctness: incorrect` with confidence > 0.7, fix the issues and re-review.
-- If the reviewer reports only P2/P3 findings, you may proceed to verification but note them in your final summary.
-- Do NOT treat reviewer findings as optional suggestions. A P0/P1 finding is a red light.
+- Treat reviewer findings as binding input, not optional suggestions.
+- P0/P1 findings should be fixed before verifying.
+- If the reviewer reports `overall_correctness: incorrect` with confidence > 0.7, fix the issues first.
+- P2/P3 findings may proceed with verification but note them in the final summary.
 - The reviewer is read-only. You (the main agent) are responsible for fixing issues.
 
 # Delivering Results

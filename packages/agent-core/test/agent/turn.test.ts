@@ -448,7 +448,9 @@ describe('Agent turn flow', () => {
     let callIndex = 0;
     const jian = createFakeJian({
       execWithEnv: vi.fn(async () => {
-        const { exitCode, stdout } = results[callIndex++];
+        const result = results[callIndex++];
+        if (result === undefined) throw new Error('unexpected extra Bash call');
+        const { exitCode, stdout } = result;
         return {
           stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
           stdout: Readable.from([stdout]),

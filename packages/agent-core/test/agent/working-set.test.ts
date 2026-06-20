@@ -4,6 +4,7 @@ import {
   VERIFICATION_COMMANDS,
   type VerificationRecord,
   WorkingSet,
+  looksLikeVerificationCommand,
 } from '../../src/agent/working-set.js';
 
 describe('WorkingSet', () => {
@@ -185,6 +186,46 @@ describe('WorkingSet', () => {
       const ws = new WorkingSet();
       ws.markRead('package.json', 1);
       expect(ws.suggestVerificationCommands()).toHaveLength(0);
+    });
+  });
+
+  describe('looksLikeVerificationCommand', () => {
+    it('recognizes TypeScript verification commands', () => {
+      expect(looksLikeVerificationCommand('npx -p typescript tsc --noEmit')).toBe(true);
+      expect(looksLikeVerificationCommand('pnpm typecheck')).toBe(true);
+    });
+
+    it('recognizes Python verification commands', () => {
+      expect(looksLikeVerificationCommand('python3 file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('python3 -m py_compile file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('python file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('pytest')).toBe(true);
+      expect(looksLikeVerificationCommand('python3 -m pytest')).toBe(true);
+      expect(looksLikeVerificationCommand('mypy file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('pylint file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('flake8 file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('black --check file.py')).toBe(true);
+      expect(looksLikeVerificationCommand('ruff check file.py')).toBe(true);
+    });
+
+    it('recognizes Go verification commands', () => {
+      expect(looksLikeVerificationCommand('go test ./...')).toBe(true);
+      expect(looksLikeVerificationCommand('go build ./...')).toBe(true);
+      expect(looksLikeVerificationCommand('go vet ./...')).toBe(true);
+    });
+
+    it('recognizes Rust verification commands', () => {
+      expect(looksLikeVerificationCommand('cargo test')).toBe(true);
+      expect(looksLikeVerificationCommand('cargo check')).toBe(true);
+      expect(looksLikeVerificationCommand('cargo clippy')).toBe(true);
+      expect(looksLikeVerificationCommand('cargo build')).toBe(true);
+    });
+
+    it('does not recognize generic shell commands', () => {
+      expect(looksLikeVerificationCommand('ls -la')).toBe(false);
+      expect(looksLikeVerificationCommand('echo hello')).toBe(false);
+      expect(looksLikeVerificationCommand('git status')).toBe(false);
+      expect(looksLikeVerificationCommand('npm install')).toBe(false);
     });
   });
 });
