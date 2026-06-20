@@ -81,6 +81,24 @@ describe('WorkingSet', () => {
       expect(ws.getVerificationCount()).toBe(0);
     });
   });
+  describe('latest verification for turn', () => {
+    it('returns the most recent record for the requested turn', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/a', 0, 'ok', 1);
+      ws.recordVerification('pnpm typecheck', '/a', 1, 'bad', 1);
+      ws.recordVerification('pnpm lint', '/a', 0, 'ok', 2);
+      const latest = ws.getLatestVerificationForTurn(1);
+      expect(latest).toBeDefined();
+      expect(latest?.command).toBe('pnpm typecheck');
+      expect(latest?.passed).toBe(false);
+    });
+
+    it('returns undefined when no verification exists for the turn', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/a', 0, 'ok', 1);
+      expect(ws.getLatestVerificationForTurn(2)).toBeUndefined();
+    });
+  });
 
   describe('verification skip candidate', () => {
     it('returns a candidate when command passed recently and no edits occurred', () => {
@@ -97,6 +115,14 @@ describe('WorkingSet', () => {
       ws.touch('src/index.ts', 6);
       expect(ws.findSkipCandidate('pnpm test', '/work', 6)).toBeNull();
     });
+
+    it('does not skip when an unverified file was touched in the same turn after the record', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 5);
+      ws.touch('src/index.ts', 5);
+      expect(ws.findSkipCandidate('pnpm test', '/work', 5)).toBeNull();
+    });
+
 
     it('skips when a verified file was touched after the record', () => {
       const ws = new WorkingSet();

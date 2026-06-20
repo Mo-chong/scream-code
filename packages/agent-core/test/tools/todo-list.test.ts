@@ -25,13 +25,13 @@ function makeStore(initial: readonly TodoItem[] = []): {
   let todos = [...initial];
   return {
     store: {
-      get: (key) => (key === 'todo' ? todos : undefined),
-      set: (key, value) => {
+      get: ((key: 'todo' | 'findings') => (key === 'todo' ? todos : undefined)) as import('../../src/tools/store').ToolStore['get'],
+      set: ((key: 'todo' | 'findings', value: unknown) => {
         if (key === 'todo') {
-          todos = [...(value as readonly TodoItem[])];
+          todos = [...(value as TodoItem[])];
         }
-      },
-    },
+      }) as import('../../src/tools/store').ToolStore['set'],
+    } as import('../../src/tools/store').ToolStore,
     getTodos: () => todos,
   };
 }

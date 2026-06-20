@@ -424,6 +424,21 @@ describe('Agent turn flow', () => {
     );
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('convergence_gate');
   });
+  it('continues a turn when the final response is too brief after verification work', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    ctx.agent.workingSet.recordVerification('pnpm test', '.', 0, 'pass', 0);
+    ctx.agent.workingSet.markAllVerified();
+    ctx.mockNextResponse({ type: 'text', text: 'Done.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Verification passed; src/index.ts is updated.' });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Fix the bug' }] });
+    await ctx.untilTurnEnd();
+
+    expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(ctx.agent.context.data().history)).toContain('too brief');
+    expect(JSON.stringify(ctx.agent.context.data().history)).toContain('convergence_gate');
+  });
 
 
   it('cancels while waiting for a Stop hook', async () => {

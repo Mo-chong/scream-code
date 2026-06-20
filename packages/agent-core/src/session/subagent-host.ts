@@ -12,6 +12,7 @@ import { linkAbortSignal, userCancellationReason } from '../utils/abort';
 import { collectGitContext } from './git-context';
 import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
+import { getFindingsFromStore } from '../tools/builtin/collaboration/report-finding';
 
 /**
  * A subagent summary shorter than this many characters triggers one
@@ -246,7 +247,25 @@ export class SessionSubagentHost {
         await runChildTurnToCompletion(child, options.signal);
         result = lastAssistantText(child);
       }
+
       const usage = child.usage.data().total;
+
+      // Aggregate structured findings produced by reviewer subagents so the
+      // parent agent can act on them without re-parsing free-text summaries.
+      let findingsBlock = '';
+      if (profileName === 'reviewer') {
+        const findings = getFindingsFromStore(child.tools.toolStore);
+        if (findings.length > 0) {
+          const lines = findings.map(
+            (f) =>
+              `- [${f.priority}] ${f.title} (${f.file_path}:${f.line_start}${
+                f.line_end === f.line_start ? '' : `-${f.line_end}`
+              }) confidence=${(f.confidence * 100).toFixed(0)}%`,
+          );
+          findingsBlock = `\n\n[review_findings]\n${lines.join('\n')}`;
+        }
+      }
+
       parent.emitEvent({
         type: 'subagent.completed',
         subagentId: childId,
@@ -256,7 +275,7 @@ export class SessionSubagentHost {
         contextTokens: child.context.tokenCount,
       });
       this.triggerSubagentStop(parent, profileName, result);
-      return { result, usage };
+      return { result: result + findingsBlock, usage };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parent.emitEvent({

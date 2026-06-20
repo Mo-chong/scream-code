@@ -32,16 +32,15 @@ export interface TodoItem {
   readonly phase?: string;
 }
 
-declare module '../../store' {
-  interface ToolStoreData {
-    todo: readonly TodoItem[];
-  }
-}
+const TODO_STORE_KEY = 'todo';
 
 // ── Schema ───────────────────────────────────────────────────────────
 
 const TodoItemSchema = z.object({
-  title: z.string().min(1).describe('Short, actionable title for the todo.'),
+  title: z
+    .string()
+    .min(1)
+    .describe('Short, actionable title for the todo. Required field name is `title`, not `content` or `name`.'),
   status: z.enum(['pending', 'in_progress', 'done']).describe('Current status of the todo.'),
   phase: z
     .string()
@@ -64,7 +63,6 @@ export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
     ),
 });
 
-const TODO_STORE_KEY = 'todo';
 
 // ── Implementation ───────────────────────────────────────────────────
 

@@ -23,7 +23,7 @@ import {
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { abortable, userCancellationReason } from '../../utils/abort';
-import { USER_PROMPT_ORIGIN, type PromptOrigin } from '../context';
+import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../context';
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
@@ -69,6 +69,7 @@ const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
 export class TurnFlow {
   private steerBuffer: BufferedSteer[] = [];
   private turnId = -1;
+  private currentTurnId = -1;
   private activeTurn: 'resuming' | ActiveTurn | null = null;
   private readonly currentStepByTurn = new Map<number, number>();
   private currentStep = 0;
@@ -77,6 +78,11 @@ export class TurnFlow {
   private currentStepHadContent = false;
   private turnHadToolFailure = false;
   private readonly MAX_CONVERGENCE_INJECTIONS = 5;
+  private summaryGuardInjected = false;
+  private turnStartWorkingSetPathCount = 0;
+  private turnStartVerificationCount = 0;
+  private verificationFailureInjected = false;
+  private readonly MIN_FINAL_RESPONSE_LENGTH = 60;
 
   constructor(protected readonly agent: Agent) {}
 
@@ -342,12 +348,16 @@ export class TurnFlow {
     signal: AbortSignal,
     standalone: boolean,
   ): Promise<TurnEndResult> {
-    this.currentStep = 0;
     this.todoSeenThisTurn = false;
     this.convergenceInjections = 0;
     this.currentStepHadContent = false;
     this.turnHadToolFailure = false;
+    this.currentTurnId = turnId;
     this.agent.workingSet.decay(turnId);
+    this.summaryGuardInjected = false;
+    this.verificationFailureInjected = false;
+    this.turnStartWorkingSetPathCount = this.agent.workingSet.getPaths().length;
+    this.turnStartVerificationCount = this.agent.workingSet.getVerificationCount();
     this.currentStepByTurn.set(turnId, 0);
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
@@ -581,9 +591,17 @@ export class TurnFlow {
                     'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
                   );
                 }
-
                 if (this.turnHadToolFailure) {
                   reasons.push('A tool failed this turn. Analyze the error and fix it.');
+                }
+
+                const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
+                if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
+                  this.verificationFailureInjected = true;
+                  reasons.push(
+                    `The last verification command failed (${latestVerification.command}). ` +
+                      'Fix the failure before re-running verification. Do NOT downgrade to runtime smoke tests.',
+                  );
                 }
 
                 if (reasons.length > 0) {
@@ -595,6 +613,25 @@ export class TurnFlow {
                   );
                   return { continue: true };
                 }
+              }
+              // Summary guard: when the turn produced actual work (file changes,
+              // verification runs, etc.) but the model's final response is too
+              // brief or just an empty acknowledgment, give it one chance to
+              // produce a structured deliverability summary before yielding.
+              if (
+                !this.summaryGuardInjected &&
+                this.turnHadMeaningfulWork() &&
+                this.lastAssistantMessageIsTrivial()
+              ) {
+                this.summaryGuardInjected = true;
+                this.agent.context.appendSystemReminder(
+                  'Your final response is too brief or only acknowledges completion. ' +
+                    'Before ending the turn, provide a concise but complete summary: ' +
+                    'what was done, which files changed, the verification result, and any ' +
+                    'remaining work or blockers.',
+                  { kind: 'system_trigger', name: 'convergence_gate' },
+                );
+                return { continue: true };
               }
 
               // Stop hooks get one continuation; otherwise a hook that always blocks would loop forever.
@@ -687,13 +724,12 @@ export class TurnFlow {
                 Number(ctx.turnId),
               );
 
-              // Record successful verification commands so the convergence gate
-              // does not ask for the same passed check twice within the dedup window.
-              // A passing verification also marks all touched files as verified, since
-              // the command covered the current working set.
+              // Record verification commands (passed or failed) so the convergence
+              // gate can enforce fix-then-re-verify behavior and skip recently
+              // passed checks. A passing verification also marks all touched files
+              // as verified, since the command covered the current working set.
               if (
                 ctx.toolCall.name === 'Bash' &&
-                isError !== true &&
                 typeof (ctx.args as { command?: string }).command === 'string'
               ) {
                 const command = (ctx.args as { command: string }).command;
@@ -702,11 +738,35 @@ export class TurnFlow {
                   this.agent.workingSet.recordVerification(
                     command,
                     cwd,
-                    0,
+                    isError === true ? 1 : 0,
                     toolOutputText(output),
                     Number(ctx.turnId),
                   );
-                  this.agent.workingSet.markAllVerified();
+                  if (isError !== true) {
+                    this.agent.workingSet.markAllVerified();
+                  }
+                }
+              }
+
+              // When the verify agent reports its result, record the structured
+              // verification status so the convergence gate can enforce fix-then-
+              // re-verify behavior.
+              if (ctx.toolCall.name === 'Agent') {
+                const subagentType = (ctx.args as { subagent_type?: string }).subagent_type;
+                if (subagentType === 'verify') {
+                  const status = parseVerificationStatus(toolOutputText(output));
+                  if (status !== undefined && status.command !== 'none') {
+                    this.agent.workingSet.recordVerification(
+                      status.command,
+                      this.agent.config.cwd,
+                      status.passed ? 0 : status.exitCode,
+                      toolOutputText(output),
+                      Number(ctx.turnId),
+                    );
+                    if (status.passed) {
+                      this.agent.workingSet.markAllVerified();
+                    }
+                  }
                 }
               }
 
@@ -805,7 +865,41 @@ export class TurnFlow {
     this.currentStepByTurn.set(turnId, step);
     this.currentStep = step;
   }
+  private turnHadMeaningfulWork(): boolean {
+    const workingSet = this.agent.workingSet;
+    const hasUnverified = workingSet.getUnverifiedPaths().length > 0;
+    const hasNewPaths = workingSet.getPaths().length > this.turnStartWorkingSetPathCount;
+    const hasNewVerification = workingSet.getVerificationCount() > this.turnStartVerificationCount;
+    const hasCurrentTurnVerification = workingSet.hasVerificationForTurn(this.currentTurnId);
+    return hasUnverified || hasNewPaths || hasNewVerification || hasCurrentTurnVerification;
+  }
+
+  private lastAssistantMessageIsTrivial(): boolean {
+    const history = this.agent.context.history;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const message = history[i];
+      if (message === undefined || message.role !== 'assistant') continue;
+      const text = getAssistantMessageText(message);
+      const trimmed = text.trim();
+      if (trimmed.length === 0) continue;
+      return (
+        trimmed.length < this.MIN_FINAL_RESPONSE_LENGTH ||
+        TRIVIAL_COMPLETION_RE.test(trimmed)
+      );
+    }
+    return false;
+  }
 }
+function getAssistantMessageText(message: ContextMessage): string {
+  if (message.role !== 'assistant') return '';
+  return message.content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
+}
+
+const TRIVIAL_COMPLETION_RE =
+  /^\s*(done|ok|okay|完成|好了|ok\.?|done\.?|completed\.?|finished\.?|tests?\s+passed\.?|passed\.?|it\s+works\.?|looks\s+good\.?|fixed\.?|resolved\.?|verified\.?|all\s+good\.?|一切正常\.?|已完成\.?)\s*$/iu;
 
 function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | undefined {
   switch (event.type) {
@@ -924,6 +1018,37 @@ function toolInputRecord(args: unknown): Record<string, unknown> {
     ? (args as Record<string, unknown>)
     : {};
 }
+
+/**
+ * Parse a `[verification_status]` block from verify-agent output.
+ * Returns undefined if no block is found.
+ */
+function parseVerificationStatus(
+  output: string,
+): { passed: boolean; command: string; exitCode: number } | undefined {
+  const match = output.match(/\[verification_status\]\s*\n([\s\S]*?)(?=\n\n|\n?$)/);
+  if (!match || match[1] === undefined) return undefined;
+  const block = match[1];
+  const passedMatch = block.match(/^passed:\s*(true|false)\s*$/im);
+  const commandMatch = block.match(/^command:\s*(.+)$/im);
+  const exitCodeMatch = block.match(/^exit_code:\s*(\d+)\s*$/im);
+  if (
+    !passedMatch ||
+    !commandMatch ||
+    !exitCodeMatch ||
+    passedMatch[1] === undefined ||
+    commandMatch[1] === undefined ||
+    exitCodeMatch[1] === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    passed: passedMatch[1].toLowerCase() === 'true',
+    command: commandMatch[1].trim(),
+    exitCode: Number.parseInt(exitCodeMatch[1], 10),
+  };
+}
+
 
 function toolOutputText(output: ExecutableToolResult['output']): string {
   if (typeof output === 'string') return output;

@@ -140,8 +140,10 @@ function buildGoalReminder(goal: GoalSnapshot): string {
   lines.push('');
   lines.push(
     'When you call UpdateGoal with `complete`, an independent reviewer will verify that the ' +
-      'completion criteria are met. Provide a clear summary of what you accomplished in your ' +
-      'final response so the reviewer can evaluate it.',
+      'completion criteria are met. In your final response before calling UpdateGoal, provide a ' +
+      'structured summary: what was done, which files changed, the verification command and result, ' +
+      'and any remaining work or blockers. Do not rely on the UpdateGoal argument alone; the reviewer ' +
+      'and the user must see this summary in your natural-language reply.',
   );
   return lines.join('\n');
 }

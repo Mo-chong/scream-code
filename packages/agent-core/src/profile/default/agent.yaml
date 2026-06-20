@@ -50,6 +50,8 @@ subagents:
     description: Read-only implementation planning and architecture design.
   verify:
     description: Verification specialist. Runs build, test, and lint commands to validate code changes.
+  reviewer:
+    description: Code review specialist. Identifies bugs and API contract violations before merge.
   oracle:
     description: Deep debugging, architecture decisions, and second opinions.
   writer:

@@ -21,3 +21,18 @@ Use this tool to maintain a structured TODO list as you work through a multi-ste
 - Keep titles short and actionable (e.g. "Read session-control.ts", "Add planMode flag to TurnManager").
 - For multi-phase work, set `phase` on each item. Items with the same phase are grouped together. Complete all items in a phase before marking items in the next phase as in_progress.
 - Update statuses as you make progress — mark one item in_progress at a time.
+
+**Item schema:**
+- `title` (string, required) — short actionable description. Do not use `content` or `name`.
+- `status` (string, required) — one of `pending`, `in_progress`, `done`.
+- `phase` (string, optional) — group label for multi-phase work.
+
+Example tool call:
+```json
+{
+  "todos": [
+    {"title": "Read session-control.ts", "status": "done"},
+    {"title": "Add planMode flag to TurnManager", "status": "in_progress", "phase": "Implementation"}
+  ]
+}
+```

@@ -138,7 +138,7 @@ export class WorkingSet {
         // Do not skip if an unverified file was touched after this record.
         let stale = false;
         for (const entry of this.entries.values()) {
-          if (!entry.verified && entry.lastTurn > record.turnId) {
+          if (!entry.verified && entry.lastTurn >= record.turnId) {
             stale = true;
             break;
           }
@@ -186,6 +186,30 @@ export class WorkingSet {
   getVerificationCount(): number {
     return this.verifications.length;
   }
+  hasVerificationForTurn(turnId: number): boolean {
+    return this.verifications.some((record) => record.turnId === turnId);
+  }
+  /**
+   * Returns the most recent verification record for the given turn, or
+   * undefined if no verification was recorded for that turn.
+   */
+  getLatestVerificationForTurn(turnId: number): VerificationRecord | undefined {
+    let latest: VerificationRecord | undefined;
+    for (const record of this.verifications) {
+      if (record.turnId === turnId) {
+        if (
+          latest === undefined ||
+          record.timestamp > latest.timestamp ||
+          (record.timestamp === latest.timestamp &&
+            record.command.length > latest.command.length)
+        ) {
+          latest = record;
+        }
+      }
+    }
+    return latest;
+  }
+
 
   touch(path: string, turn: number): void {
     if (path.length === 0) return;

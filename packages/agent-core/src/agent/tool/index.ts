@@ -229,15 +229,15 @@ export class ToolManager {
     }
   }
 
-  protected get toolStore(): ToolStore {
+  /** Exposed so subagent hosts can read cross-turn state such as review findings. */
+  get toolStore(): ToolStore {
     return {
-      get: (key) => this.store[key],
-      set: (key, value) => {
+      get: ((key: ToolStoreKey) => this.store[key]) as ToolStore['get'],
+      set: ((key: ToolStoreKey, value: ToolStoreData[ToolStoreKey]) => {
         this.updateStore(key, value);
-      },
+      }) as ToolStore['set'],
     };
   }
-
   attachMcpTools(): void {
     const mcp = this.agent.mcp;
     if (mcp === undefined) return;
@@ -619,6 +619,7 @@ export class ToolManager {
         new b.TaskListTool(background),
         new b.TaskOutputTool(background),
         new b.TaskStopTool(background),
+        new b.ReportFindingTool(this.toolStore),
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),

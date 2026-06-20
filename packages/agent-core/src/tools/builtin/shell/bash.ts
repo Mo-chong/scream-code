@@ -210,6 +210,38 @@ function detectAntiPattern(command: string): ExecutableToolResult | null {
   return null;
 }
 
+function looksLikeCommandNotFound(command: string, output: string): boolean {
+  const lowerOutput = output.toLowerCase();
+  const lowerCommand = command.toLowerCase();
+  return (
+    lowerOutput.includes('command not found') ||
+    lowerOutput.includes('not recognized as an internal or external command') ||
+    lowerOutput.includes('was not found') ||
+    lowerOutput.includes('no such file or directory') ||
+    lowerOutput.includes('cannot find') ||
+    lowerCommand.startsWith('tsc ') ||
+    lowerCommand.includes(' tsc ')
+  );
+}
+
+function commandNotFoundHint(command: string): string {
+  const lower = command.toLowerCase();
+  if (lower.includes('tsc') || lower.includes('typescript')) {
+    return 'Hint: TypeScript compiler not found. Use the project package manager (e.g. `pnpm typecheck`, `npm run typecheck`, or `npx tsc --noEmit`) instead of calling `tsc` directly.';
+  }
+  if (lower.includes('pnpm ')) {
+    return 'Hint: Ensure pnpm is installed and you are in the project root. If the binary is missing, try `npm install` or use `corepack pnpm ...`.';
+  }
+  if (lower.includes('cargo ')) {
+    return 'Hint: Ensure Rust/Cargo is installed and you are in a crate workspace.';
+  }
+  if (lower.includes('pytest ') || lower.includes('python ')) {
+    return 'Hint: Ensure Python and the required packages are installed in the active environment.';
+  }
+  return 'Hint: The command binary was not found. Check that the required toolchain is installed and use the project-specific script when available.';
+}
+
+
 
 function validateCommand(command: string, isWindows: boolean): ExecutableToolResult | null {
   const cmd = command;
@@ -516,7 +548,9 @@ export class BashTool implements BuiltinTool<BashInput> {
       if (!isError) {
         return builder.ok('Command executed successfully.');
       }
-      return builder.error(`Command failed with exit code: ${String(exitCode)}.`, {
+      const outputText = builder.toString();
+      const hint = looksLikeCommandNotFound(command, outputText) ? `\\n${commandNotFoundHint(command)}` : '';
+      return builder.error(`Command failed with exit code: ${String(exitCode)}.${hint}`, {
         brief: `Failed with exit code: ${String(exitCode)}`,
       });
     } catch (error) {
