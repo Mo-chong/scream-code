@@ -790,6 +790,14 @@ export class TurnFlow {
                     ? subagentType !== 'verify' && subagentType !== 'reviewer'
                     : this.isExploratoryBashCommand(command);
                 this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
+              } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
+                // A successful execution of the same tool type resolves a previous
+                // exploratory failure (e.g. `npx tsc` missing the compiler, then
+                // `npx -p typescript tsc` succeeding). Blocking failures are only
+                // cleared when the turn resets.
+                if (this.lastToolFailure.isExploratory) {
+                  this.lastToolFailure = null;
+                }
               }
 
               const event = isError === true ? 'PostToolUseFailure' : 'PostToolUse';
@@ -907,10 +915,13 @@ export class TurnFlow {
   /**
    * Classify a Bash command as "exploratory" (probing the environment) vs
    * "blocking" (a command whose failure means the task cannot be delivered).
-   * Exploratory failures (e.g. `which tsc`, `ls bin/`) should not keep the turn
-   * alive once the agent has found a working alternative.
+   * Exploratory failures (e.g. probing for tsc, ls, which) do not block once
+   * the turn has produced a successful resolution.
    */
   private isExploratoryBashCommand(command: string): boolean {
+    const normalized = command.toLowerCase().trim();
+    // Probing for toolchain binaries or inspecting the environment should not
+    // keep the turn alive once a working alternative has been found.
     const exploratoryPatterns = [
       /^\s*which\s+/,
       /^\s*whereis\s+/,
@@ -926,9 +937,25 @@ export class TurnFlow {
       /^\s*echo\s+/,
       /^\s*test\s+-[efdx]/,
       /^\s*\[\s+-[efdx]/,
+      // Trying to invoke `tsc`/`tsx`/etc. without the package installed is an
+      // environment probe. The real verification happens once typescript/tsx
+      // is available (e.g. `npx -p typescript tsc`).
+      /^\s*npx\s+tsc\s/,
+      /^\s*npx\s+tsx\s/,
+      /^\s*npx\s+typescript\s/,
+      /^\s*tsc\s/,
+      /^\s*tsx\s/,
+      // Installing typescript/tsx to enable verification is also exploratory.
+      /^\s*npm\s+install\s+(--no-save\s+)?typescript/,
+      /^\s*npm\s+install\s+(--no-save\s+)?tsx/,
+      /^\s*pnp[ms]\s+add\s+(--global\s+)?typescript/,
+      /^\s*pnp[ms]\s+add\s+(--global\s+)?tsx/,
+      /^\s*yarn\s+add\s+(--dev\s+)?typescript/,
+      /^\s*yarn\s+add\s+(--dev\s+)?tsx/,
     ];
-    return exploratoryPatterns.some((pattern) => pattern.test(command));
+    return exploratoryPatterns.some((pattern) => pattern.test(normalized));
   }
+
 
 }
 function getAssistantMessageText(message: ContextMessage): string {
