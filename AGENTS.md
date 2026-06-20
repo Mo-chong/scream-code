@@ -521,7 +521,11 @@ Key files: `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages
 
 ### Verification Protocol and Convergence Gate
 
-The turn loop enforces verification before a task can be declared complete. `WorkingSet` tracks files touched by `Write`/`Edit` and read by `Read`. `suggestVerificationCommands()` maps the project kind to appropriate build/test/lint commands. `TurnFlow` injects a `convergence_gate` system reminder when the model tries to stop while:
+The turn loop requires exactly one verification pass per code change. `WorkingSet` tracks files touched by `Write`/`Edit` and read by `Read`. `suggestVerificationCommands()` maps the project kind to appropriate build/test/lint commands. Once a verification command passes, the model must deliver rather than run additional build/test/lint commands to "double-check" the same change.
+
+`WorkingSet` also records recent successful verification commands with their full output and turn ID. When a Bash verification command is requested again within 60 seconds and no unverified file has been touched since the prior run, `TurnFlow.prepareToolExecution()` returns the cached result without re-executing the shell. The model should not request the same verification command repeatedly, and should not substitute a different command to satisfy the same verification urge.
+
+`TurnFlow` injects a `convergence_gate` system reminder when the model tries to stop while:
 
 - the last assistant step had no content,
 - a tool failed in the current turn,
@@ -530,7 +534,7 @@ The turn loop enforces verification before a task can be declared complete. `Wor
 
 The gate fires up to five times per turn. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
 
-Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/src/agent/working-set.ts`.
+Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/src/agent/working-set.ts`, `packages/agent-core/src/profile/default/system.md`.
 
 ### WelcomeComponent Breathing
 

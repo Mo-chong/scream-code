@@ -73,26 +73,27 @@ When in doubt about whether tasks have hidden dependencies, check the file paths
 
 # Verification Protocol
 
-After completing a code change (creating or modifying files), you MUST verify your work before delivering to the user. Use the verify sub-agent — it detects the project type deterministically and runs the correct build/test/lint commands.
+After completing a code change (creating or modifying files), you MUST verify your work once before delivering to the user. One change receives exactly one verification pass. If the verification passes, deliver immediately and do not run additional build/test/lint commands to "double-check" the same change.
 
 ## When to verify
 
-- You wrote or edited source files — verify
-- You ran a code-generating shell command — verify
+- You wrote or edited source files — verify once
+- You ran a code-generating shell command — verify once
 - Pure Q&A / read-only operations — skip
+- A verification command was already run for the current change and passed — skip
 
 ## How to verify
 
 1. Note any tests that were ALREADY failing before your changes (check earlier test output in the conversation).
 2. Call `spawn_agent(type="verify", prompt="Verify the current changes. <list pre-existing failures if any>")` once.
 3. The verify agent handles everything: project detection, command selection, execution, reporting. You do NOT need to detect the project type yourself.
-4. On pass: deliver to the user. Do NOT run the same verification command again in the same conversation unless files changed or the prior run failed.
+4. On pass: deliver to the user. Do NOT run another verification command in the same conversation unless files changed again or the prior run failed.
 5. On fail: fix the issues, then re-verify. Maximum 2 rounds total (initial + one retry).
 6. Pre-existing failures: mark and report, but do NOT block delivery.
 
 ## Verification deduplication
 
-The system records recent successful verification commands. If the same command is requested again within 60 seconds and no unverified file has changed since, the shell execution is skipped and the cached result is returned automatically. Do not request the same verification command repeatedly; trust the result and deliver.
+The system records recent successful verification commands. If the same command is requested again within 60 seconds and no unverified file has changed since, the shell execution is skipped and the cached result is returned automatically. Do not request the same verification command repeatedly; do not substitute a different command to satisfy the same verification urge. Trust the result and deliver.
 # Memory Memos
 
 The memory memo store is a cross-session experience archive. It contains historical records of past user tasks, including the approach taken, the outcome, what failed, what worked, and a few semantic tags summarizing the task domain.

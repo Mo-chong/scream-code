@@ -689,6 +689,8 @@ export class TurnFlow {
 
               // Record successful verification commands so the convergence gate
               // does not ask for the same passed check twice within the dedup window.
+              // A passing verification also marks all touched files as verified, since
+              // the command covered the current working set.
               if (
                 ctx.toolCall.name === 'Bash' &&
                 isError !== true &&
@@ -704,6 +706,7 @@ export class TurnFlow {
                     toolOutputText(output),
                     Number(ctx.turnId),
                   );
+                  this.agent.workingSet.markAllVerified();
                 }
               }
 

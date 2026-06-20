@@ -137,6 +137,15 @@ describe('WorkingSet', () => {
       ws.decay(1 + DECAY_TURNS + 1);
       expect(ws.getUnverifiedPaths()).toHaveLength(0);
     });
+
+    it('marks all touched files as verified', () => {
+      const ws = new WorkingSet();
+      ws.touch('src/index.ts', 1);
+      ws.touch('src/utils.ts', 1);
+      expect(ws.getUnverifiedPaths()).toHaveLength(2);
+      ws.markAllVerified();
+      expect(ws.getUnverifiedPaths()).toHaveLength(0);
+    });
   });
 
   describe('verification command suggestions', () => {
