@@ -92,7 +92,7 @@ After completing a code change (creating or modifying files), you MUST verify yo
 
 ## Verification deduplication
 
-The system records recent successful verification commands. If a command with the same output has already passed within the last 60 seconds, do not run it again. Trust the recorded result and deliver.
+The system records recent successful verification commands. If the same command is requested again within 60 seconds and no unverified file has changed since, the shell execution is skipped and the cached result is returned automatically. Do not request the same verification command repeatedly; trust the result and deliver.
 # Memory Memos
 
 The memory memo store is a cross-session experience archive. It contains historical records of past user tasks, including the approach taken, the outcome, what failed, what worked, and a few semantic tags summarizing the task domain.

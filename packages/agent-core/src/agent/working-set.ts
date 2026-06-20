@@ -14,8 +14,10 @@ export interface VerificationRecord {
   readonly command: string;
   readonly cwd: string;
   readonly exitCode: number;
+  readonly output: string;
   readonly outputDigest: string;
   readonly timestamp: number;
+  readonly turnId: number;
   readonly passed: boolean;
 }
 
@@ -112,6 +114,44 @@ export class WorkingSet {
   }
 
   /**
+   * Returns a recent successful verification record for the same command and
+   * cwd, but only if no unverified file has been touched since that record was
+   * made. This is used by TurnFlow to hard-skip redundant verification commands
+   * before they are executed.
+   */
+  findSkipCandidate(
+    command: string,
+    cwd: string,
+    currentTurnId: number,
+  ): VerificationRecord | null {
+    const normalized = this.normalizeCommand(command);
+    const normalizedCwd = cwd.replaceAll('\\\\', '/');
+    const now = Date.now();
+    for (const record of this.verifications) {
+      if (
+        record.passed &&
+        this.normalizeCommand(record.command) === normalized &&
+        record.cwd.replaceAll('\\\\', '/') === normalizedCwd &&
+        now - record.timestamp < VERIFICATION_DEDUP_MS &&
+        record.turnId <= currentTurnId
+      ) {
+        // Do not skip if an unverified file was touched after this record.
+        let stale = false;
+        for (const entry of this.entries.values()) {
+          if (!entry.verified && entry.lastTurn > record.turnId) {
+            stale = true;
+            break;
+          }
+        }
+        if (!stale) {
+          return record;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Records a verification command result and prunes stale entries.
    */
   recordVerification(
@@ -119,14 +159,17 @@ export class WorkingSet {
     cwd: string,
     exitCode: number,
     output: string,
+    turnId: number,
   ): VerificationRecord {
     const now = Date.now();
     const record: VerificationRecord = {
       command: this.normalizeCommand(command),
       cwd: cwd.replaceAll('\\\\', '/'),
       exitCode,
+      output,
       outputDigest: this.digestOutput(output),
       timestamp: now,
+      turnId,
       passed: exitCode === 0,
     };
     this.verifications = [

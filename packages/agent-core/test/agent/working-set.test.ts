@@ -5,12 +5,15 @@ import {
   type VerificationRecord,
   WorkingSet,
 } from '../../src/agent/working-set.js';
+
 describe('WorkingSet', () => {
   describe('verification deduplication', () => {
     it('records a passed verification and finds it within the dedup window', () => {
       const ws = new WorkingSet();
-      const record = ws.recordVerification('pnpm test', '/work', 0, 'ok');
+      const record = ws.recordVerification('pnpm test', '/work', 0, 'ok', 1);
       expect(record.passed).toBe(true);
+      expect(record.output).toBe('ok');
+      expect(record.turnId).toBe(1);
       expect(ws.getVerificationCount()).toBe(1);
 
       const found = ws.findRecentVerification('pnpm test', '/work', 'ok');
@@ -20,19 +23,19 @@ describe('WorkingSet', () => {
 
     it('normalizes commands before matching', () => {
       const ws = new WorkingSet();
-      ws.recordVerification('  pnpm  test  ;', '/work', 0, 'ok');
+      ws.recordVerification('  pnpm  test  ;', '/work', 0, 'ok', 1);
       expect(ws.findRecentVerification('pnpm test', '/work', 'ok')).not.toBeNull();
     });
 
     it('does not match when output changes', () => {
       const ws = new WorkingSet();
-      ws.recordVerification('pnpm test', '/work', 0, 'ok');
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 1);
       expect(ws.findRecentVerification('pnpm test', '/work', 'not ok')).toBeNull();
     });
 
     it('does not match failed verifications', () => {
       const ws = new WorkingSet();
-      ws.recordVerification('pnpm test', '/work', 1, 'failed');
+      ws.recordVerification('pnpm test', '/work', 1, 'failed', 1);
       expect(ws.findRecentVerification('pnpm test', '/work', 'failed')).toBeNull();
     });
 
@@ -42,8 +45,10 @@ describe('WorkingSet', () => {
         command: 'pnpm test',
         cwd: '/work',
         exitCode: 0,
+        output: '',
         outputDigest: '0',
         timestamp: Date.now() - 61_000,
+        turnId: 1,
         passed: true,
       };
       // @ts-expect-error private field access for testing
@@ -57,21 +62,59 @@ describe('WorkingSet', () => {
         command: 'pnpm old',
         cwd: '/work',
         exitCode: 0,
+        output: '',
         outputDigest: '0',
         timestamp: Date.now() - 61_000,
+        turnId: 1,
         passed: true,
       };
       // @ts-expect-error private field access for testing
       ws.verifications = [old];
-      ws.recordVerification('pnpm new', '/work', 0, 'ok');
+      ws.recordVerification('pnpm new', '/work', 0, 'ok', 2);
       expect(ws.getVerificationCount()).toBe(1);
     });
 
     it('clears all verifications on request', () => {
       const ws = new WorkingSet();
-      ws.recordVerification('pnpm test', '/work', 0, 'ok');
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 1);
       ws.clearVerifications();
       expect(ws.getVerificationCount()).toBe(0);
+    });
+  });
+
+  describe('verification skip candidate', () => {
+    it('returns a candidate when command passed recently and no edits occurred', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 5);
+      const candidate = ws.findSkipCandidate('pnpm test', '/work', 6);
+      expect(candidate).not.toBeNull();
+      expect(candidate?.output).toBe('ok');
+    });
+
+    it('does not skip when an unverified file was touched after the record', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 5);
+      ws.touch('src/index.ts', 6);
+      expect(ws.findSkipCandidate('pnpm test', '/work', 6)).toBeNull();
+    });
+
+    it('skips when a verified file was touched after the record', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/work', 0, 'ok', 5);
+      ws.markRead('src/index.ts', 6);
+      expect(ws.findSkipCandidate('pnpm test', '/work', 6)).not.toBeNull();
+    });
+
+    it('does not skip failed verifications', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('pnpm test', '/work', 1, 'failed', 5);
+      expect(ws.findSkipCandidate('pnpm test', '/work', 6)).toBeNull();
+    });
+
+    it('normalizes commands when finding skip candidates', () => {
+      const ws = new WorkingSet();
+      ws.recordVerification('  pnpm  test  ;', '/work', 0, 'ok', 1);
+      expect(ws.findSkipCandidate('pnpm test', '/work', 2)).not.toBeNull();
     });
   });
 

@@ -624,6 +624,37 @@ export class TurnFlow {
                 ctx.args,
               );
               if (cached !== null) return { syntheticResult: cached };
+
+              // Hard-skip redundant verification commands. The WorkingSet
+              // records recent successful verification runs; if the same
+              // command is requested again within the dedup window and no
+              // unverified file has been touched since, we return the cached
+              // result instead of re-executing the shell command.
+              if (
+                ctx.toolCall.name === 'Bash' &&
+                typeof (ctx.args as { command?: string }).command === 'string'
+              ) {
+                const command = (ctx.args as { command: string }).command;
+                const cwd = (ctx.args as { cwd?: string }).cwd ?? this.agent.config.cwd;
+                if (looksLikeVerificationCommand(command)) {
+                  const candidate = this.agent.workingSet.findSkipCandidate(
+                    command,
+                    cwd,
+                    Number(ctx.turnId),
+                  );
+                  if (candidate !== null) {
+                    return {
+                      syntheticResult: {
+                        output: `${candidate.output}
+[system: verification skipped — identical successful run within the last ${Math.round(
+                          (Date.now() - candidate.timestamp) / 1000,
+                        )}s]`,
+                      },
+                    };
+                  }
+                }
+              }
+
               return undefined;
             },
             authorizeToolExecution: async (ctx) => {
@@ -671,6 +702,7 @@ export class TurnFlow {
                     cwd,
                     0,
                     toolOutputText(output),
+                    Number(ctx.turnId),
                   );
                 }
               }
