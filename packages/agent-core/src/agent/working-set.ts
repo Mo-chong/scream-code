@@ -326,9 +326,11 @@ export class WorkingSet {
 // the WorkingSet so the convergence gate does not cause redundant runs.
 const VERIFICATION_PATTERNS = [
   /\b(tsc|typecheck)\b/i,
-  /\b(test|jest|vitest|mocha|pytest)\b/i,
-  /\b(lint|eslint|oxlint|clippy)\b/i,
+  /\b(test|jest|vitest|mocha|pytest|unittest)\b/i,
+  /\b(lint|eslint|oxlint|clippy|ruff)\b/i,
   /\b(build|make|cargo build|go build)\b/i,
+  /\bpy_compile\b/i,
+  /\bpython3?\s+(\S+\.(py|pyw)\b|-m\s+\w+)/i,
 ];
 
 export function looksLikeVerificationCommand(command: string): boolean {

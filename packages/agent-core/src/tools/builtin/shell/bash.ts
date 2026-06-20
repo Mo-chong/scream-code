@@ -227,7 +227,7 @@ function looksLikeCommandNotFound(command: string, output: string): boolean {
 function commandNotFoundHint(command: string): string {
   const lower = command.toLowerCase();
   if (lower.includes('tsc') || lower.includes('typescript')) {
-    return 'Hint: TypeScript compiler not found. Use the project package manager (e.g. `pnpm typecheck`, `npm run typecheck`, or `npx tsc --noEmit`) instead of calling `tsc` directly.';
+    return 'Hint: TypeScript compiler not found. Use `npx -p typescript tsc --noEmit` (or a project script such as `pnpm typecheck`) instead of calling `tsc` directly.';
   }
   if (lower.includes('pnpm ')) {
     return 'Hint: Ensure pnpm is installed and you are in the project root. If the binary is missing, try `npm install` or use `corepack pnpm ...`.';

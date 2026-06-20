@@ -565,7 +565,11 @@ export class TurnFlow {
               // work, a blocking tool failure, an empty assistant step, or a
               // missing TodoList update for an active goal. Exploratory failures
               // (e.g. probing for tsc, ls, which) do not block once the turn has
-              // produced a successful resolution.
+              // produced a successful resolution. A passing verification for the
+              // current turn also resolves unverified-change concerns.
+              const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
+              const hasPassedVerificationThisTurn = latestVerification?.passed === true;
+
               if (this.convergenceInjections < this.MAX_CONVERGENCE_INJECTIONS) {
                 const reasons: string[] = [];
 
@@ -576,13 +580,13 @@ export class TurnFlow {
                 }
 
                 const unverified = this.agent.workingSet.getUnverifiedPaths();
-                if (unverified.length > 0) {
+                if (unverified.length > 0 && !hasPassedVerificationThisTurn) {
                   const suggestions = this.agent.workingSet.suggestVerificationCommands(
                     this.agent.config.cwd,
                   );
                   reasons.push(
                     `You have unverified changes in: ${unverified.join(', ')}.\n` +
-                      `The next step MUST be verification: ${suggestions.join(' OR ')}.`,
+                      `The next step should be verification: ${suggestions.join(' OR ')}.`,
                   );
                 }
                 const goal = this.agent.goal.getGoal().goal;
@@ -597,7 +601,6 @@ export class TurnFlow {
                       'Analyze the error and fix it before reporting completion.',
                   );
                 }
-                const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
                 if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
                   this.verificationFailureInjected = true;
                   reasons.push(
@@ -746,6 +749,11 @@ export class TurnFlow {
                   );
                   if (isError !== true) {
                     this.agent.workingSet.markAllVerified();
+                    // A passing verification resolves any earlier exploratory Bash
+                    // failures (e.g. probing for the right binary).
+                    if (this.lastToolFailure?.isExploratory === true) {
+                      this.lastToolFailure = null;
+                    }
                   }
                 }
               }
@@ -767,6 +775,10 @@ export class TurnFlow {
                     );
                     if (status.passed) {
                       this.agent.workingSet.markAllVerified();
+                      // A passing verification resolves earlier exploratory failures.
+                      if (this.lastToolFailure?.isExploratory === true) {
+                        this.lastToolFailure = null;
+                      }
                     }
                   }
                 }
@@ -921,37 +933,38 @@ export class TurnFlow {
   private isExploratoryBashCommand(command: string): boolean {
     const normalized = command.toLowerCase().trim();
     // Probing for toolchain binaries or inspecting the environment should not
-    // keep the turn alive once a working alternative has been found.
+    // keep the turn alive once a working alternative has been found. These
+    // patterns can appear anywhere in the command (e.g. after `cd ... && `).
     const exploratoryPatterns = [
-      /^\s*which\s+/,
-      /^\s*whereis\s+/,
-      /^\s*command\s+-v\s+/,
-      /^\s*type\s+/,
-      /^\s*ls\s+/,
-      /^\s*find\s+/,
-      /^\s*glob\s+/,
-      /^\s*npm\s+list\s+-g/,
-      /^\s*cat\s+/,
-      /^\s*head\s+/,
-      /^\s*tail\s+/,
-      /^\s*echo\s+/,
-      /^\s*test\s+-[efdx]/,
-      /^\s*\[\s+-[efdx]/,
+      /\bwhich\s+/,
+      /\bwhereis\s+/,
+      /\bcommand\s+-v\s+/,
+      /\btype\s+/,
+      /\bls\s+/,
+      /\bfind\s+/,
+      /\bglob\s+/,
+      /\bnpm\s+list\s+-g/,
+      /\bcat\s+/,
+      /\bhead\s+/,
+      /\btail\s+/,
+      /\becho\s+/,
+      /\btest\s+-[efdx]/,
+      /\[\s+-[efdx]/,
       // Trying to invoke `tsc`/`tsx`/etc. without the package installed is an
       // environment probe. The real verification happens once typescript/tsx
       // is available (e.g. `npx -p typescript tsc`).
-      /^\s*npx\s+tsc\s/,
-      /^\s*npx\s+tsx\s/,
-      /^\s*npx\s+typescript\s/,
-      /^\s*tsc\s/,
-      /^\s*tsx\s/,
+      /(^|;\s*|&&\s*)\s*npx\s+tsc\s/,
+      /(^|;\s*|&&\s*)\s*npx\s+tsx\s/,
+      /(^|;\s*|&&\s*)\s*npx\s+typescript\s/,
+      /(^|;\s*|&&\s*)\s*tsc\s/,
+      /(^|;\s*|&&\s*)\s*tsx\s/,
       // Installing typescript/tsx to enable verification is also exploratory.
-      /^\s*npm\s+install\s+(--no-save\s+)?typescript/,
-      /^\s*npm\s+install\s+(--no-save\s+)?tsx/,
-      /^\s*pnp[ms]\s+add\s+(--global\s+)?typescript/,
-      /^\s*pnp[ms]\s+add\s+(--global\s+)?tsx/,
-      /^\s*yarn\s+add\s+(--dev\s+)?typescript/,
-      /^\s*yarn\s+add\s+(--dev\s+)?tsx/,
+      /(^|;\s*|&&\s*)\s*npm\s+install\s+(--no-save\s+)?typescript/,
+      /(^|;\s*|&&\s*)\s*npm\s+install\s+(--no-save\s+)?tsx/,
+      /(^|;\s*|&&\s*)\s*pnp[ms]\s+add\s+(--global\s+)?typescript/,
+      /(^|;\s*|&&\s*)\s*pnp[ms]\s+add\s+(--global\s+)?tsx/,
+      /(^|;\s*|&&\s*)\s*yarn\s+add\s+(--dev\s+)?typescript/,
+      /(^|;\s*|&&\s*)\s*yarn\s+add\s+(--dev\s+)?tsx/,
     ];
     return exploratoryPatterns.some((pattern) => pattern.test(normalized));
   }

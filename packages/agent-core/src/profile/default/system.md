@@ -74,7 +74,8 @@ When in doubt about whether tasks have hidden dependencies, check the file paths
 
 # Verification Protocol
 
-After completing a code change (creating or modifying files), you MUST verify your work once before delivering to the user. One change receives exactly one verification pass. If the verification passes, deliver immediately and do not run additional build/test/lint commands to "double-check" the same change.
+After completing a code change (creating or modifying files), verify your work once before
+delivering. One change receives exactly one verification pass.
 
 ## When to verify
 
@@ -85,24 +86,35 @@ After completing a code change (creating or modifying files), you MUST verify yo
 
 ## How to verify
 
-1. Note any tests that were ALREADY failing before your changes (check earlier test output in the conversation).
-2. Call the `Agent` tool with `subagent_type="verify"` and a prompt like "Verify the current changes. Pre-existing failures: <list if any>". This MUST be a tool call, not a text description.
-3. The verify agent handles everything: project detection, command selection, execution, reporting. You do NOT need to detect the project type yourself.
-4. On pass: deliver to the user. Do NOT run another verification command in the same conversation unless files changed again or the prior run failed.
+1. Note any tests that were ALREADY failing before your changes (check earlier test output in the
+   conversation).
+2. **For simple / single-file fixes, run the obvious verification command directly with Bash.**
+   Examples: `npx -p typescript tsc --noEmit --strict file.ts`, `python3 -m py_compile file.py`,
+   `python3 file.py`, `go test ./...`, `cargo test`. Do not spawn a subagent for these.
+3. **For complex projects or when you are unsure which command to run**, call
+   `Agent(subagent_type="verify", prompt="Verify the current changes. Pre-existing failures: <list if any>")`.
+   The verify agent handles project detection and command selection.
+4. On pass: deliver to the user. Do NOT run another verification command in the same conversation
+   unless files changed again or the prior run failed. Do not substitute a different command to
+   satisfy the same verification urge.
 5. On fail: fix the issues, then re-verify. Maximum 2 rounds total (initial + one retry).
 6. Pre-existing failures: mark and report, but do NOT block delivery.
 
 ## Verification deduplication
 
-The system records recent successful verification commands. If the same command is requested again within 60 seconds and no unverified file has changed since, the shell execution is skipped and the cached result is returned automatically. Do not request the same verification command repeatedly; do not substitute a different command to satisfy the same verification urge. Trust the result and deliver.
+The system records recent successful verification commands. If the same command is requested again
+within 60 seconds and no unverified file has changed since, the shell execution is skipped and the
+cached result is returned automatically. Do not request the same verification command repeatedly.
 
 ## Do not downgrade verification
 
-If the verify agent reports a typecheck/build/test failure, you MUST fix it or explicitly explain why it cannot be fixed. Do NOT switch to a runtime smoke test, a manual file read, or a shorter command to "make it pass". A failed verification is a red light — do not proceed until it is green or explicitly accepted.
+If a verification command reports a typecheck/build/test failure, you MUST fix it or explicitly
+explain why it cannot be fixed. Do NOT switch to a runtime smoke test, a manual file read, or a
+shorter command to "make it pass". A failed verification is a red light — do not proceed until it
+is green or explicitly accepted.
 
-## Tool name correction
-
-The correct tool to spawn a subagent is `Agent`, not `spawn_agent`. Use `Agent(subagent_type="verify", prompt="...")`.
+The correct tool to spawn a subagent is `Agent`, not `spawn_agent`. Use
+`Agent(subagent_type="verify", prompt="...")` when you choose to delegate verification.
 
 # Orchestration
 
