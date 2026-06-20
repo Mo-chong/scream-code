@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync } from 'node:fs';
+import { Readable, Writable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -438,6 +439,60 @@ describe('Agent turn flow', () => {
     expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('too brief');
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('convergence_gate');
+  });
+  it('does not block completion once a failed verification command passes on retry', async () => {
+    const results = [
+      { exitCode: 1, stdout: 'Traceback (most recent call last):' },
+      { exitCode: 0, stdout: 'All checks passed.' },
+    ];
+    let callIndex = 0;
+    const jian = createFakeJian({
+      execWithEnv: vi.fn(async () => {
+        const { exitCode, stdout } = results[callIndex++];
+        return {
+          stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+          stdout: Readable.from([stdout]),
+          stderr: Readable.from(['']),
+          pid: 42,
+          exitCode,
+          wait: vi.fn().mockResolvedValue(exitCode),
+          kill: vi.fn().mockResolvedValue(undefined),
+        };
+      }),
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn(async (_path: string, content: string) => content.length),
+    });
+    const ctx = testAgent({ jian });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    const failingCall: ToolCall = {
+      type: 'function',
+      id: 'call_bash_fail',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'python3 file.py', timeout: 60 }),
+    };
+    const passingCall: ToolCall = {
+      type: 'function',
+      id: 'call_bash_pass',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'python3 file.py', timeout: 60 }),
+    };
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will run the verification command.' }, failingCall);
+    ctx.mockNextResponse({ type: 'text', text: 'Fix applied; running verification again.' }, passingCall);
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Verification passed after the fix. The runtime bugs have been resolved.',
+    });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Fix and verify' }] });
+    await ctx.untilTurnEnd();
+
+    const history = JSON.stringify(ctx.agent.context.data().history);
+    expect(history).not.toContain('A required tool (Bash) failed this turn');
+    expect(history).not.toContain('The last verification command failed');
+    expect(history).toContain('Verification passed after the fix');
   });
 
 

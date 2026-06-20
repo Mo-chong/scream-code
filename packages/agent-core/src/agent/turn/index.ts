@@ -595,7 +595,7 @@ export class TurnFlow {
                     'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
                   );
                 }
-                if (this.lastToolFailure?.isExploratory === false) {
+                if (this.lastToolFailure?.isExploratory === false && !hasPassedVerificationThisTurn) {
                   reasons.push(
                     `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
                       'Analyze the error and fix it before reporting completion.',
@@ -749,9 +749,9 @@ export class TurnFlow {
                   );
                   if (isError !== true) {
                     this.agent.workingSet.markAllVerified();
-                    // A passing verification resolves any earlier exploratory Bash
-                    // failures (e.g. probing for the right binary).
-                    if (this.lastToolFailure?.isExploratory === true) {
+                    // A passing verification resolves any earlier Bash failure
+                    // for this turn (e.g. a failing test run before the fix).
+                    if (this.lastToolFailure?.toolName === 'Bash') {
                       this.lastToolFailure = null;
                     }
                   }
@@ -775,8 +775,9 @@ export class TurnFlow {
                     );
                     if (status.passed) {
                       this.agent.workingSet.markAllVerified();
-                      // A passing verification resolves earlier exploratory failures.
-                      if (this.lastToolFailure?.isExploratory === true) {
+                      // A passing verification resolves any earlier verify/Bash
+                      // failure for this turn.
+                      if (this.lastToolFailure?.toolName === 'Bash' || this.lastToolFailure?.toolName === 'Agent') {
                         this.lastToolFailure = null;
                       }
                     }
