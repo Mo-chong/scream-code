@@ -103,6 +103,7 @@ import type {
 } from './core-api';
 import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
+import { applyProxyConfig } from '#/utils/proxy-fetch';
 import { proxyWithExtraPayload } from './types';
 import { JianShellNotFoundError, LocalJian, type Jian } from '@scream-cli/jian';
 import type { WebSearchProvider } from '../tools/builtin';
@@ -887,6 +888,9 @@ async function createRuntimeConfig(input: {
   readonly screamRequestHeaders?: Record<string, string> | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
 }): Promise<ToolServices> {
+  // Apply proxy configuration before any fetch() calls
+  applyProxyConfig(input.config.proxy);
+
   const fetchCache = new FetchCache();
   const localFetcher = new LocalFetchURLProvider({ cache: fetchCache });
   const fetchService = input.config.services?.screamCliFetch;

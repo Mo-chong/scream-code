@@ -134,6 +134,13 @@ export const DuckDuckGoConfigSchema = z.object({
 
 export type DuckDuckGoConfig = z.infer<typeof DuckDuckGoConfigSchema>;
 
+export const ProxyConfigSchema = z.object({
+  mode: z.enum(['off', 'on', 'auto']).default('auto'),
+  url: z.string().optional(),
+});
+
+export type ProxyConfig = z.infer<typeof ProxyConfigSchema>;
+
 export const ServicesConfigSchema = z.object({
   screamCliSearch: ScreamCliServiceConfigSchema.optional(),
   screamCliFetch: ScreamCliServiceConfigSchema.optional(),
@@ -206,6 +213,7 @@ export const ScreamConfigSchema = z.object({
   permission: PermissionConfigSchema.optional(),
   hooks: z.array(HookDefSchema).optional(),
   services: ServicesConfigSchema.optional(),
+  proxy: ProxyConfigSchema.optional(),
   mergeAllAvailableSkills: z.boolean().optional(),
   extraSkillDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
@@ -223,6 +231,7 @@ const LoopControlPatchSchema = LoopControlSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const ScreamCliServiceConfigPatchSchema = ScreamCliServiceConfigSchema.partial();
 const DuckDuckGoConfigPatchSchema = DuckDuckGoConfigSchema.partial();
+const ProxyConfigPatchSchema = ProxyConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
   screamCliSearch: ScreamCliServiceConfigPatchSchema.optional(),
   screamCliFetch: ScreamCliServiceConfigPatchSchema.optional(),
@@ -244,6 +253,7 @@ export const ScreamConfigPatchSchema = z
     permission: PermissionConfigPatchSchema.optional(),
     hooks: z.array(HookDefSchema).optional(),
     services: ServicesConfigPatchSchema.optional(),
+    proxy: ProxyConfigPatchSchema.optional(),
     mergeAllAvailableSkills: z.boolean().optional(),
     extraSkillDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
