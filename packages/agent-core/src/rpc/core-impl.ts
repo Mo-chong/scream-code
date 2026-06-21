@@ -34,6 +34,7 @@ import {
 import type { Logger } from '../logging/types';
 import { resolveSessionMcpConfig, type SessionMcpConfig } from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
+import type { SkillRoot } from '../skill';
 import { exportSessionDirectory } from '../session/export';
 import {
   ProviderManager, type BearerTokenProvider,
@@ -61,6 +62,7 @@ import type {
   GetBackgroundPayload,
   GetScreamConfigPayload,
   GetPluginInfoPayload,
+  InjectPluginPayload,
   InstallPluginPayload,
   ListSessionsPayload,
   McpServerInfo,
@@ -76,6 +78,7 @@ import type {
   ReloadPluginsResult,
   RemoveScreamProviderPayload,
   RemovePluginPayload,
+  RemoveSkillPayload,
   RenameSessionPayload,
   ResumeSessionPayload,
   SessionSummary,
@@ -609,7 +612,52 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }: SessionScopedPayload<EmptyPayload>): Promise<readonly SkillSummary[]> {
     return this.sessionApi(sessionId).listSkills(payload);
   }
+  async removeSkill({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<RemoveSkillPayload>): Promise<void> {
+    return this.sessionApi(sessionId).removeSkill(payload);
+  }
 
+
+  async injectPlugin({ sessionId, id }: SessionScopedPayload<InjectPluginPayload>): Promise<void> {
+    await this.pluginsReady;
+    this.assertPluginsLoaded();
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new ScreamError(
+        ErrorCodes.SESSION_NOT_FOUND,
+        `Session "${sessionId}" was not found`,
+        { details: { sessionId } },
+      );
+    }
+    const record = this.plugins.get(id);
+    if (record === undefined) {
+      throw new ScreamError(
+        ErrorCodes.PLUGIN_NOT_FOUND,
+        `Plugin "${id}" is not installed`,
+        { details: { id } },
+      );
+    }
+    if (record.state !== 'ok' || record.manifest === undefined) {
+      throw new ScreamError(
+        ErrorCodes.PLUGIN_LOAD_FAILED,
+        `Plugin "${id}" is in an error state and cannot be injected`,
+        { details: { id } },
+      );
+    }
+    const skillDirs = record.manifest.skills ?? [];
+    if (skillDirs.length === 0) {
+      // Nothing to inject; the plugin simply has no skills.
+      return;
+    }
+    const roots: SkillRoot[] = skillDirs.map((dir) => ({
+      path: dir,
+      source: 'extra',
+      plugin: { id: record.id, instructions: record.skillInstructions },
+    }));
+    await session.injectSkillRoots(roots);
+  }
   listMcpServers({
     sessionId,
     ...payload
@@ -652,6 +700,19 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).removeMcpServer(payload);
   }
 
+  async removePlugin({ id }: RemovePluginPayload): Promise<void> {
+    await this.pluginsReady;
+    this.assertPluginsLoaded();
+    await this.plugins.remove(id);
+    for (const session of this.sessions.values()) {
+      try {
+        session.ejectPlugin(id);
+      } catch {
+        // Ejection is best-effort; the plugin record is already removed.
+      }
+    }
+  }
+
   generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<EmptyPayload>): Promise<void> {
     return this.sessionApi(sessionId).generateAgentsMd(payload);
   }
@@ -685,11 +746,6 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     await this.plugins.setMcpServerEnabled(id, server, enabled);
   }
 
-  async removePlugin({ id }: RemovePluginPayload): Promise<void> {
-    await this.pluginsReady;
-    this.assertPluginsLoaded();
-    await this.plugins.remove(id);
-  }
 
   async reloadPlugins(_: EmptyPayload): Promise<ReloadPluginsResult> {
     try {

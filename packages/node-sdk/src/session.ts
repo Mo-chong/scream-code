@@ -206,6 +206,34 @@ export class Session {
   }
 
   /**
+   * Inject a newly installed plugin's skills into the running session
+   * without requiring a session restart.
+   */
+  async injectPlugin(id: string): Promise<void> {
+    this.ensureOpen();
+    const normalized = normalizeRequiredString(
+      id,
+      'Plugin id cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    await this.rpc.injectPlugin({ sessionId: this.id, id: normalized });
+  }
+  /**
+   * Delete a manually installed skill from disk and remove it from the
+   * running session, including any bundled sub-skills.
+   */
+  async removeSkill(skillName: string): Promise<void> {
+    this.ensureOpen();
+    const normalized = normalizeRequiredString(
+      skillName,
+      'Skill name cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    await this.rpc.removeSkill({ sessionId: this.id, skillName: normalized });
+  }
+
+
+  /**
    * List background tasks for this session's interactive agent.
    *
    * Defaults to all tasks (including terminal/lost). Pass

@@ -7,7 +7,7 @@ export * from './types';
 
 export { dispatchInput, type SlashCommandHost } from './dispatch';
 export { handleMakeSkillCommand } from './make-skill';
-export { handlePluginCommand } from './plugin';
+export { handleSkillCommand } from './skill-center';
 export {
   handleConnectCommand,
   handleLogoutCommand,

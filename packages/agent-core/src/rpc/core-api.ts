@@ -199,11 +199,17 @@ export interface SkillSummary {
   readonly source: 'builtin' | 'user' | 'extra' | 'project';
   readonly type?: string | undefined;
   readonly disableModelInvocation?: boolean | undefined;
+  /** Plugin id when this skill is provided by a plugin package. */
+  readonly pluginId?: string | undefined;
 }
 
 export interface ActivateSkillPayload {
   readonly name: string;
   readonly args?: string | undefined;
+}
+
+export interface RemoveSkillPayload {
+  readonly skillName: string;
 }
 
 export interface McpServerInfo {
@@ -253,8 +259,11 @@ export interface SetPluginMcpServerEnabledPayload {
 export interface RemovePluginPayload {
   readonly id: string;
 }
-
 export interface GetPluginInfoPayload {
+  readonly id: string;
+}
+
+export interface InjectPluginPayload {
   readonly id: string;
 }
 
@@ -377,6 +386,8 @@ export interface SessionAPI extends AgentAPIWithId {
   updateSessionMetadata: (payload: UpdateSessionMetadataPayload) => void;
   getSessionMetadata: (payload: EmptyPayload) => SessionMeta;
   listSkills: (payload: EmptyPayload) => readonly SkillSummary[];
+  injectPlugin: (payload: InjectPluginPayload) => void;
+  removeSkill: (payload: RemoveSkillPayload) => void;
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;

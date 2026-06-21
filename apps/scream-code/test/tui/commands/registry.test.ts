@@ -38,6 +38,10 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('make-skill')?.name).toBe('make-skill');
     expect(findBuiltInSlashCommand('makeskill')?.name).toBe('make-skill');
     expect(findBuiltInSlashCommand('craftskill')?.name).toBe('make-skill');
+    expect(findBuiltInSlashCommand('skill')?.name).toBe('skill');
+    expect(findBuiltInSlashCommand('skills')?.name).toBe('skill');
+    expect(findBuiltInSlashCommand('plugin')?.name).toBe('skill');
+    expect(findBuiltInSlashCommand('plugins')?.name).toBe('skill');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 
@@ -103,10 +107,10 @@ describe('built-in slash command registry', () => {
         'new',
         'permission',
         'plan',
-        'plugin',
         'revoke',
         'sessions',
         'settings',
+        'skill',
         'status',
         'tasks',
         'theme',

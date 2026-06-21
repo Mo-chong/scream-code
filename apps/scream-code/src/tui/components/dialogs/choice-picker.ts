@@ -33,6 +33,8 @@ export interface ChoiceOption {
   readonly tone?: 'danger';
   /** Optional explanatory text shown below the label. */
   readonly description?: string | undefined;
+  /** Optional action-key shortcuts, active only when the search query is empty. */
+  readonly actionKeys?: Readonly<Record<string, () => void>> | undefined;
 }
 
 export interface ChoicePickerOptions {
@@ -117,6 +119,17 @@ export class ChoicePickerComponent extends Container implements Focusable {
       const chosen = this.list.selected();
       if (chosen !== undefined) this.opts.onSelect(chosen.value);
       return;
+    }
+    const chosen = this.list.selected();
+    if (
+      chosen?.actionKeys !== undefined &&
+      this.list.view().query.length === 0
+    ) {
+      const ch = printableChar(data);
+      if (ch !== undefined && chosen.actionKeys[ch] !== undefined) {
+        chosen.actionKeys[ch]();
+        return;
+      }
     }
     this.list.handleKey(data);
   }

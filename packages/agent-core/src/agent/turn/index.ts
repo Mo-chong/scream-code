@@ -277,15 +277,36 @@ export class TurnFlow {
     origin: PromptOrigin,
     signal: AbortSignal,
   ): Promise<TurnEndResult> {
+    const DEFAULT_MAX_GOAL_TURNS = 50;
+    const configuredMaxGoalTurns = this.agent.screamConfig?.loopControl?.maxGoalTurns;
+    const effectiveMaxGoalTurns = configuredMaxGoalTurns ?? DEFAULT_MAX_GOAL_TURNS;
+
     let turnId = firstTurnId;
     let turnInput = input;
     let turnOrigin = origin;
     while (true) {
       const goalBeforeTurn = this.agent.goal.getGoal().goal;
-      if (goalBeforeTurn?.status === 'active' && goalBeforeTurn.budget.overBudget) {
-        await this.agent.goal.markBlocked({ reason: 'A configured budget was reached' });
-        const ended = await this.endGoalTurnWithoutModel(turnId, turnInput, turnOrigin);
-        return { event: ended };
+      if (goalBeforeTurn?.status === 'active') {
+        // Hard convergence guard: if the model has not set its own turn budget
+        // and has consumed the default allowance, block the goal so it cannot
+        // spin forever and burn tokens.
+        if (
+          effectiveMaxGoalTurns > 0 &&
+          goalBeforeTurn.budget.turnBudget === null &&
+          goalBeforeTurn.turnsUsed >= effectiveMaxGoalTurns
+        ) {
+          await this.agent.goal.markBlocked({
+            reason: `Reached the goal turn limit (${effectiveMaxGoalTurns})`,
+          });
+          const ended = await this.endGoalTurnWithoutModel(turnId, turnInput, turnOrigin);
+          return { event: ended };
+        }
+
+        if (goalBeforeTurn.budget.overBudget) {
+          await this.agent.goal.markBlocked({ reason: 'A configured budget was reached' });
+          const ended = await this.endGoalTurnWithoutModel(turnId, turnInput, turnOrigin);
+          return { event: ended };
+        }
       }
 
       await this.agent.goal.incrementTurn();

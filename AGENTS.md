@@ -384,6 +384,20 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 - **Core**: `packages/agent-core/src/agent/context/index.ts` — `undo()` performs a backward walk, splices messages, and clamps `_tokenCount` down.
 - **Availability**: `idle-only`.
 
+### Skill Center (`/skill`)
+
+管理已安装 Skill 与浏览可安装 Skill 包。原 `/plugin` 命令及其别名已合并为 `/skill` 的兼容别名。
+
+- **Entry**: `/skill` (aliases: `skills`, `plugin`, `plugins`)
+- **TUI**: `src/tui/commands/skill-center.ts` — 选择器面板，支持 `Enter` 激活、`i` 安装并注入、`d` 卸载
+- **Loading overlay**: `SkillCenterLoadingComponent` 在加载已安装 Skill 与 Marketplace 数据时显示 spinner，避免画面卡顿
+- **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` 提供内置可安装 Skill 包列表
+- **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill` 删除手动安装的 skill 安装单元（包含子 Skill）；`Session.injectSkillRoots` 在不重启会话的情况下加载新插件的 Skill
+- **Registry helpers**: `packages/agent-core/src/skill/registry.ts` — `SkillRegistry.ejectPlugin` / `removeSkillPath`
+- **RPC chain**: `packages/agent-core/src/rpc/core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI，新增 `removeSkill` / `injectPlugin`
+- **Tests**: `apps/scream-code/test/tui/commands/skill-center.test.ts`, `packages/agent-core/test/skill/install-paths.test.ts`
+
+
 ---
 
 ## Agent-Core Mechanisms

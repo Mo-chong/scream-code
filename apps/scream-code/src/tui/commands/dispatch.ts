@@ -50,7 +50,7 @@ import { handleMcpCommand } from './mcp';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handleMakeSkillCommand } from './make-skill';
-import { handlePluginCommand } from './plugin';
+import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 
 // ---------------------------------------------------------------------------
@@ -93,8 +93,7 @@ export { handleUpdateCommand } from './update';
 export { handleMcpCommand } from './mcp';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
-export { handlePluginCommand } from './plugin';
-
+export { handleSkillCommand } from './skill-center';
 // ---------------------------------------------------------------------------
 // Host interface
 // ---------------------------------------------------------------------------
@@ -317,8 +316,8 @@ async function handleBuiltInSlashCommand(
     case 'make-skill':
       await handleMakeSkillCommand(host, args);
       return;
-    case 'plugin':
-      await handlePluginCommand(host, args);
+    case 'skill':
+      await handleSkillCommand(host, args);
       return;
     default:
       host.showError(`Unknown slash command: /${String(name)}`);

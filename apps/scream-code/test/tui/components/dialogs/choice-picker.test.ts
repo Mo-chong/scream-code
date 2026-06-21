@@ -337,6 +337,68 @@ describe('ChoicePickerComponent search and pagination', () => {
   });
 });
 
+describe('ChoicePickerComponent action keys', () => {
+  it('invokes the action key handler for the selected option when the query is empty', () => {
+    const onAction = vi.fn();
+    const onSelect = vi.fn();
+    const picker = new ChoicePickerComponent({
+      title: 'Action keys',
+      options: [
+        { value: 'a', label: 'Alpha', actionKeys: { d: onAction } },
+        { value: 'b', label: 'Beta' },
+      ],
+      colors: darkColors,
+      searchable: true,
+      onSelect,
+      onCancel: vi.fn(),
+    });
+
+    picker.handleInput('d');
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke action keys while a search query is active', () => {
+    const onAction = vi.fn();
+    const picker = new ChoicePickerComponent({
+      title: 'Action keys',
+      options: [
+        { value: 'a', label: 'Alpha', actionKeys: { d: onAction } },
+        { value: 'b', label: 'Beta' },
+      ],
+      colors: darkColors,
+      searchable: true,
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    // Type a query first so the action key is treated as search input.
+    picker.handleInput('a');
+    picker.handleInput('l');
+    picker.handleInput('d');
+    expect(rendered(picker)).toContain('Search: ald');
+    expect(onAction).not.toHaveBeenCalled();
+  });
+  it('ignores action keys on options that do not define them', () => {
+    const onSelect = vi.fn();
+    const picker = new ChoicePickerComponent({
+      title: 'Action keys',
+      options: [
+        { value: 'a', label: 'Alpha' },
+        { value: 'b', label: 'Beta' },
+      ],
+      colors: darkColors,
+      searchable: true,
+      onSelect,
+      onCancel: vi.fn(),
+    });
+
+    picker.handleInput('d');
+    expect(rendered(picker)).toContain('Search: d');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
 describe('ModelSelectorComponent search and pagination', () => {
   function buildModels(count: number): Record<string, ModelAlias> {
     const models: Record<string, ModelAlias> = {};

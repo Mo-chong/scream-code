@@ -39,3 +39,18 @@ export class JianShellNotFoundError extends JianError {
     this.name = 'JianShellNotFoundError';
   }
 }
+/**
+ * Thrown by `LocalJian` when a file operation would resolve outside the
+ * instance's configured root directory. This is a last-line-of-defense guard;
+ * higher-level path policies should still validate user-supplied paths first.
+ */
+export class JianPathOutsideRootError extends JianError {
+  constructor(
+    message: string,
+    readonly path: string,
+    readonly rootDir: string,
+  ) {
+    super(message);
+    this.name = 'JianPathOutsideRootError';
+  }
+}

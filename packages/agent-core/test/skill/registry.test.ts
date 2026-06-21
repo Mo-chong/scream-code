@@ -154,3 +154,50 @@ function sectionFor(rendered: string, header: string): string {
   const next = rendered.indexOf('### ', start + header.length);
   return next === -1 ? rendered.slice(start) : rendered.slice(start, next);
 }
+
+describe('SkillRegistry.removeSkillPath', () => {
+  it('removes skills under the given path', () => {
+    const registry = makeRegistry([
+      makeSkill('alpha', 'user', 'desc', '/home/user/.scream-code/skills/alpha/SKILL.md'),
+      makeSkill('beta', 'user', 'desc', '/home/user/.scream-code/skills/beta/SKILL.md'),
+    ]);
+    const removed = registry.removeSkillPath('/home/user/.scream-code/skills/alpha');
+    expect(removed).toBe(1);
+    expect(registry.listSkills().map((s) => s.name)).toEqual(['beta']);
+  });
+
+  it('removes bundled sub-skills together with the parent directory', () => {
+    const registry = makeRegistry([
+      makeSkill('parent', 'user', 'desc', '/home/user/.scream-code/skills/parent/SKILL.md'),
+      makeSkill(
+        'child',
+        'user',
+        'desc',
+        '/home/user/.scream-code/skills/parent/child/SKILL.md',
+      ),
+      makeSkill('other', 'user', 'desc', '/home/user/.scream-code/skills/other/SKILL.md'),
+    ]);
+    const removed = registry.removeSkillPath('/home/user/.scream-code/skills/parent');
+    expect(removed).toBe(2);
+    expect(registry.listSkills().map((s) => s.name)).toEqual(['other']);
+  });
+
+  it('removes a flat .md skill without affecting similarly named skills', () => {
+    const registry = makeRegistry([
+      makeSkill('flat', 'user', 'desc', '/home/user/.scream-code/skills/flat.md'),
+      makeSkill('flat-backup', 'user', 'desc', '/home/user/.scream-code/skills/flat-backup.md'),
+    ]);
+    const removed = registry.removeSkillPath('/home/user/.scream-code/skills/flat.md');
+    expect(removed).toBe(1);
+    expect(registry.listSkills().map((s) => s.name)).toEqual(['flat-backup']);
+  });
+
+  it('returns 0 when no skills match', () => {
+    const registry = makeRegistry([
+      makeSkill('alpha', 'user', 'desc', '/home/user/.scream-code/skills/alpha/SKILL.md'),
+    ]);
+    const removed = registry.removeSkillPath('/home/user/.scream-code/skills/missing');
+    expect(removed).toBe(0);
+    expect(registry.listSkills().map((s) => s.name)).toEqual(['alpha']);
+  });
+});

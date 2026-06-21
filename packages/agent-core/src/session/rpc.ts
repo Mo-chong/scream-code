@@ -9,6 +9,7 @@ import type {
   GetBackgroundOutputPathPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  InjectPluginPayload,
   McpServerInfo,
   McpStartupMetrics,
   PromptPayload,
@@ -16,6 +17,7 @@ import type {
   AddMcpServerPayload,
   StopMcpServerPayload,
   RemoveMcpServerPayload,
+  RemoveSkillPayload,
   RenameSessionPayload,
   RegisterToolPayload,
   SessionAPI,
@@ -78,6 +80,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   listSkills(_payload: EmptyPayload): Promise<readonly SkillSummary[]> {
     return this.session.listSkills();
   }
+  async removeSkill(payload: RemoveSkillPayload): Promise<void> {
+    return this.session.removeSkill(payload.skillName);
+  }
+
 
   listMcpServers(_payload: EmptyPayload): readonly McpServerInfo[] {
     return this.session.mcp.list();
@@ -308,6 +314,13 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
         lastPrompt,
       },
     });
+  }
+  async injectPlugin(_payload: InjectPluginPayload): Promise<void> {
+    // Implemented directly on ScreamCore so it can access the plugin manager.
+    throw new ScreamError(
+      ErrorCodes.NOT_IMPLEMENTED,
+      'injectPlugin is implemented at the core level',
+    );
   }
 }
 

@@ -231,7 +231,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     } catch {
       return;
     }
-    const skillCommands = buildSkillSlashCommands(skills);
+    const builtinNames = new Set(
+      BUILTIN_SLASH_COMMANDS.flatMap((cmd) => [cmd.name, ...cmd.aliases]),
+    );
+    const skillCommands = buildSkillSlashCommands(skills, builtinNames);
     this.skillCommands = skillCommands.commands;
     this.skillCommandMap.clear();
     for (const [commandName, skillName] of skillCommands.commandMap) {

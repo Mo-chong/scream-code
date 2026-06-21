@@ -18,9 +18,14 @@ export function isUserActivatableSkill(skill: SkillSummary): boolean {
   );
 }
 
-export function buildSkillSlashCommands(skills: readonly SkillSummary[]): SkillSlashCommands {
+export function buildSkillSlashCommands(
+  skills: readonly SkillSummary[],
+  builtinCommandNames?: ReadonlySet<string>,
+): SkillSlashCommands {
   const commandMap = new Map<string, string>();
   const commands: ScreamSlashCommand[] = [];
+  const reservedNames = builtinCommandNames ?? new Set<string>();
+
   for (const skill of skills) {
     if (!isUserActivatableSkill(skill)) continue;
 
@@ -34,10 +39,11 @@ export function buildSkillSlashCommands(skills: readonly SkillSummary[]): SkillS
     });
 
     // Also register the bare name so built-in skills like /dream
-    // appear in autocomplete. The `skill:` prefixed entries above
-    // are still filtered out by setupAutocomplete() to avoid
-    // cluttering the dropdown with ~40 entries.
-    if (skill.source === 'builtin') {
+    // appear in autocomplete. Skip names that collide with built-in
+    // slash commands (e.g. /make-skill) to avoid duplicate entries.
+    // The `skill:` prefixed entries above are still filtered out by
+    // setupAutocomplete() to avoid cluttering the dropdown with ~40 entries.
+    if (skill.source === 'builtin' && !reservedNames.has(skill.name)) {
       commandMap.set(skill.name, skill.name);
       commands.push({
         name: skill.name,

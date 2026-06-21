@@ -180,25 +180,44 @@ export class Agent {
     // Use a global memory store shared across all sessions/workDirs.
     const screamHomeDir = options.screamHomeDir;
     this.memoStore = screamHomeDir
-      ? new MemoryMemoStore(screamHomeDir)
+      ? new MemoryMemoStore(screamHomeDir, this.log)
       : undefined;
-    if (this.memoStore !== undefined && screamHomeDir !== undefined) {
-      void this.memoStore.init();
-      void MemoryMemoStore.migrateLegacyStores(screamHomeDir);
-      // Attach embedding engine for semantic search. Best-effort — gracefully
-      // degrades to keyword-only if fastembed fails to load.
-      try {
-        this.memoStore.setEmbeddingEngine(createFastEmbedEngine());
-      } catch {
-        // fastembed not available — keyword search still works.
-      }
-    }
+    this.memoStoreReady = this.initMemoStore(screamHomeDir);
     this.sessionMemory = new SessionMemory(this);
     this.workingSet = new WorkingSet();
     this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
     this.replayBuilder = new ReplayBuilder(this);
   }
 
+  /**
+   * Promise that resolves once the shared memory store (and any legacy migration)
+   * has been initialized. Session startup awaits this so memory tools are ready
+   * before the first turn runs.
+   */
+  readonly memoStoreReady: Promise<void>;
+
+  private initMemoStore(screamHomeDir: string | undefined): Promise<void> {
+    if (screamHomeDir === undefined || this.memoStore === undefined) {
+      return Promise.resolve();
+    }
+    return (async () => {
+      try {
+        await this.memoStore!.init();
+      } catch (error: unknown) {
+        this.log.error('memory store init failed', error);
+      }
+      try {
+        await MemoryMemoStore.migrateLegacyStores(screamHomeDir);
+      } catch (error: unknown) {
+        this.log.error('memory legacy migration failed', error);
+      }
+      try {
+        this.memoStore!.setEmbeddingEngine(createFastEmbedEngine());
+      } catch (error: unknown) {
+        this.log.warn('embedding engine init failed; falling back to keyword search', error);
+      }
+    })();
+  }
   get generate(): typeof generate {
     return async (provider, systemPrompt, tools, history, callbacks, options) => {
       if (options?.auth !== undefined) {

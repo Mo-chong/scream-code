@@ -1,10 +1,10 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { JianFileExistsError } from '#/errors';
 import { LocalJian } from '#/local';
-import { afterEach, beforeEach, describe, expect, it, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 function nodeArgs(code: string): string[] {
   return ['node', '-e', code];
@@ -854,6 +854,80 @@ describe('LocalProcess.kill safety', () => {
     15_000,
   );
 });
+
+describe('LocalJian process environment allowlist', () => {
+  let jian: LocalJian;
+
+  beforeEach(async () => {
+    jian = await LocalJian.create();
+  });
+
+  it('inherits PATH but strips secrets from spawned processes', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'should-not-leak');
+    try {
+      const proc = await jian.exec('node', '-e', 'console.log(process.env.OPENAI_API_KEY ?? "missing")');
+      const output = await streamToString(proc.stdout);
+      await proc.wait();
+      expect(output.trim()).toBe('missing');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('preserves explicit env values passed by the caller', async () => {
+    const proc = await jian.execWithEnv(
+      ['node', '-e', 'console.log(process.env.CALLER_VALUE ?? "missing")'],
+      { CALLER_VALUE: 'present' },
+    );
+    const output = await streamToString(proc.stdout);
+    await proc.wait();
+    expect(output.trim()).toBe('present');
+  });
+});
+
+describe('LocalJian optional root sandbox', () => {
+  let tempDir: string;
+  let sandboxDir: string;
+
+  beforeEach(async () => {
+    tempDir = await realpath(await mkdtemp(join(tmpdir(), 'jian-sandbox-')));
+    sandboxDir = join(tempDir, 'sandbox');
+    await mkdir(sandboxDir);
+  });
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects file operations outside the configured root', async () => {
+    const jian = await LocalJian.create(sandboxDir, sandboxDir);
+    const outside = join(tempDir, 'outside.txt');
+    await expect(jian.writeText(outside, 'x')).rejects.toThrow('Path outside allowed root directory');
+  });
+
+  it('allows file operations inside the configured root', async () => {
+    const jian = await LocalJian.create(sandboxDir, sandboxDir);
+    const inside = join(sandboxDir, 'inside.txt');
+    await expect(jian.writeText(inside, 'x')).resolves.toBeDefined();
+    expect(await jian.readText(inside)).toBe('x');
+  });
+
+  it('preserves the root boundary across withCwd()', async () => {
+    const jian = await LocalJian.create(sandboxDir, sandboxDir);
+    const subDir = join(sandboxDir, 'sub');
+    await mkdir(subDir);
+    const narrowed = jian.withCwd(subDir);
+    const outside = join(tempDir, 'outside.txt');
+    await expect(narrowed.writeText(outside, 'x')).rejects.toThrow('Path outside allowed root directory');
+  });
+});
+
+async function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk as Buffer));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];

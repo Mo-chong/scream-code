@@ -15,13 +15,95 @@ import { isAbsolute, join, normalize } from 'pathe';
 import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
-import { JianFileExistsError } from './errors';
+import { JianFileExistsError, JianPathOutsideRootError } from './errors';
 import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
 import type { Jian } from './jian';
 import type { JianProcess } from './process';
 import type { StatResult } from './types';
 
+/**
+ * Environment variables that spawned processes are allowed to inherit from the
+ * parent process. All other variables are stripped to prevent accidental secret
+ * leakage (e.g. cloud tokens, API keys, SSH agent sockets) into agent-executed
+ * commands. Explicit env values passed by callers can still add or override keys.
+ */
+const ALLOWED_INHERITED_ENV_KEYS: readonly string[] = [
+  // Shell / execution
+  'PATH',
+  'PATHEXT',
+  'SHELL',
+  'ComSpec',
+  // User / home
+  'HOME',
+  'USER',
+  'USERNAME',
+  'LOGNAME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  // Locale / terminal
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'TERM',
+  'TERM_PROGRAM',
+  'TERM_PROGRAM_VERSION',
+  'COLORTERM',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  // Temp dirs
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  // Windows / XDG dirs
+  'APPDATA',
+  'LOCALAPPDATA',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'XDG_RUNTIME_DIR',
+  // Git / SCM
+  'GIT_TERMINAL_PROMPT',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  // scream-specific
+  'SCREAM_PID',
+];
+
+
 const isWindows: boolean = process.platform === 'win32';
+
+/**
+ * True if `candidate` is `base` itself or a descendant of `base`, compared on
+ * path-component boundaries. Both paths must already be normalized. This is a
+ * lexical check only; it does not resolve symlinks.
+ */
+function isWithinDirectory(candidate: string, base: string): boolean {
+  if (candidate === base) return true;
+  const prefix = base.endsWith('/') ? base : `${base}/`;
+  return candidate.startsWith(prefix);
+}
+
+/**
+ * Build a sanitized environment for child processes. Inherits only an explicit
+ * allowlist of ambient variables, then applies caller-supplied overrides.
+ */
+function buildSafeEnv(explicit: Record<string, string> | undefined): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of ALLOWED_INHERITED_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  if (explicit !== undefined) {
+    for (const [key, value] of Object.entries(explicit)) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
 
 /**
  * Build the `(dev, ino)` cycle-detection key used by `_globWalk`'s
@@ -149,13 +231,21 @@ export class LocalJian implements Jian {
   readonly name: string = 'local';
   readonly osEnv: Environment;
   private _cwd: string;
+  private readonly _rootDir: string | undefined;
 
-  private constructor(osEnv: Environment, cwd?: string) {
+  private constructor(osEnv: Environment, cwd?: string, rootDir?: string) {
     // After construction we never touch `process.cwd()` / `process.chdir()`
     // — all path resolution goes through `this._cwd`. The default seeds
     // from `process.cwd()` but callers can pin to anything via `withCwd`
     // (or supplying `cwd` directly).
     this._cwd = normalize(cwd ?? process.cwd());
+    // Optional trust boundary for filesystem operations. When set, all file
+    // paths resolved by this instance must stay within `_rootDir`. By default
+    // no boundary is enforced so `LocalJian` remains a general-purpose local
+    // filesystem abstraction; callers that need a sandbox (e.g. an agent
+    // workspace) can supply `rootDir` or use `withCwd`, which narrows the
+    // boundary to the new cwd.
+    this._rootDir = rootDir === undefined ? undefined : normalize(rootDir);
     this.osEnv = osEnv;
   }
 
@@ -166,18 +256,33 @@ export class LocalJian implements Jian {
    * callers can therefore operate on independent working directories
    * without polluting one another.
    */
-  static async create(): Promise<LocalJian> {
+  static async create(cwd?: string, rootDir?: string): Promise<LocalJian> {
     const osEnv = await detectEnvironmentFromNode();
-    return new LocalJian(osEnv);
+    return new LocalJian(osEnv, cwd, rootDir);
   }
 
   withCwd(cwd: string): LocalJian {
-    return new LocalJian(this.osEnv, cwd);
+    // Preserve the same root trust boundary so a sandboxed instance cannot be
+    // widened by simply changing the working directory. If the new cwd falls
+    // outside the boundary, subsequent file operations will fail until the
+    // caller supplies an in-root path.
+    return new LocalJian(this.osEnv, cwd, this._rootDir);
   }
 
   private _resolvePath(path: string): string {
-    if (isAbsolute(path)) return normalize(path);
-    return join(this._cwd, path);
+    const resolved = isAbsolute(path) ? normalize(path) : join(this._cwd, path);
+    this._assertWithinRoot(resolved);
+    return resolved;
+  }
+
+  private _assertWithinRoot(resolvedPath: string): void {
+    if (this._rootDir === undefined) return;
+    if (isWithinDirectory(resolvedPath, this._rootDir)) return;
+    throw new JianPathOutsideRootError(
+      `Path outside allowed root directory: ${resolvedPath}`,
+      resolvedPath,
+      this._rootDir,
+    );
   }
 
   pathClass(): 'posix' | 'win32' {
@@ -520,22 +625,7 @@ export class LocalJian implements Jian {
   }
 
   async exec(...args: string[]): Promise<JianProcess> {
-    const command = args[0];
-    if (command === undefined) {
-      throw new Error('LocalJian.exec(): at least one argument (the command to run) is required.');
-    }
-    const restArgs = args.slice(1);
-    const child = spawn(command, restArgs, {
-      cwd: this._cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      // POSIX `detached:true` makes the child a process-group leader so
-      // `LocalProcess.kill()` can signal the entire tree. No-op on Windows
-      // (`taskkill /T` handles the tree there). We do not call `child.unref()`
-      // because the parent still waits on the child's exit through `wait()`.
-      detached: !isWindows,
-    });
-    await waitForSpawn(child);
-    return new LocalProcess(child);
+    return this.execWithEnv(args, undefined);
   }
 
   async execWithEnv(args: string[], env?: Record<string, string>): Promise<JianProcess> {
@@ -550,7 +640,7 @@ export class LocalJian implements Jian {
       cwd: this._cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: !isWindows,
-      env,
+      env: buildSafeEnv(env),
     });
     await waitForSpawn(child);
     return new LocalProcess(child);

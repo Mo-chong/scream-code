@@ -26,6 +26,7 @@ const BREATHE_INTERVAL_MS = 40;
 const WELCOME_TIPS: readonly string[] = [
   '/config  配置模型',
   '/sessions  恢复历史会话',
+  '/skill  打开 Skill 中心',
   '/  输入后打开快捷菜单',
 ];
 

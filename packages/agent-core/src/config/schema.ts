@@ -89,6 +89,11 @@ export const LoopControlSchema = z.object({
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
   compactionTriggerRatio: z.number().min(0.5).max(0.99).optional(),
+  // Hard ceiling on the number of turns a single goal-mode run may consume.
+  // Only enforced when the model has not set an explicit turn budget; it
+  // prevents runaway loops where the model neither completes nor blocks the
+  // goal. Set to 0 to disable the default guard.
+  maxGoalTurns: z.number().int().min(0).optional(),
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;

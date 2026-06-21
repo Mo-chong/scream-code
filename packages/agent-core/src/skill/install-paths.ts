@@ -1,4 +1,4 @@
-import { join } from 'pathe';
+import { basename, dirname, join, normalize } from 'pathe';
 
 import { findProjectRoot } from './scanner';
 
@@ -7,6 +7,36 @@ export interface SkillInstallPaths {
   readonly userDir: string;
   /** <projectRoot>/.scream-code/skills */
   readonly projectDir: string;
+}
+
+const MANAGED_SKILL_ROOT_NAMES = new Set(['.scream-code', '.agents']);
+
+/**
+ * Given a skill path, return the filesystem entry that represents the whole
+ * skill installation unit. For directory-based skills this is the skill's root
+ * directory (so bundled sub-skills are removed together); for flat `.md`
+ * skills this is the `.md` file itself.
+ *
+ * The install unit is the first ancestor of `skillPath` whose parent is a
+ * managed skill root such as `<...>/.scream-code/skills` or
+ * `<...>/.agents/skills`.
+ */
+export function resolveSkillInstallUnit(skillPath: string): string {
+  const normalized = normalize(skillPath).replaceAll('\\', '/');
+  let current = normalized;
+  while (true) {
+    const parent = dirname(current).replaceAll('\\', '/');
+    if (parent === current || parent === '.') {
+      throw new Error(`Skill path "${skillPath}" is not under a managed skill root`);
+    }
+    const parentBase = basename(parent);
+    const grandparent = dirname(parent).replaceAll('\\', '/');
+    const grandparentBase = grandparent === '.' ? '' : basename(grandparent);
+    if (parentBase === 'skills' && MANAGED_SKILL_ROOT_NAMES.has(grandparentBase)) {
+      return current;
+    }
+    current = parent;
+  }
 }
 
 /**

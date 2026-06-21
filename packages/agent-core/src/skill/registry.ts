@@ -103,6 +103,58 @@ export class SkillRegistry {
       this.byPluginAndName.set(key, skill);
     }
   }
+  /**
+   * Remove every skill and root contributed by a plugin that is being
+   * uninstalled, so the running session no longer offers those skills.
+   */
+  ejectPlugin(pluginId: string): void {
+    const rootsToRemove = new Set<string>();
+    for (const skill of this.byName.values()) {
+      if (skill.plugin?.id !== pluginId) continue;
+      for (const rootPath of this.roots) {
+        if (isPathUnderOrEqual(skill.path, rootPath)) {
+          rootsToRemove.add(rootPath);
+        }
+      }
+    }
+    for (const [name, skill] of this.byName) {
+      if (skill.plugin?.id === pluginId) {
+        this.byName.delete(name);
+      }
+    }
+    for (const [key, skill] of this.byPluginAndName) {
+      if (skill.plugin?.id === pluginId) {
+        this.byPluginAndName.delete(key);
+      }
+    }
+    const keptRoots = this.roots.filter((rootPath) => !rootsToRemove.has(rootPath));
+    this.roots.length = 0;
+    this.roots.push(...keptRoots);
+  }
+  /**
+   * Remove every skill whose path lives under `skillPath` (inclusive), and any
+   * skill root that is contained by `skillPath`. Used when a manual skill
+   * installation unit has been deleted from disk.
+   */
+  removeSkillPath(skillPath: string): number {
+    const normalizedPrefix = normalizePath(skillPath);
+    let removed = 0;
+    for (const [name, skill] of this.byName) {
+      if (isPathUnderOrEqual(skill.path, normalizedPrefix)) {
+        this.byName.delete(name);
+        removed++;
+      }
+    }
+    for (const [key, skill] of this.byPluginAndName) {
+      if (isPathUnderOrEqual(skill.path, normalizedPrefix)) {
+        this.byPluginAndName.delete(key);
+      }
+    }
+    const keptRoots = this.roots.filter((rootPath) => !isPathUnderOrEqual(rootPath, normalizedPrefix));
+    this.roots.length = 0;
+    this.roots.push(...keptRoots);
+    return removed;
+  }
 
   renderSkillPrompt(skill: SkillDefinition, rawArgs: string): string {
     const argumentNames = skillArgumentNames(skill.metadata);
@@ -154,6 +206,18 @@ export class SkillRegistry {
     }
     return lines.length === 1 ? '' : lines.join('\n');
   }
+}
+
+function normalizePath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/\/$/, '');
+}
+
+function isPathUnderOrEqual(skillPath: string, rootPath: string): boolean {
+  const normalizedSkill = normalizePath(skillPath);
+  const normalizedRoot = normalizePath(rootPath);
+  if (normalizedSkill === normalizedRoot) return true;
+  const separator = normalizedRoot.endsWith('/') ? '' : '/';
+  return normalizedSkill.startsWith(`${normalizedRoot}${separator}`);
 }
 
 function pluginSkillKey(pluginId: string, skillName: string): string {

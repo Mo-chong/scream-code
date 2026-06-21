@@ -31,6 +31,8 @@ export interface SkillSummary {
   readonly source: SkillSource;
   readonly type?: string | undefined;
   readonly disableModelInvocation?: boolean | undefined;
+  /** Plugin id when this skill is provided by a plugin package. */
+  readonly pluginId?: string | undefined;
 }
 
 export interface SkillRoot {
@@ -80,5 +82,6 @@ export function summarizeSkill(skill: SkillDefinition): SkillSummary {
     source: skill.source,
     type: skill.metadata.type,
     disableModelInvocation: skill.metadata.disableModelInvocation,
+    pluginId: skill.plugin?.id,
   };
 }

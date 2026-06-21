@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'pathe';
 import type { Jian } from '@scream-cli/jian';
@@ -30,6 +31,7 @@ import {
 import type { ProviderManager } from './provider-manager';
 import {
   registerBuiltinSkills,
+  resolveSkillInstallUnit,
   resolveSkillRoots,
   SkillRegistry,
   summarizeSkill,
@@ -95,6 +97,7 @@ export class Session {
   readonly hookEngine: HookEngine;
   private agentIdCounter = 0;
   private readonly skillsReady: Promise<void>;
+  private readonly mcpReady: Promise<void>;
   metadata: SessionMeta = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -107,8 +110,8 @@ export class Session {
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
-    // fire-and-forget `loadSkills` / `loadMcpServers` failures (and
-    // anything else that races) land in the session log, not just global.
+    // awaited `loadSkills` / `loadMcpServers` failures land in the session
+    // log, not just global.
     this.logHandle =
       options.id === undefined
         ? undefined
@@ -139,13 +142,13 @@ export class Session {
       .then(() => {
         this.refreshAgentBuiltinTools();
       });
-    void this.loadMcpServers().catch((error: unknown) => {
+    this.mcpReady = this.loadMcpServers().catch((error: unknown) => {
       this.emitInitialMcpLoadError(error);
     });
   }
-
   async createMain() {
     const { agent } = await this.createAgent({ type: 'main' }, DEFAULT_AGENT_PROFILES['agent']);
+    await agent.memoStoreReady;
     await this.triggerSessionStart('startup');
     return agent;
   }
@@ -157,6 +160,7 @@ export class Session {
     let warning: string | undefined;
     const resumeTasks = Object.keys(agents).map(async (id) => {
       const agent = this.ensureResumeAgentInstantiated(id, agents);
+      await agent.memoStoreReady;
       const result = await agent.resume();
       if (result.warning !== undefined && warning === undefined) {
         warning = result.warning;
@@ -339,6 +343,48 @@ export class Session {
     await this.skillsReady;
     return this.skills.listSkills().map(summarizeSkill);
   }
+
+  /**
+   * Dynamically load additional skill roots into the running session.
+   * Used after a plugin is installed so its skills become available
+   * without requiring the user to create a new session.
+   */
+  async injectSkillRoots(roots: readonly SkillRoot[]): Promise<void> {
+    await this.skillsReady;
+    await this.skills.loadRoots(roots);
+    this.refreshAgentBuiltinTools();
+  }
+  /**
+   * Remove skills contributed by a plugin from the running session.
+   * Called automatically when a plugin is uninstalled while the session is active.
+   */
+  ejectPlugin(pluginId: string): void {
+    this.skills.ejectPlugin(pluginId);
+    this.refreshAgentBuiltinTools();
+  }
+  /**
+   * Delete a manually installed skill from disk and remove it (and any bundled
+   * sub-skills) from the running session. Plugin-provided skills must be
+   * uninstalled via removePlugin instead.
+   */
+  async removeSkill(skillName: string): Promise<void> {
+    await this.skillsReady;
+    const skill = this.skills.getSkill(skillName);
+    if (skill === undefined) {
+      throw new ScreamError(ErrorCodes.SKILL_NOT_FOUND, `Skill "${skillName}" was not found`);
+    }
+    if (skill.source === 'builtin' || skill.plugin !== undefined) {
+      throw new ScreamError(
+        ErrorCodes.REQUEST_INVALID,
+        `Skill "${skillName}" cannot be removed this way; use removePlugin for plugin skills`,
+      );
+    }
+    const installUnit = resolveSkillInstallUnit(skill.path);
+    await rm(installUnit, { recursive: true, force: true });
+    this.skills.removeSkillPath(installUnit);
+    this.refreshAgentBuiltinTools();
+  }
+
 
   private async loadSkills(): Promise<void> {
     const roots = await resolveSkillRoots({

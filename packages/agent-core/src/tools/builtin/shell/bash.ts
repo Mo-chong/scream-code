@@ -409,10 +409,10 @@ export class BashTool implements BuiltinTool<BashInput> {
       SCREAM_PID: String(process.pid),
     };
 
-    // Merge ambient env + noninteractive knobs so tools like git / node
-    // don't open a pager and paints don't colour the stream.
+    // Merge noninteractive knobs with the sanitized ambient env provided by
+    // `jian.execWithEnv`. The Jian layer applies an allowlist to prevent secret
+    // leakage, so we only pass explicit overrides here.
     const mergedEnv: Record<string, string> = {
-      ...(process.env as Record<string, string>),
       ...noninteractiveEnv,
     };
     return this.jian.execWithEnv(shellArgs, mergedEnv);

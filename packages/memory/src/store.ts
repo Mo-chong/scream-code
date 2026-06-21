@@ -11,6 +11,13 @@ const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
 const SQLITE_MIGRATION_MARKER = '.migrated-to-sqlite';
 
+export interface MemoryMemoStoreLogger {
+  debug?: (message: string, ...args: unknown[]) => void;
+  info?: (message: string, ...args: unknown[]) => void;
+  warn?: (message: string, ...args: unknown[]) => void;
+  error?: (message: string, ...args: unknown[]) => void;
+}
+
 export class MemoryMemoStore {
   private readonly projectDir: string;
   private readonly jsonlPath: string;
@@ -22,22 +29,35 @@ export class MemoryMemoStore {
   private embeddingQueue = new Set<string>();
   private embeddingTimer: ReturnType<typeof setTimeout> | undefined;
   private embeddingFlushing = false;
+  private embeddingDegraded = false;
+  private embeddingConsecutiveFailures = 0;
+  private lastEmbeddingError: Error | undefined;
+  private readonly log: MemoryMemoStoreLogger;
 
-  constructor(projectDir: string) {
+  constructor(projectDir: string, log?: MemoryMemoStoreLogger) {
     this.projectDir = projectDir;
     this.jsonlPath = join(projectDir, 'memory', FILE_NAME);
     this.dbPath = join(projectDir, 'memory', 'memos.sqlite');
+    this.log = log ?? {};
   }
 
   /**
    * Open the SQLite database and run schema migrations. Call this once after
    * construction before relying on reads/writes.
+   *
+   * Note on async SQLite: Node.js added the asynchronous `Database` class to
+   * `node:sqlite` in v23.4.0 (experimental). This package currently supports
+   * Node >=22.0.0 and uses `DatabaseSync` because the v22 type definitions do
+   * not yet include `Database`. Once the project baseline moves to Node 23+ and
+   * the types catch up, the synchronous calls here should be migrated to the
+   * async API to avoid blocking the event loop on large operations.
    */
   async init(): Promise<void> {
     if (this.initialized) return;
     await this.ensureDir();
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    this.db.exec('PRAGMA foreign_keys = ON;');
     this.createSchema();
     await this.migrateFromJsonl();
     this.initialized = true;
@@ -717,6 +737,11 @@ export class MemoryMemoStore {
     }, 2000);
   }
 
+  /**
+   * Flush queued embedding generation. Retries once on failure to tolerate
+   * transient model-load contention, then marks embeddings as degraded and
+   * logs the problem. Callers can still retrieve memos through keyword search.
+   */
   private async flushEmbeddings(): Promise<void> {
     if (
       this.embeddingFlushing ||
@@ -726,14 +751,13 @@ export class MemoryMemoStore {
       return;
     }
 
-    const ids = [...this.embeddingQueue];
-    this.embeddingQueue.clear();
-    if (ids.length === 0) return;
-
     this.embeddingFlushing = true;
     try {
       await this.init();
       if (this.db === undefined) return;
+
+      const ids = [...this.embeddingQueue];
+      this.embeddingQueue.clear();
 
       // Collect memos that still need embeddings.
       const pending: Array<{ id: string; text: string }> = [];
@@ -751,10 +775,15 @@ export class MemoryMemoStore {
 
       if (pending.length === 0) return;
 
-      const vectors = await this.embeddingEngine.embedBatch(
-        pending.map((p) => p.text),
-      );
-      if (vectors === null || vectors.length !== pending.length) return;
+      const vectors = await this.tryEmbedBatch(pending.map((p) => p.text));
+      if (vectors === null || vectors.length !== pending.length) {
+        this.markEmbeddingFailure(
+          new Error(vectors === null ? 'embedBatch returned null' : 'embedding count mismatch'),
+        );
+        return;
+      }
+
+      this.clearEmbeddingFailure();
 
       const insert = this.db.prepare(
         'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at) VALUES (?, ?, ?, ?)',
@@ -771,14 +800,67 @@ export class MemoryMemoStore {
           );
         }
         this.db.exec('COMMIT');
-      } catch {
+      } catch (err) {
         this.db.exec('ROLLBACK');
+        this.markEmbeddingFailure(err instanceof Error ? err : new Error(String(err)));
       }
-    } catch {
-      // Non-critical — embeddings are best-effort.
+    } catch (err) {
+      this.markEmbeddingFailure(err instanceof Error ? err : new Error(String(err)));
     } finally {
       this.embeddingFlushing = false;
     }
+  }
+
+  private async tryEmbedBatch(texts: string[]): Promise<Float32Array[] | null> {
+    if (this.embeddingEngine === undefined) return null;
+    // First attempt.
+    try {
+      const first = await this.embeddingEngine.embedBatch(texts);
+      if (first !== null) return first;
+    } catch {
+      // Fall through to one retry.
+    }
+    // One immediate retry in case the failure was transient (e.g. model file
+    // contention during parallel process startup).
+    try {
+      return await this.embeddingEngine.embedBatch(texts);
+    } catch {
+      return null;
+    }
+  }
+
+  private markEmbeddingFailure(error: Error): void {
+    this.embeddingDegraded = true;
+    this.embeddingConsecutiveFailures += 1;
+    this.lastEmbeddingError = error;
+    this.log.warn?.('embedding flush failed', {
+      error: error.message,
+      consecutiveFailures: this.embeddingConsecutiveFailures,
+    });
+  }
+
+  private clearEmbeddingFailure(): void {
+    this.embeddingDegraded = false;
+    this.embeddingConsecutiveFailures = 0;
+    this.lastEmbeddingError = undefined;
+  }
+
+  /**
+   * Runtime health of the embedding subsystem. When `degraded` is true, the
+   * store still serves keyword search; only vector similarity is unavailable.
+   */
+  embeddingStatus(): {
+    available: boolean;
+    degraded: boolean;
+    consecutiveFailures: number;
+    lastError?: string;
+  } {
+    return {
+      available: this.embeddingEngine !== undefined && this.embeddingEngine.available,
+      degraded: this.embeddingDegraded,
+      consecutiveFailures: this.embeddingConsecutiveFailures,
+      lastError: this.lastEmbeddingError?.message,
+    };
   }
 
   private listAll(limit: number, offset: number, projectDir?: string): { rows: MemoryMemo[]; total: number } {

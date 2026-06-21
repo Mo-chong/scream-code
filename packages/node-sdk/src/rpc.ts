@@ -129,6 +129,10 @@ export interface RemoveMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
 }
 
+export interface RemoveSkillRpcInput extends SessionIdRpcInput {
+  readonly skillName: string;
+}
+
 type ResolvedCoreAPI = Awaited<ReturnType<SDKRPCClient>>;
 
 export class SDKRpcClient {
@@ -485,6 +489,16 @@ export class SDKRpcClient {
     const rpc = await this.getRpc();
     return rpc.listSkills({ sessionId: input.sessionId });
   }
+
+  async injectPlugin(input: SessionIdRpcInput & { id: string }): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.injectPlugin({ sessionId: input.sessionId, id: input.id });
+  }
+  async removeSkill(input: RemoveSkillRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.removeSkill({ sessionId: input.sessionId, skillName: input.skillName });
+  }
+
 
   async listBackgroundTasks(
     input: SessionIdRpcInput & { activeOnly?: boolean; limit?: number },

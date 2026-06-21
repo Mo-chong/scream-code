@@ -133,17 +133,17 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'plugin',
-    aliases: ['plugins'],
-    description: 'ScreamCode 插件中心：浏览、安装、卸载插件',
-    priority: 111,
+    name: 'skill',
+    aliases: ['skills', 'plugin', 'plugins'],
+    description: '技能中心，管理 Skill 技能，含激活、安装、卸载等',
+    priority: 110,
     availability: 'always',
   },
   {
     name: 'cc',
     aliases: [],
     description: '操控你的cc（启动/关闭/重启）',
-    priority: 110,
+    priority: 109,
     availability: 'always',
   },
   {
