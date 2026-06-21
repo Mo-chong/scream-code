@@ -132,6 +132,8 @@ export function transformTomlData(data: Record<string, unknown>): Record<string,
       result[targetKey] = transformLoopControlData(value);
     } else if (targetKey === 'background' && isPlainObject(value)) {
       result[targetKey] = transformPlainObject(value);
+    } else if (targetKey === 'proxy' && isPlainObject(value)) {
+      result[targetKey] = transformPlainObject(value);
     } else if (!isPlainObject(value)) {
       result[targetKey] = value;
     }
@@ -301,6 +303,7 @@ export function configToTomlData(config: ScreamConfig): Record<string, unknown> 
   setSection(out, 'services', config.services, servicesToToml);
   setSection(out, 'loop_control', config.loopControl, loopControlToToml);
   setSection(out, 'background', config.background, backgroundToToml);
+  setSection(out, 'proxy', config.proxy, proxyToToml);
   setSection(out, 'permission', config.permission, permissionToToml);
   setHooks(out, config.hooks);
 
@@ -457,6 +460,17 @@ function backgroundToToml(
 ): Record<string, unknown> {
   const out = cloneRecord(rawBackground);
   for (const [key, value] of Object.entries(background)) {
+    setDefined(out, camelToSnake(key), value);
+  }
+  return out;
+}
+
+function proxyToToml(
+  proxy: NonNullable<ScreamConfig['proxy']>,
+  rawProxy: unknown,
+): Record<string, unknown> {
+  const out = cloneRecord(rawProxy);
+  for (const [key, value] of Object.entries(proxy)) {
     setDefined(out, camelToSnake(key), value);
   }
   return out;
