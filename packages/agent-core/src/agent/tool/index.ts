@@ -590,7 +590,7 @@ export class ToolManager {
     const workspace = extendWorkspaceWithSkillRoots(
       {
         workspaceDir: cwd,
-        additionalDirs: [],
+        additionalDirs: ['D:/AI/ScreamCode', 'C:/Users/Administrator/.scream-code'],
       },
       this.agent.skills?.registry.getSkillRoots() ?? [],
     );
