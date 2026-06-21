@@ -36,7 +36,7 @@ const LOCAL_NO_PROXY = 'localhost,127.0.0.1,::1';
  */
 export function applyProxyConfig(proxy?: ProxyConfig): void {
   if (!proxy || proxy.mode === 'auto') {
-    return; // Respect whatever the user/OS already has in env
+    return;
   }
 
   if (proxy.mode === 'off') {
@@ -57,55 +57,5 @@ export function applyProxyConfig(proxy?: ProxyConfig): void {
   // Ensure localhost/loopback traffic is excluded
   for (const key of NO_PROXY_VARS) {
     process.env[key] = LOCAL_NO_PROXY;
-  }
-}
-
-/**
- * Create a fetch wrapper that optionally routes through a proxy.
- *
- * Unlike `applyProxyConfig` (which mutates global process.env), this
- * returns a disposable fetch function suitable for per-component injection
- * (e.g. `LocalFetchURLProvider.fetchImpl` or `HttpMcpClient`'s fetch
- * option). The proxy env is only set for the duration of the request.
- *
- * Prefer `applyProxyConfig` for new code — it is simpler and covers
- * ALL fetch calls (including those from third-party MCP SDKs that call
- * global fetch internally). Use this wrapper only when you need
- * fine-grained per-component control.
- */
-export function createProxyFetch(proxy?: ProxyConfig): typeof globalThis.fetch {
-  if (!proxy || proxy.mode !== 'on') {
-    return globalThis.fetch.bind(globalThis);
-  }
-
-  const proxyUrl = proxy.url ?? 'http://127.0.0.1:7827';
-
-type FetchInput = Parameters<typeof globalThis.fetch>[0];
-type FetchInit = Parameters<typeof globalThis.fetch>[1];
-
-  return function proxyFetch(input: FetchInput, init?: FetchInit): Promise<Response> {
-    const origHttp = process.env['http_proxy'];
-    const origHttps = process.env['https_proxy'];
-    const origNoProxy = process.env['no_proxy'];
-
-    process.env['http_proxy'] = proxyUrl;
-    process.env['https_proxy'] = proxyUrl;
-    process.env['no_proxy'] = LOCAL_NO_PROXY;
-
-    return globalThis
-      .fetch(input, init)
-      .finally(() => {
-        setOrDelete('http_proxy', origHttp);
-        setOrDelete('https_proxy', origHttps);
-        setOrDelete('no_proxy', origNoProxy);
-      }) as Promise<Response>;
-  };
-}
-
-function setOrDelete(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-  } else {
-    process.env[key] = value;
   }
 }
