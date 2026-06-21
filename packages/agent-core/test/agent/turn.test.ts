@@ -409,21 +409,24 @@ describe('Agent turn flow', () => {
     expect(ctx.llmCalls[1]?.history).toContainEqual(llmStopHookMessage);
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('Second answer.');
   });
-  it('continues a turn when the model tries to stop with unverified working-set paths', async () => {
+  it('does not force continuation for unverified working-set paths', async () => {
     const ctx = testAgent();
     ctx.configure();
     ctx.agent.workingSet.touch('src/foo.ts', 0);
-    ctx.mockNextResponse({ type: 'text', text: 'Done.' });
-    ctx.mockNextResponse({ type: 'text', text: 'Still working.' });
+    // Use a non-trivial final response so the summary guard does not fire.
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'I have completed the requested change to src/foo.ts and it is ready to use.',
+    });
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Make a change' }] });
     await ctx.untilTurnEnd();
 
-    expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
-    expect(JSON.stringify(ctx.agent.context.data().history)).toContain(
+    expect(ctx.llmCalls.length).toBe(1);
+    expect(JSON.stringify(ctx.agent.context.data().history)).not.toContain(
       'You have unverified changes in: src/foo.ts',
     );
-    expect(JSON.stringify(ctx.agent.context.data().history)).toContain('convergence_gate');
+    expect(JSON.stringify(ctx.agent.context.data().history)).not.toContain('convergence_gate');
   });
   it('continues a turn when the final response is too brief after verification work', async () => {
     const ctx = testAgent();

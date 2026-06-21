@@ -582,12 +582,12 @@ export class TurnFlow {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
 
-              // Hard convergence gate: never stop while there is unverified
-              // work, a blocking tool failure, an empty assistant step, or a
-              // missing TodoList update for an active goal. Exploratory failures
-              // (e.g. probing for tsc, ls, which) do not block once the turn has
-              // produced a successful resolution. A passing verification for the
-              // current turn also resolves unverified-change concerns.
+              // Convergence gate: prevent the turn from ending on an empty step,
+              // a missing TodoList update for an active goal, a blocking (non-exploratory)
+              // tool failure, or a failed verification command. We no longer force
+              // verification just because files were touched — the agent decides whether
+              // a verification pass is appropriate based on the user's intent and the
+              // system prompt guidance.
               const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
               const hasPassedVerificationThisTurn = latestVerification?.passed === true;
 
@@ -600,16 +600,6 @@ export class TurnFlow {
                   );
                 }
 
-                const unverified = this.agent.workingSet.getUnverifiedPaths();
-                if (unverified.length > 0 && !hasPassedVerificationThisTurn) {
-                  const suggestions = this.agent.workingSet.suggestVerificationCommands(
-                    this.agent.config.cwd,
-                  );
-                  reasons.push(
-                    `You have unverified changes in: ${unverified.join(', ')}.\n` +
-                      `The next step should be verification: ${suggestions.join(' OR ')}.`,
-                  );
-                }
                 const goal = this.agent.goal.getGoal().goal;
                 if (goal?.status === 'active' && !this.todoSeenThisTurn) {
                   reasons.push(
@@ -923,11 +913,10 @@ export class TurnFlow {
   }
   private turnHadMeaningfulWork(): boolean {
     const workingSet = this.agent.workingSet;
-    const hasUnverified = workingSet.getUnverifiedPaths().length > 0;
     const hasNewPaths = workingSet.getPaths().length > this.turnStartWorkingSetPathCount;
     const hasNewVerification = workingSet.getVerificationCount() > this.turnStartVerificationCount;
     const hasCurrentTurnVerification = workingSet.hasVerificationForTurn(this.currentTurnId);
-    return hasUnverified || hasNewPaths || hasNewVerification || hasCurrentTurnVerification;
+    return hasNewPaths || hasNewVerification || hasCurrentTurnVerification;
   }
 
   private lastAssistantMessageIsTrivial(): boolean {
