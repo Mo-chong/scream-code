@@ -47,7 +47,9 @@ If no completed task loops are found in the compacted messages, output:
 <!-- Compression Priorities (in order) -->
 
 1. **Current Task State**: What is being worked on RIGHT NOW
-2. **Errors & Solutions**: All encountered errors and their resolutions
+2. **Errors & Solutions (POISON PREVENTION)**: For completed tasks, only mention THE FINAL SOLUTION.
+   Do NOT describe failed approaches in Current Focus, Active Issues, or Code State.
+   The failure narrative belongs in memory-memo's whatFailed field — not in the working summary.
 3. **Code Evolution**: Final working versions only (remove intermediate attempts)
 4. **System Context**: Project structure, dependencies, environment setup
 5. **Design Decisions**: Architectural choices and their rationale

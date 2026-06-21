@@ -197,7 +197,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
             ...(tags !== undefined ? [`  ${tags}`] : []),
             `  Approach: ${memo.approach}`,
             `  Outcome: ${memo.outcome}`,
-            ...(memo.whatFailed !== 'none' ? [`  What failed: ${memo.whatFailed}`] : []),
+            ...(renderWhatFailed(memo.whatFailed, memo.outcome)),
             ...(memo.whatWorked !== 'none' ? [`  What worked: ${memo.whatWorked}`] : []),
             '',
           );
@@ -207,4 +207,34 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
       },
     };
   }
+}
+
+
+/**
+ * Render whatFailed field for AI consumption:
+ * - For completed tasks: digest to first sentence to avoid poisoning
+ * - For unresolved tasks: show full text as warning signal
+ */
+function renderWhatFailed(whatFailed: string, outcome: string): string[] {
+  if (whatFailed === 'none') return [];
+  if (isCompleted(outcome)) {
+    const digest = digestFirstSentence(whatFailed);
+    if (digest.length < whatFailed.length) {
+      return [`  ⚠ 踩坑: ${digest} …（完整记录可查）`];
+    }
+    return [`  ⚠ 踩坑: ${digest}`];
+  }
+  return [`  What failed: ${whatFailed}`];
+}
+
+function isCompleted(outcome: string): boolean {
+  const lower = outcome.toLowerCase();
+  return lower.includes('完成') || lower.includes('成功') || lower.includes('done') || lower.includes('success');
+}
+
+function digestFirstSentence(text: string): string {
+  const match = text.match(/^.*?[。；.;\n]/);
+  if (match) return match[0].trim();
+  if (text.length > 40) return text.slice(0, 40).trimEnd();
+  return text;
 }
