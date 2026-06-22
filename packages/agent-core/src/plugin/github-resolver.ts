@@ -59,7 +59,7 @@ export async function resolveGithubSource(
 
   // No release we could resolve. Fall back to the default branch via codeload.
   const headController = new AbortController();
-  const headTimeout = setTimeout(() => headController.abort(), 30_000);
+  const headTimeout = setTimeout(() =>{  headController.abort(); }, 30_000);
   let headProbe: Response;
   try {
     headProbe = await fetch(
@@ -102,7 +102,7 @@ async function tryResolveLatestReleaseTag(
 ): Promise<string | undefined> {
   const url = `https://github.com/${owner}/${repo}/releases/latest`;
   const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), 30_000);
+  const timeoutHandle = setTimeout(() =>{  controller.abort(); }, 30_000);
   let resp: Response;
   try {
     resp = await fetch(url, { redirect: 'manual', signal: controller.signal });

@@ -120,11 +120,11 @@ export async function generate(
       await throwIfAborted(options?.signal, stream);
     }
 
-    // Index-based routing for parallel tool call argument deltas.
     // When a ToolCallPart arrives with an index referring to a tool call
     // that is NOT the currently-pending one, append it directly to the
     // correct ToolCall in message.toolCalls instead of relying on sequential
     // merging. This prevents argument cross-contamination across parallel calls.
+    // Index-based routing for parallel tool call argument deltas.
     if (
       isToolCallPart(part) &&
       part.index !== undefined &&
@@ -146,11 +146,11 @@ export async function generate(
 
     if (pendingPart === null) {
       pendingPart = part;
-    } else if (!mergeInPlace(pendingPart, part)) {
       // Could not merge — flush the pending part and start a new one.
       // For parallel tool calls this happens when a new ToolCall header arrives
       // while a previous ToolCall is still pending; the flush finalizes the
       // previous tool call into `message.toolCalls`.
+    } else if (!mergeInPlace(pendingPart, part)) {
       flushPart(message, pendingPart, toolCallIndexMap);
       pendingPart = part;
     }
@@ -200,25 +200,13 @@ export async function generate(
   };
 }
 
-type CancelableStream = StreamedMessage & {
-  cancel?: () => unknown;
-  return?: () => unknown;
-};
-
 function throwAbortError(): never {
   throw new DOMException('The operation was aborted.', 'AbortError');
 }
 
 async function cancelStream(stream: StreamedMessage): Promise<void> {
-  const cancelable = stream as CancelableStream;
-
-  try {
-    await cancelable.cancel?.();
-  } catch {}
-
-  try {
-    await cancelable.return?.();
-  } catch {}
+  const iter = stream[Symbol.asyncIterator]();
+  await iter.return?.();
 }
 
 async function throwIfAborted(signal?: AbortSignal, stream?: StreamedMessage): Promise<void> {

@@ -5,7 +5,8 @@ on:
   push:
     branches:
       - main
-
+    tags:
+      - 'v*'
 permissions:
   contents: read
 
@@ -85,3 +86,4 @@ jobs:
             echo "Typechecking ${config}"
             pnpm dlx --package @typescript/native-preview@beta tsgo -p "${config}" --noEmit
           done
+

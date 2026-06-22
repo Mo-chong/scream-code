@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const COMPONENTS_ROOT = join(__dirname, '..', '..', 'src', 'tui', 'components');
+const COMPONENTS_ROOT = join(__dirname, '..', '..', 'src', 'tui');
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -41,6 +41,7 @@ describe('TUI handleInput — printable-key guard', () => {
   it('forbids bare-literal printable comparisons on `data` (use printableChar)', () => {
     const offenders: { file: string; line: number; snippet: string }[] = [];
     for (const file of walk(COMPONENTS_ROOT)) {
+      if (file.endsWith('printable-key.ts')) continue;
       const content = readFileSync(file, 'utf8');
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {

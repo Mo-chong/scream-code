@@ -126,9 +126,12 @@ export class ChoicePickerComponent extends Container implements Focusable {
       this.list.view().query.length === 0
     ) {
       const ch = printableChar(data);
-      if (ch !== undefined && chosen.actionKeys[ch] !== undefined) {
-        chosen.actionKeys[ch]();
-        return;
+      if (ch !== undefined) {
+        const fn = chosen.actionKeys[ch] ?? chosen.actionKeys[ch.toLowerCase()];
+        if (fn !== undefined) {
+          fn();
+          return;
+        }
       }
     }
     this.list.handleKey(data);

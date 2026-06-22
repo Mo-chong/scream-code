@@ -48,6 +48,9 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       // Overflow errors can't be fixed by retrying — they need compaction.
       // Fail fast so the turn-level handler can trigger emergency compaction
       // without wasting retry attempts on the same overflow.
+      // NOTE: only instanceof APIContextOverflowError is checked here.
+      // If a provider wraps the overflow as ScreamError(CONTEXT_OVERFLOW),
+      // it will be retried. This is an edge case for non-ltod provider adapters.
       if (error instanceof APIContextOverflowError) {
         logRequestFailure(input, error, attempt, maxAttempts);
         throw error;

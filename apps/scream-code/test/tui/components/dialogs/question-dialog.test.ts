@@ -357,7 +357,7 @@ describe('QuestionDialogComponent', () => {
 
     const out = dialog.render(80).join('\n');
     expect(out).toContain(chalk.bgHex(darkColors.primary).hex(darkColors.text).bold(' First '));
-    expect(out).not.toContain('(●) First');
+    expect(out).not.toContain('(■) First');
   });
 
   it('preserves Other drafts across tabs and question navigation', () => {

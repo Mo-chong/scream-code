@@ -24,10 +24,10 @@ const BLOCK_RGB: [number, number, number] = [255, 255, 255]
 const LOGO_RGB: [number, number, number] = [136, 136, 136]
 const DIM_RGB: [number, number, number] = [85, 85, 85]
 
-function fg(r: number, g: number, b: number) { return `\x1b[38;2;${r};${g};${b}m` }
-const RESET = '\x1b[0m'
-const BOLD = '\x1b[1m'
-const DIM = '\x1b[2m'
+function fg(r: number, g: number, b: number) { return `\u001B[38;2;${r};${g};${b}m` }
+const RESET = '\u001B[0m'
+const BOLD = '\u001B[1m'
+const DIM = '\u001B[2m'
 
 function renderSheen(char: string, charIndex: number, sheenPos: number, isReversing: boolean, accent: [number, number, number]) {
   if (char === ' ') return ' '
@@ -78,7 +78,7 @@ function getTerminalSize() {
 
 function visualWidth(s: string) {
   let w = 0
-  for (const ch of s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')) {
+  for (const ch of s.replaceAll(/\u001B\[[0-9;]*[a-zA-Z]/g, '')) {
     w += /[一-鿿　-〿＀-￯]/.test(ch) ? 2 : 1
   }
   return w
@@ -120,10 +120,10 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
-      stdout.write('\x1b[?1049h')
+      stdout.write('\u001B[?1049h')
     }
-    stdout.write('\x1b[2J')
-    stdout.write('\x1b[?25l')
+    stdout.write('\u001B[2J')
+    stdout.write('\u001B[?25l')
 
     const accent = THEME_ACCENT[theme]
     let sheenPos = 0
@@ -159,7 +159,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
       while (lines.length < rows) lines.push('')
 
-      stdout.write('\x1b[H')
+      stdout.write('\u001B[H')
       stdout.write(lines.join('\n'))
     }
 
@@ -175,7 +175,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
     function onData(data: Buffer) {
       const key = data.toString()
-      if (key === '\x03') {
+      if (key === '\u0003') {
         interrupt()
         return
       }
@@ -191,11 +191,11 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       process.off('SIGINT', interrupt)
       process.off('SIGTERM', interrupt)
       try { stdin.setRawMode(false) } catch { /* ignore */ }
-      stdout.write('\x1b[?25h')
+      stdout.write('\u001B[?25h')
       if (process.platform !== 'win32') {
-        stdout.write('\x1b[?1049l')
+        stdout.write('\u001B[?1049l')
       } else {
-        stdout.write('\x1b[2J\x1b[H')
+        stdout.write('\u001B[2J\u001B[H')
       }
     }
 
@@ -212,9 +212,9 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     } catch {
       process.off('SIGINT', interrupt)
       process.off('SIGTERM', interrupt)
-      stdout.write('\x1b[?25h')
+      stdout.write('\u001B[?25h')
       if (process.platform !== 'win32') {
-        stdout.write('\x1b[?1049l')
+        stdout.write('\u001B[?1049l')
       }
       for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
       stdout.write(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}\n`)

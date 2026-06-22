@@ -187,13 +187,13 @@ export class TurnFlow {
   cancel(turnId?: number, reason?: unknown): void {
     this.agent.records.logRecord({ type: 'turn.cancel', turnId });
     if (turnId !== undefined && turnId !== this.currentId) {
-      return; // Ignore cancel for non-active turn
+      return;
     }
-    // A direct cancel (RPC / replay) is the user pressing stop. When the cancel
-    // is propagated from an aborting signal (e.g. a subagent's deadline via
-    // waitForCurrentTurn), carry that original reason instead so a timeout is
-    // not mislabeled to the model as a deliberate user interruption.
     const cancelReason = reason ?? userCancellationReason();
+    // Close the cancelled turn's usage window — runOneTurn's cleanup path
+    // may not reach it if a new prompt() advanced currentId before the old
+    // turnWorker's microtask resumed.
+    this.agent.usage.endTurn();
     this.abortTurn(cancelReason);
     this.agent.subagentHost?.cancelAll(cancelReason);
   }
@@ -370,7 +370,6 @@ export class TurnFlow {
   ): Promise<TurnEndedEvent> {
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
-    this.agent.context.appendUserMessage(input, origin);
     const ended: TurnEndedEvent = { type: 'turn.ended', turnId, reason: 'completed' };
     this.agent.usage.endTurn();
     this.agent.emitEvent(ended);
@@ -406,6 +405,7 @@ export class TurnFlow {
     this.turnStartWorkingSetPathCount = this.agent.workingSet.getPaths().length;
     this.turnStartVerificationCount = this.agent.workingSet.getVerificationCount();
     this.currentStepByTurn.set(turnId, 0);
+    this.currentStep = 0;
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
     this.editWithoutLookupCount = 0;
@@ -597,14 +597,14 @@ export class TurnFlow {
                 );
               }
 
-              // Inject session memory summary so the model retains context
-              // after compaction strips detailed tool-call history.
-              const sessionSummary = this.agent.sessionMemory.getSessionSummary();
-              if (sessionSummary.length > 0) {
-                this.agent.context.appendSystemReminder(sessionSummary, {
-                  kind: 'injection',
-                  variant: 'session_memory',
-                });
+              if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
+                const sessionSummary = this.agent.sessionMemory.getSessionSummary();
+                if (sessionSummary.length > 0) {
+                  this.agent.context.appendSystemReminder(sessionSummary, {
+                    kind: 'injection',
+                    variant: 'session_memory',
+                  });
+                }
               }
 
               // Suggest /dream on the first step when conditions are met
@@ -1154,6 +1154,7 @@ export class TurnFlow {
     }
   }
 
+  /** Track files touched by builtin tools. Bash-modified files are NOT tracked. */
   private recordWorkingSetPaths(toolName: string, args: unknown, turnId: number): void {
     const workingSet = this.agent.workingSet;
     if (toolName === 'Read' || toolName === 'ReadGroup' || toolName === 'ReadMediaFile') {
@@ -1278,6 +1279,23 @@ export class TurnFlow {
       /(^|;\s*|&&\s*)\s*pnp[ms]\s+add\s+(--global\s+)?tsx/,
       /(^|;\s*|&&\s*)\s*yarn\s+add\s+(--dev\s+)?typescript/,
       /(^|;\s*|&&\s*)\s*yarn\s+add\s+(--dev\s+)?tsx/,
+      // Common read-only / exploratory probes
+      /\bgit\s+status\b/,
+      /\bgit\s+diff\b/,
+      /\bgit\s+log\b/,
+      /\bgrep\s+/,
+      /\brg\s+/,
+      /\bnode\s+-e\s+/,
+      /\bpython\b/,
+      /\bpython3\b/,
+      /\bwc\s+/,
+      /\bsort\s+/,
+      /\buniq\b/,
+      /\bdiff\s+/,
+      /\bfile\s+/,
+      /\bstat\s+/,
+      /\bdf\s+/,
+      /\bdu\s+/,
     ];
     return exploratoryPatterns.some((pattern) => pattern.test(normalized));
   }

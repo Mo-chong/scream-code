@@ -52,15 +52,35 @@ export class MemoryMemoStore {
    * the types catch up, the synchronous calls here should be migrated to the
    * async API to avoid blocking the event loop on large operations.
    */
+  private initPromise: Promise<void> | null = null;
+
   async init(): Promise<void> {
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this._doInit();
+    return this.initPromise;
+  }
+
+  private async _doInit(): Promise<void> {
     if (this.initialized) return;
     await this.ensureDir();
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA foreign_keys = ON;');
+    this.db.exec('PRAGMA busy_timeout = 5000;');
     this.createSchema();
     await this.migrateFromJsonl();
     this.initialized = true;
+  }
+
+  /** Close the database handle and checkpoint WAL. */
+  close(): void {
+    if (this.db !== undefined) {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      this.db.close();
+      this.db = undefined;
+    }
+    this.initialized = false;
+    this.initPromise = null;
   }
 
   /** Iterate all memos from the database, newest first. Optionally filter by project directory. */
@@ -72,8 +92,13 @@ export class MemoryMemoStore {
       projectDir === undefined
         ? this.db.prepare('SELECT * FROM memos ORDER BY recorded_at DESC')
         : this.db.prepare(
+          // NOTE: `project_dir = ''` includes legacy memos from before per-project
+          // filtering was introduced. This is intentional — project queries always
+          // include global/legacy entries alongside the requested project.
             "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC",
           );
+    // NOTE: stmt.all() materializes the entire result set. For large stores
+    // this loads all rows into memory. Use paginated list() for bounded reads.
     const rows = (
       projectDir === undefined ? stmt.all() : stmt.all(projectDir)
     ) as Array<Record<string, unknown>>;
@@ -211,19 +236,19 @@ export class MemoryMemoStore {
     const legacyPaths: string[] = [];
     for (const sessionKey of sessionEntries) {
       const legacyPath = join(sessionsDir, sessionKey, 'memory', FILE_NAME);
-      let stream;
+      let stream: import('node:fs').ReadStream;
       try {
         stream = createReadStream(legacyPath, { encoding: 'utf8' });
       } catch {
-        continue;
+        // Sync error (invalid path) — skip this file.
       }
 
       // Swallow async ENOENT errors when the legacy file does not exist.
-      stream.on('error', () => {});
+      stream!.on('error', () => {});
 
       let line = '';
       try {
-        for await (const chunk of stream) {
+        for await (const chunk of stream!) {
           line += chunk;
           let newlineIndex = line.indexOf('\n');
           while (newlineIndex !== -1) {
@@ -283,6 +308,12 @@ export class MemoryMemoStore {
         };
       }
 
+      // Validate v2 fields that have CHECK constraints
+      const src = entry['extractionSource'];
+      if (typeof src === 'string' && !['compaction', 'exit', 'manual'].includes(src)) {
+        return undefined;
+      }
+
       return entry as unknown as MemoryMemo;
     } catch {
       // Skip corrupted lines
@@ -331,6 +362,9 @@ export class MemoryMemoStore {
     this.migrateSchema();
   }
 
+  // Migrate schema: uses PRAGMA table_info column-existence checks rather
+  // than PRAGMA user_version. Future migrations should adopt user_version
+  // with a numbered migration runner for ordered, idempotent upgrades.
   private migrateSchema(): void {
     if (this.db === undefined) return;
     const info = this.db.prepare('PRAGMA table_info(memos)').all() as Array<{
@@ -361,21 +395,21 @@ export class MemoryMemoStore {
     }
 
     const memos: MemoryMemo[] = [];
-    let stream;
+    let stream: import('node:fs').ReadStream;
     try {
       stream = createReadStream(this.jsonlPath, { encoding: 'utf8' });
     } catch {
-      // No legacy file — nothing to migrate.
+      // Sync error (invalid path) — nothing to migrate.
       await writeFile(markerPath, '', 'utf8').catch(() => {});
       return;
     }
 
     // Swallow async ENOENT errors when the legacy file does not exist.
-    stream.on('error', () => {});
+    stream!.on('error', () => {});
 
     let line = '';
     try {
-      for await (const chunk of stream) {
+      for await (const chunk of stream!) {
         line += chunk;
         let newlineIndex = line.indexOf('\n');
         while (newlineIndex !== -1) {
@@ -403,7 +437,7 @@ export class MemoryMemoStore {
   private insertMany(memos: readonly MemoryMemo[]): void {
     if (this.db === undefined || memos.length === 0) return;
     const insert = this.db.prepare(
-      `INSERT INTO memos (
+      `INSERT OR IGNORE INTO memos (
         id, source_session_id, source_session_title, user_need, approach,
         outcome, what_failed, what_worked, extraction_source, recorded_at, project_dir, tags
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -440,9 +474,9 @@ export class MemoryMemoStore {
         );
       }
       this.db.exec('COMMIT');
-    } catch (err) {
+    } catch (error) {
       this.db.exec('ROLLBACK');
-      throw new Error(`Failed to migrate memos to SQLite: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Failed to migrate memos to SQLite: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
 
@@ -621,6 +655,10 @@ export class MemoryMemoStore {
    * Search memos by vector similarity. Returns memos sorted by cosine
    * similarity (highest first). Falls back to empty if no embeddings exist.
    *
+   * NOTE: candidates are ordered by created_at DESC, so only the newest
+   * N embeddings are considered. Older but highly relevant memos may be
+   * omitted when the store has more than candidateLimit embeddings.
+   * This is a known limitation — see M-M5 in project review notes.
    * Performance notes:
    * - candidateLimit bounds the SQL query so we never load every embedding.
    * - recencyCutoffDays lets callers ignore very old memos.
@@ -800,12 +838,12 @@ export class MemoryMemoStore {
           );
         }
         this.db.exec('COMMIT');
-      } catch (err) {
+      } catch (error) {
         this.db.exec('ROLLBACK');
-        this.markEmbeddingFailure(err instanceof Error ? err : new Error(String(err)));
+        this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
       }
-    } catch (err) {
-      this.markEmbeddingFailure(err instanceof Error ? err : new Error(String(err)));
+    } catch (error) {
+      this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
     } finally {
       this.embeddingFlushing = false;
     }
@@ -938,8 +976,9 @@ function memoMatchesSearch(memo: MemoryMemo, search: string): boolean {
     ...(memo.tags ?? []),
   ]
     .join(' ')
-    .toLowerCase();
-  return haystack.includes(search);
+    .toLowerCase()
+    .replaceAll(/\s+/g, '');
+  return haystack.includes(search.replaceAll(/\s+/g, ''));
 }
 
 /**

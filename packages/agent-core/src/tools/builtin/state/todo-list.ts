@@ -57,6 +57,7 @@ export interface TodoListInput {
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
   todos: z
     .array(TodoItemSchema)
+    .max(200)
     .optional()
     .describe(
       'The updated todo list. Omit to read the current todo list without making changes. Pass an empty array to clear the list.',

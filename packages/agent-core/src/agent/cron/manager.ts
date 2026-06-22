@@ -151,7 +151,7 @@ export class CronManager {
       source: () => this.store.list(),
       isIdle: () => !agent.turn.hasActiveTurn,
       isKilled: () => process.env['SCREAM_DISABLE_CRON'] === '1',
-      onFire: (task, ctx) => this.handleFire(task, ctx),
+      onFire: (task, ctx) =>{  this.handleFire(task, ctx); },
       removeOneShot: (id) => {
         this.removeTasks([id]);
       },
@@ -269,8 +269,8 @@ export class CronManager {
     const next = prev
       .catch(() => {})
       .then(() => work())
-      .catch((err: unknown) => {
-        this.agent.log?.warn?.('cron persist failed', err);
+      .catch((error: unknown) => {
+        this.agent.log?.warn?.('cron persist failed', error);
       })
       .finally(() => {
         if (this.persistQueues.get(id) === next) {

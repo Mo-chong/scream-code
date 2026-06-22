@@ -29,7 +29,7 @@ describe('TodoPanelComponent', () => {
     const joined = lines.join('\n');
     expect(joined).toMatch(/待办/);
     expect(joined).toMatch(/✓ Investigate parser/);
-    expect(joined).toMatch(/● Add tests/);
+    expect(joined).toMatch(/■ Add tests/);
     expect(joined).toMatch(/○ Open PR/);
   });
 
@@ -38,7 +38,7 @@ describe('TodoPanelComponent', () => {
     panel.setTodos([{ title: 'old', status: 'pending' }]);
     panel.setTodos([{ title: 'new', status: 'in_progress' }]);
     const out = strip(panel.render(80).join('\n'));
-    expect(out).toMatch(/● new/);
+    expect(out).toMatch(/■ new/);
     expect(out).not.toMatch(/old/);
   });
 

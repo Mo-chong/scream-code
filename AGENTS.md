@@ -432,7 +432,7 @@ The agent has a memory system provided by the `@scream-cli/memory` package. Posi
   - Session exit: `extractMemoriesOnExit()` in `packages/agent-core/src/agent/index.ts` — takes last 30 messages × 300 chars, calls LLM.
   - Idle timer: after 10 minutes of no user input, `ScreamTUI.performIdleMemoryExtraction()` calls `session.extractMemoriesOnExit()`. Cooldown: 10 minutes. Compaction extraction updates the cooldown timestamp to avoid duplicates.
   - Manual write: `MemoryWrite` tool in `packages/agent-core/src/tools/builtin/memory/memory-write.ts` — the model can save a structured memo immediately when the user explicitly asks, e.g. "save this to memory", "save to memo", or "summarize and save". These entries are tagged with `extractionSource: 'manual'`.
-- **Scoring**: keyword Jaccard similarity (45%) + recency decay 90 days (25%) + usage boost (15%) + project affinity (10%) + tag overlap with the current project's tag cloud (5%). Purely rule-based, zero LLM cost.
+- **Scoring**: keyword Jaccard similarity (45%) + recency decay 90 days (25%) + usage boost (15%) + project affinity (10%) + tag overlap with the current project's tag cloud (5%). Rule-based with optional local embedding similarity via `fastembed` (ONNX runtime, `packages/memory/src/embeddings.ts`).
 
 #### Active Lookup
 
@@ -557,6 +557,17 @@ Once a verification command passes, the model must deliver rather than run addit
 The gate fires up to five times per turn for the hard checks; the brief-final-response check is allowed one remedial step. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
 
 Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/src/agent/working-set.ts`, `packages/agent-core/src/profile/default/system.md`.
+
+### Cron / Scheduled Tasks
+
+The agent has an experimental cron subsystem for scheduling recurring tasks (periodic memory extraction, system health checks, etc.).
+
+- **Registry**: `packages/agent-core/src/tools/cron/` — cron expression parser (`cron-expr.ts`), scheduler (`scheduler.ts`), persistence (`persist.ts`, `session-store.ts`), and tool definitions (`cron-create.ts`, `cron-list.ts`, `cron-delete.ts`).
+- **Manager**: `packages/agent-core/src/agent/cron/manager.ts` — polls for due jobs, fires them via the agent turn loop, persists results.
+- **Jitter**: `packages/agent-core/src/tools/cron/jitter.ts` — adds random jitter to cron schedules to avoid thundering herds.
+- **Feature flag**: cron is experimental and not enabled by default. Toggle via scream config.
+
+Key files: `packages/agent-core/src/tools/cron/`, `packages/agent-core/src/agent/cron/`.
 
 ### WelcomeComponent Breathing
 

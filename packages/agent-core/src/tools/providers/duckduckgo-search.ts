@@ -221,15 +221,15 @@ const LITE_SNIPPET_RE =
 
 /** Strip HTML tags and decode common HTML entities. */
 function stripHtmlAndDecode(text: string): string {
-  const stripped = text.replace(/<[^>]*>/g, '');
+  const stripped = text.replaceAll(/<[^>]*>/g, '');
   return stripped
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#x27;', "'")
+    .replaceAll('&#39;', "'")
+    .replaceAll('&nbsp;', ' ')
     .trim();
 }
 

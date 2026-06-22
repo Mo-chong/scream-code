@@ -20,6 +20,7 @@ import { getDataDir } from '#/utils/paths';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { SELECT_POINTER } from '../constant/symbols';
 import type { SlashCommandHost } from './dispatch';
+import { printableChar } from '../utils/printable-key';
 
 // ─── 内置推荐列表 ──────────────────────────────────────────────────────
 
@@ -145,7 +146,7 @@ async function loadServers(
 
 /** Replace newlines so error messages don't break single-line terminal rendering. */
 function sanitizeDesc(s: string): string {
-  return s.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  return s.replaceAll(/\r?\n/g, ' ').replaceAll(/\s+/g, ' ').trim();
 }
 
 function buildRows(
@@ -451,7 +452,8 @@ class McpPickerComponent extends Container implements Focusable {
       this.selectedIndex = this.nextSelectable(this.selectedIndex);
       return;
     }
-    if (data === 'd' || data === 'D') {
+    const key = printableChar(data);
+    if (key === 'd' || key === 'D') {
       const row = this.rows[this.selectedIndex];
       if (row && row.kind === 'installed' && row.status && row.status !== '__section' && row.status !== '__empty') {
         this.onDelete(row);

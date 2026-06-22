@@ -85,7 +85,7 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
     const accesses = executions
       .filter((e): e is { path: string; exec: RunnableToolExecution } => 'exec' in e)
       .flatMap((e) => e.exec.accesses ?? ToolAccesses.none());
-    const sortedPaths = [...paths].sort();
+    const sortedPaths = [...paths].toSorted();
     const approvalRule = literalRulePattern(this.name, sortedPaths.join('\n'));
     const deniedCount = executions.filter((e) => 'error' in e).length;
 

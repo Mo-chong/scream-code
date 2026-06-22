@@ -25,6 +25,7 @@ import type { StreamingUIController } from './streaming-ui';
 import type { TranscriptEntry, LoginProgressSpinnerHandle } from '../types';
 import type { TUIState } from '../tui-state';
 import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attachment-store';
+import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
@@ -308,7 +309,7 @@ export class TranscriptController {
   }
 
   showError(message: string): void {
-    this.showStatus(`错误：${message}`, this.host.state.theme.colors.error);
+    this.showStatus(`错误：${replaceTabs(message)}`, this.host.state.theme.colors.error);
   }
 
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {
@@ -336,9 +337,6 @@ export class TranscriptController {
 
   toggleToolOutputExpansion(): void {
     const { state } = this.host;
-    // Avoid the full-screen clear that pi-tui 0.78.1 issues when content shrinks
-    // after collapsing a tool card.
-    state.ui.setClearOnShrink(false);
     state.toolOutputExpanded = !state.toolOutputExpanded;
     const walk = (children: readonly Component[]): void => {
       for (const child of children) {
@@ -356,9 +354,6 @@ export class TranscriptController {
 
   togglePlanExpansion(): boolean {
     const { state } = this.host;
-    // Avoid the full-screen clear that pi-tui 0.78.1 issues when content shrinks
-    // after collapsing a plan card.
-    state.ui.setClearOnShrink(false);
     const next = !state.planExpanded;
     let toggled = false;
     for (const child of state.transcriptContainer.children) {

@@ -79,6 +79,9 @@ export class WorkingSet {
   private digestOutput(output: string): string {
     let hash = 0;
     const text = output.slice(0, 2000);
+    // NOTE: increments by 1, not 2, for surrogate pairs. Non-BMP characters
+    // (emoji) are processed as two code units with different hash contributions.
+    // Only affects change detection for verification output with emoji.
     for (let i = 0; i < text.length; i++) {
       const char = text.codePointAt(i) ?? 0;
       hash = Math.trunc((hash << 5) - hash + char);

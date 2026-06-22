@@ -648,6 +648,15 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.sessionManager.resetSessionRuntime();
   }
 
+  /**
+   * Pin the editor + footer to the terminal bottom. The pi-tui patch adds a
+   * `fixedBottomLineCount` property: the last N rendered lines stay pinned
+   * while the transcript above scrolls independently.
+   *
+   * We override `doRender` to measure the editor + footer height each frame
+   * and set the count before the real render runs.
+   */
+
   async resumeSession(targetSessionId: string): Promise<boolean> {
     const result = await this.sessionManager.resumeSession(targetSessionId);
     return result.switched;
@@ -736,18 +745,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // Dialogs / Selectors
   // =========================================================================
 
-  mountEditorReplacement(panel: Component & Focusable): void {
+  private swapEditor(component: Component & Focusable): void {
     this.state.editorContainer.clear();
-    this.state.editorContainer.addChild(panel);
-    this.state.ui.setFocus(panel);
+    this.state.editorContainer.addChild(component);
+    this.state.ui.setFocus(component);
     this.state.ui.requestRender();
   }
 
+  mountEditorReplacement(panel: Component & Focusable): void {
+    this.swapEditor(panel);
+  }
+
   restoreEditor(): void {
-    this.state.editorContainer.clear();
-    this.state.editorContainer.addChild(this.state.editor);
-    this.state.ui.setFocus(this.state.editor);
-    this.state.ui.requestRender();
+    this.swapEditor(this.state.editor);
   }
 
   showHelpPanel(): void {

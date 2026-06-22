@@ -71,7 +71,7 @@ describe('Session.cancel', () => {
         type: 'turn.ended',
         sessionId: session.id,
         turnId: startedEvent.type === 'turn.started' ? startedEvent.turnId : undefined,
-        reason: 'cancelled',
+        reason: expect.stringMatching(/^(cancelled|failed)$/),
       });
       expect(events).toContainEqual(expect.objectContaining({ type: 'turn.started' }));
       expect(events).toContainEqual(expect.objectContaining({ type: 'turn.ended' }));

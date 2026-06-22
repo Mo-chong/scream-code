@@ -206,7 +206,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   if (thinking === undefined) return;
 
   // Build a provider ID from the model name
-  const providerId = `custom-${modelId.replace(/[^A-Za-z0-9._-]/g, '-')}`;
+  const providerId = `custom-${modelId.replaceAll(/[^A-Za-z0-9._-]/g, '-')}`;
 
   // Build a minimal catalog model entry
   const catalogModel: CatalogModel = {

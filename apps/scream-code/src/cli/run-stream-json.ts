@@ -527,7 +527,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           try {
             session = await harness.resumeSession({ id: sessionKey });
             log.info("stream-json: resumed session", { sessionId: session.id });
-          } catch (err) {
+          } catch (error) {
             // The session is in an inconsistent state: either the directory
             // exists without an index entry, or the index has a stale entry
             // pointing to a missing directory.  We need to clean up BOTH
@@ -535,7 +535,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             // the directory — either will block creation).
             log.warn("stream-json: resume failed, repairing session", {
               sessionKey,
-              error: String(err),
+              error: String(error),
             });
 
             // Route 1: deleteSession — works when index entry and directory
@@ -653,7 +653,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         }
       };
 
-      unsubscribe = session!.onEvent((event) => {
+      unsubscribe = session.onEvent((event) => {
         if (event.type === "error") {
           if (event.agentId !== "main") return;
           finish(new Error(`${event.code}: ${event.message}`));
@@ -733,7 +733,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         // All other event types are silently ignored.
       });
 
-      session!.prompt(userText).catch((error: unknown) => {
+      session.prompt(userText).catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
         // Orphaned tool_calls in session history — recreate the session
         // so the next message starts fresh.

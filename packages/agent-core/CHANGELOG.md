@@ -1,5 +1,11 @@
 # @scream-cli/agent-core
 
+## 0.6.6
+
+### Patch Changes
+
+- Add subagent.started lifecycle event for TUI visibility of "spawning → running" transition. Fix step_uuid crash from out-of-order streaming events. Palette constant renaming, fixed-bottom caching, Glob formatting, and misc TUI cleanups.
+
 ## 0.6.5
 
 ### Patch Changes

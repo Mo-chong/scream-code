@@ -13,18 +13,17 @@
  */
 
 const dark = {
-  blue400: '#4EC87E',
-  blue500: '#72A4E9',
-  cyan400: '#5BC0BE',
+  green: '#4EC87E',
+  blue: '#72A4E9',
+  cyan: '#5BC0BE',
   gray50: '#F5F5F5',
   gray100: '#E0E0E0',
   gray500: '#888888',
   gray600: '#6B6B6B',
   gray700: '#5A5A5A',
-  green400: '#4EC87E',
-  green300: '#7AD99B',
-  red400: '#E85454',
-  red300: '#F08585',
+  greenLight: '#7AD99B',
+  red: '#E85454',
+  redLight: '#F08585',
   amber400: '#E8A838',
   gold400: '#FBD700',
   tangerine400: '#FF5401',
@@ -32,15 +31,14 @@ const dark = {
 } as const;
 
 const light = {
-  blue500: '#2563EB',
-  blue600: '#0E7A38',
-  cyan700: '#00838F',
+  green: '#0E7A38',
+  blue: '#2563EB',
+  cyan: '#00838F',
   gray900: '#1A1A1A',
   gray700: '#454545',
   gray600: '#5F5F5F',
   gray500: '#737373',
-  green700: '#0E7A38',
-  red700: '#B91C1C',
+  red: '#B91C1C',
   amber800: '#92660A',
   gold700: '#8C7600',
   tangerine700: '#B33A00',
@@ -92,7 +90,7 @@ export interface ColorPalette {
 }
 
 export const darkColors: ColorPalette = {
-  primary: dark.blue400,
+  primary: dark.green,
   accent: dark.tangerine400,
   planMode: '#00FFFF',
 
@@ -112,14 +110,14 @@ export const darkColors: ColorPalette = {
   borderFocus: dark.gold400,
 
   // State
-  success: dark.green400,
+  success: dark.green,
   warning: dark.amber400,
-  error: dark.red400,
+  error: dark.red,
 
-  diffAdded: dark.green400,
-  diffRemoved: dark.red400,
-  diffAddedStrong: dark.green300,
-  diffRemovedStrong: dark.red300,
+  diffAdded: dark.green,
+  diffRemoved: dark.red,
+  diffAddedStrong: dark.greenLight,
+  diffRemovedStrong: dark.redLight,
   diffGutter: dark.gray600,
   diffMeta: dark.gray500,
 
@@ -132,9 +130,9 @@ export const darkColors: ColorPalette = {
 };
 
 export const lightColors: ColorPalette = {
-  primary: light.blue600,
+  primary: light.green,
   accent: light.tangerine700,
-  planMode: '#00FFFF',
+  planMode: '#00838F',
 
   text: light.gray900,
   textStrong: light.gray900,
@@ -152,13 +150,13 @@ export const lightColors: ColorPalette = {
   borderFocus: light.gold700,
 
   // State
-  success: light.green700,
+  success: light.green,
   warning: light.amber800,
-  error: light.red700,
-  diffAdded: light.green700,
-  diffRemoved: light.red700,
-  diffAddedStrong: light.green700,
-  diffRemovedStrong: light.red700,
+  error: light.red,
+  diffAdded: light.green,
+  diffRemoved: light.red,
+  diffAddedStrong: light.green,
+  diffRemovedStrong: light.red,
   diffGutter: light.gray500,
   diffMeta: light.gray600,
 

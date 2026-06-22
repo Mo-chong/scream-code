@@ -43,7 +43,7 @@ function findParentMcpJsonPaths(cwd: string): string[] {
     dir = dirname(dir);
   }
   // Reverse so root is first, shallowest parent is last.
-  return paths.reverse();
+  return paths.toReversed();
 }
 
 export interface LoadMcpServersInput {

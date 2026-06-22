@@ -14,7 +14,7 @@ function strip(text: string): string {
 
 describe('AssistantMessageComponent', () => {
   it('defines the shared status bullet as a stable non-emoji glyph', () => {
-    expect(STATUS_BULLET).toBe('● ');
+    expect(STATUS_BULLET).toBe('■ ');
     expect(visibleWidth(STATUS_BULLET)).toBe(2);
   });
 

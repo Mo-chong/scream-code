@@ -1661,7 +1661,7 @@ describe('AnthropicChatProvider', () => {
         {
           type: 'function',
           id: 'toolu_abc',
-          name: 'add', arguments: '',
+          name: 'add', arguments: null,
           _streamIndex: 1,
         },
         { type: 'tool_call_part', argumentsPart: '{"a":', index: 1 },
@@ -1735,13 +1735,13 @@ describe('AnthropicChatProvider', () => {
         {
           type: 'function',
           id: 'toolu_a',
-          name: 'tool_a', arguments: '',
+          name: 'tool_a', arguments: null,
           _streamIndex: 0,
         },
         {
           type: 'function',
           id: 'toolu_b',
-          name: 'tool_b', arguments: '',
+          name: 'tool_b', arguments: null,
           _streamIndex: 1,
         },
         { type: 'tool_call_part', argumentsPart: '{"x":', index: 0 },

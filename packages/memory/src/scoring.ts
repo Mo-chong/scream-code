@@ -88,6 +88,8 @@ export function computeRelevanceScore(
   const factors: RelevanceFactors = {
     keywordOverlap: computeKeywordSimilarity(memo, query),
     recency: computeRecency(memo.recordedAt),
+    // NOTE: usageCount is always 0 — per-memo usage counting is not yet
+    // implemented in the store. When added, increment on each search hit.
     usageBoost: Math.min(0.3, usageCount * 0.1),
     projectBoost: computeProjectBoost(memo.projectDir, currentProjectDir),
     tagOverlap: computeTagOverlap(memo.tags, projectTagCloud),
@@ -235,7 +237,7 @@ export function extractKeywords(text: string): string[] {
   return [...new Set(tokens)]; // deduplicate
 }
 
-function computeKeywordSimilarity(
+export function computeKeywordSimilarity(
   memo: MemoryMemoSummary,
   query: string,
 ): number {

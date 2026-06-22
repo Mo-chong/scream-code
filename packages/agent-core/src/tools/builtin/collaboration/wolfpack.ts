@@ -3,7 +3,7 @@
  *
  * Spawns multiple subagents in parallel using a template + items pattern.
  * Each item gets its own subagent; results are batched together.
- * V1 uses Promise.allSettled — no concurrency control or rate-limit handling.
+ * Concurrency capped at WOLFPACK_CONCURRENCY to avoid provider rate-limit exhaustion.
  */
 
 import { z } from 'zod';
@@ -88,26 +88,36 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
 
     const profileName = args.subagent_type ?? 'coder';
     const template = args.prompt_template;
+    const WOLFPACK_CONCURRENCY = 8;
 
-    // Spawn all subagents in parallel
     const handlePromises = args.items.map(
-      async (item): Promise<{ item: string; handle: SubagentHandle }> => {
+      async (item): Promise<{ item: string; handle: SubagentHandle } | { item: string; error: unknown }> => {
         ctx.signal.throwIfAborted();
-        const prompt = template.replace(/\{\{item\}\}/g, item);
-        const handle = await this.subagentHost.spawn(profileName, {
-          parentToolCallId: ctx.toolCallId,
-          prompt,
-          description: `${args.description}: ${item}`,
-          runInBackground: false,
-          signal: ctx.signal,
-        });
-        return { item, handle };
+        try {
+          const prompt = template.replaceAll('{{item}}', () => item);
+          const handle = await this.subagentHost.spawn(profileName, {
+            parentToolCallId: ctx.toolCallId,
+            prompt,
+            description: `${args.description}: ${item}`,
+            runInBackground: false,
+            signal: ctx.signal,
+          });
+          return { item, handle };
+        } catch (error) {
+          return { item, error };
+        }
       },
     );
 
-    const handleResults = await Promise.allSettled(handlePromises);
+    // Execute spawns in batches to avoid provider rate-limit exhaustion.
+    const handleResults: Array<PromiseSettledResult<{ item: string; handle: SubagentHandle } | { item: string; error: unknown }>> = [];
+    for (let i = 0; i < handlePromises.length; i += WOLFPACK_CONCURRENCY) {
+      ctx.signal.throwIfAborted();
+      const batch = handlePromises.slice(i, i + WOLFPACK_CONCURRENCY);
+      const batchResults = await Promise.allSettled(batch);
+      handleResults.push(...batchResults);
+    }
 
-    // Wait for all completions
     const completionPromises = handleResults.map(
       async (settled): Promise<{ item: string; result: string; success: boolean; agentId?: string }> => {
         if (settled.status === 'rejected') {
@@ -115,7 +125,14 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
           return { item: 'unknown', result: `Spawn failed: ${msg}`, success: false };
         }
 
-        const { item, handle } = settled.value;
+        const value = settled.value;
+        if ('error' in value) {
+          const msg = value.error instanceof Error ? value.error.message : String(value.error);
+          return { item: value.item, result: `Spawn failed: ${msg}`, success: false };
+        }
+
+        const { item, handle } = value;
+
         try {
           const completion = await handle.completion;
           return {

@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs';
+
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import {
@@ -8,6 +10,7 @@ import {
   readdir,
   readFile,
   stat,
+  realpath,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -15,7 +18,7 @@ import { isAbsolute, join, normalize } from 'pathe';
 import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
-import { JianFileExistsError, JianPathOutsideRootError } from './errors';
+import { JianFileExistsError, JianPathOutsideRootError, JianExecError } from './errors';
 import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
 import type { Jian } from './jian';
 import type { JianProcess } from './process';
@@ -118,6 +121,10 @@ function cycleKey(s: { dev: number; ino: number }): string | null {
   if (s.ino === 0) return null;
   return `${String(s.dev)}:${String(s.ino)}`;
 }
+// NOTE: LocalProcess has no auto-kill on dispose. On POSIX with detached:true,
+// a discarded reference leaves the child orphaned (reparented to init).
+// Callers must explicitly kill() or wait() before dropping the reference.
+
 
 class LocalProcess implements JianProcess {
   readonly stdin: Writable;
@@ -177,16 +184,19 @@ class LocalProcess implements JianProcess {
       const taskkillArgs = useForce
         ? ['/T', '/F', '/PID', String(this.pid)]
         : ['/T', '/PID', String(this.pid)];
-      return new Promise<void>((resolve) => {
+      return new Promise<void>((resolve, reject) => {
         const killer = spawn('taskkill', taskkillArgs, {
           stdio: 'ignore',
           windowsHide: true,
         });
-        const done = (): void => {
-          resolve();
-        };
-        killer.once('error', done);
-        killer.once('close', done);
+        killer.once('error', (err) => {
+          reject(new Error(`taskkill failed to start: ${err.message}`));
+        });
+        killer.once('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`taskkill exited with code ${code ?? 'null'}`));
+        });
+        killer.unref();
       });
     }
 
@@ -285,6 +295,28 @@ export class LocalJian implements Jian {
     );
   }
 
+  /** Resolve path for sandboxed operations — lexical check + realpath. */
+  private async _resolveSandboxedPath(path: string): Promise<string> {
+    const lexical = isAbsolute(path) ? normalize(path) : join(this._cwd, path);
+    if (!isWithinDirectory(lexical, this._rootDir!)) {
+      throw new JianPathOutsideRootError(
+        `Path outside allowed root directory: ${lexical}`,
+        lexical,
+        this._rootDir!,
+      );
+    }
+    const realPath = await realpath(lexical);
+    const realRoot = await realpath(this._rootDir!);
+    if (!isWithinDirectory(realPath, realRoot)) {
+      throw new JianPathOutsideRootError(
+        `Path outside allowed root directory (via symlink): ${lexical}`,
+        lexical,
+        this._rootDir!,
+      );
+    }
+    return realPath;
+  }
+
   pathClass(): 'posix' | 'win32' {
     return isWindows ? 'win32' : 'posix';
   }
@@ -311,7 +343,9 @@ export class LocalJian implements Jian {
    * call `process.chdir(x)` directly.
    */
   async chdir(path: string): Promise<void> {
-    const resolved = this._resolvePath(path);
+    const resolved = this._rootDir !== undefined
+      ? await this._resolveSandboxedPath(path)
+      : this._resolvePath(path);
     const s = await stat(resolved);
     if (!s.isDirectory()) {
       throw new Error(`Not a directory: ${resolved}`);
@@ -320,8 +354,10 @@ export class LocalJian implements Jian {
   }
 
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
-    const resolved = this._resolvePath(path);
     const followSymlinks = options?.followSymlinks ?? true;
+    const resolved = this._rootDir !== undefined && followSymlinks
+      ? await this._resolveSandboxedPath(path)
+      : this._resolvePath(path);
     const s = followSymlinks ? await stat(resolved) : await lstat(resolved);
     return {
       stMode: s.mode,
@@ -354,6 +390,8 @@ export class LocalJian implements Jian {
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const caseSensitive = options?.caseSensitive ?? true;
+    // NOTE: patterns are split on '/' only. Windows users passing `**\\*.txt`
+    // get a single segment — backslashes are treated literally. Use POSIX-style.
     const patternParts = pattern.split('/');
     // Seed `visited` with basePath's own inode so that a symlink inside
     // basePath that points back at basePath is caught on its first
@@ -437,6 +475,7 @@ export class LocalJian implements Jian {
       for (const entry of entries) {
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
+        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir)) continue;
         let entryStat;
         try {
           entryStat = await stat(fullPath);
@@ -475,7 +514,7 @@ export class LocalJian implements Jian {
 
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
-
+        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir)) continue;
         if (remainingParts.length === 0) {
           yield fullPath;
         } else {
@@ -532,18 +571,21 @@ export class LocalJian implements Jian {
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const encoding = options?.encoding ?? 'utf-8';
-    const errors = options?.errors ?? 'strict';
-    const buf = await readFile(resolved);
-    const content = decodeTextWithErrors(buf, encoding, errors);
-    const lines = content.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line === undefined) continue;
-      if (i < lines.length - 1) {
-        yield line + '\n';
-      } else if (line !== '') {
-        yield line;
+    const stream = createReadStream(resolved, { encoding, highWaterMark: 64 * 1024 });
+    let remainder = '';
+    try {
+      for await (const chunk of stream) {
+        const lines = (remainder + (chunk as string)).split('\n');
+        remainder = lines.pop() ?? '';
+        for (const line of lines) {
+          yield line + '\n';
+        }
       }
+    } finally {
+      stream.destroy();
+    }
+    if (remainder !== '') {
+      yield remainder;
     }
   }
 
@@ -579,6 +621,9 @@ export class LocalJian implements Jian {
       // target already exists — it does NOT raise EEXIST. To honor the
       // `existOk: false` semantics, we must probe for existence ourselves
       // before delegating to the recursive mkdir.
+      // NOTE: there is a TOCTOU between the existence probe and the recursive
+      // mkdir. A concurrent creator that makes the directory in between causes
+      // mkdir to succeed silently, violating existOk:false.
       if (!existOk) {
         try {
           const s = await stat(resolved);
@@ -642,7 +687,18 @@ export class LocalJian implements Jian {
       detached: !isWindows,
       env: buildSafeEnv(env),
     });
-    await waitForSpawn(child);
+    try {
+      await waitForSpawn(child);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        throw new JianExecError(
+          `Failed to spawn ${command}: ${error.message}`,
+          command,
+          (error as NodeJS.ErrnoException).code,
+        );
+      }
+      throw error;
+    }
     return new LocalProcess(child);
   }
 }

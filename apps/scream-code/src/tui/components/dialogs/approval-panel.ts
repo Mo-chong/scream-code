@@ -26,6 +26,7 @@ import type {
   PendingApproval,
 } from '#/tui/reverse-rpc/types';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { replaceTabs } from '#/tui/utils/sanitize';
 
 export interface ApprovalPanelResponse {
   readonly response: 'approved' | 'approved_for_session' | 'rejected' | 'cancelled';
@@ -66,14 +67,21 @@ function renderDisplayBlock(
 ): string[] {
   switch (block.type) {
     case 'diff':
-      return renderDiffLinesClustered(block.old_text, block.new_text, block.path, colors, {
-        contextLines: 3,
-        expandKeyHint: 'ctrl+e to preview',
-        maxLines: DIFF_SUMMARY_MAX_LINES,
-      });
+      return renderDiffLinesClustered(
+        replaceTabs(block.old_text),
+        replaceTabs(block.new_text),
+        block.path,
+        colors,
+        {
+          contextLines: 3,
+          expandKeyHint: 'ctrl+e to preview',
+          maxLines: DIFF_SUMMARY_MAX_LINES,
+        },
+      );
     case 'file_content': {
       const lang = block.language ?? langFromPath(block.path);
-      const allLines = highlightLines(block.content, lang);
+      const content = replaceTabs(block.content);
+      const allLines = highlightLines(content, lang);
       const shown = allLines.slice(0, CONTENT_SUMMARY_MAX_LINES);
       const lines = [s.strong(block.path)];
       for (const [i, line] of shown.entries()) {
@@ -97,13 +105,14 @@ function renderDisplayBlock(
       if (block.danger !== undefined) {
         lines.push(s.errorBold(`Dangerous: ${block.danger}`));
       }
-      const cmdLines = block.command.length > 0 ? block.command.split('\n') : [''];
+      const command = replaceTabs(block.command);
+      const cmdLines = command.length > 0 ? command.split('\n') : [''];
       cmdLines.forEach((cmdLine, idx) => {
         const prefix = idx === 0 ? s.accent('$') : s.dim('·');
         lines.push(`${prefix} ${s.strong(cmdLine)}`);
       });
       if (block.description !== undefined && block.description.length > 0) {
-        lines.push(`  ${s.dim(block.description)}`);
+        lines.push(`  ${s.dim(replaceTabs(block.description))}`);
       }
       return lines;
     }
@@ -135,7 +144,7 @@ function renderDisplayBlock(
     }
     case 'brief':
       return block.text
-        ? block.text.split('\n').map((line) => (line.length > 0 ? s.strong(line) : ''))
+        ? replaceTabs(block.text).split('\n').map((line) => (line.length > 0 ? s.strong(line) : ''))
         : [];
     case 'background_task':
       return [
@@ -149,7 +158,7 @@ function renderDisplayBlock(
 }
 
 function normalizeApprovalText(text: string): string {
-  return text.replaceAll('\r\n', '\n').trim();
+  return replaceTabs(text.replaceAll('\r\n', '\n').trim());
 }
 
 function isDuplicateBriefBlock(block: DisplayBlock, description: string): boolean {

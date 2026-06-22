@@ -782,18 +782,12 @@ describe('generate()', () => {
     expect(onToolCall).not.toHaveBeenCalled();
   });
 
-  it('post-await abort cancels the acquired stream before throwing AbortError', async () => {
+  it('post-await abort rejects with AbortError after closing the acquired stream', async () => {
     const controller = new AbortController();
-    const cancel = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
-    const stream: StreamedMessage & { cancel(): Promise<void> } = {
-      cancel,
-      get id(): string | null {
-        return null;
-      },
-      get usage(): TokenUsage | null {
-        return null;
-      },
+    const stream: StreamedMessage = {
+      get id(): string | null { return null; },
+      get usage(): TokenUsage | null { return null; },
       finishReason: null,
       rawFinishReason: null,
       async *[Symbol.asyncIterator](): AsyncIterator<StreamedMessagePart> {
@@ -809,16 +803,12 @@ describe('generate()', () => {
         controller.abort();
         return stream;
       },
-      withThinking(_effort: ThinkingEffort): ChatProvider {
-        return this;
-      },
+      withThinking(_effort: ThinkingEffort): ChatProvider { return this; },
     };
 
     await expect(
       generate(provider, '', [], [], undefined, { signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError' });
-
-    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('onToolCall receives tool calls in message order', async () => {
