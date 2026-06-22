@@ -93,6 +93,11 @@ export class TurnFlow {
   private editWithoutLookupCount = 0;
   private static readonly BASH_FILE_OPS_RE = /\b(cat|head|tail|less|more)\s+/i;
 
+  // ── Toxicity early interception fields ───────────────────────
+  private deviationChainActive = false;
+  private deviationChainReason = '';
+  private deviationChainBypassUsed = false;
+
   constructor(protected readonly agent: Agent) {}
 
   // Returns the new turnId, or null if the turn was marked as resuming.
@@ -392,6 +397,9 @@ export class TurnFlow {
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
     this.editWithoutLookupCount = 0;
+    this.deviationChainActive = false;
+    this.deviationChainReason = '';
+    this.deviationChainBypassUsed = false;
     this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -618,12 +626,36 @@ export class TurnFlow {
                   { kind: 'injection', variant: 'step_after_verify_fail' },
                 );
               }
+              // ── 毒性早期检测：偏差链追踪 ─────────────────────────
+              if (this.editWithoutLookupCount >= 3 && !this.deviationChainActive) {
+                this.deviationChainActive = true;
+                this.deviationChainReason =
+                  '连续多次 Edit 未查 LSP.references：已触发偏差拦截。';
+              }
+              if (!this.deviationChainActive && this.verifyFailedThisStep) {
+                  this.deviationChainActive = true;
+                  this.deviationChainReason =
+                    '验证失败：已触发偏差拦截。';
+              }
               this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async ({ signal }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
+
+              // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
+              if (this.deviationChainActive && !this.deviationChainBypassUsed) {
+                this.deviationChainBypassUsed = true;
+                this.agent.context.appendSystemReminder(
+                  '偏差链检测到：' + this.deviationChainReason + '\n' +
+                  '- MUST verify all claims with tool calls.\n' +
+                  '- NEVER fabricate outputs. Each claim needs tool evidence.\n' +
+                  '- Fix the root cause. Do NOT work around.',
+                  { kind: 'injection', variant: 'deviation_chain_intercept' },
+                );
+                return { continue: true };
+              }
 
               // Convergence gate: prevent the turn from ending on an empty step,
               // a missing TodoList update for an active goal, a blocking (non-exploratory)

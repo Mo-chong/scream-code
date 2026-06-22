@@ -360,3 +360,39 @@ describe('注入器变体标签', () => {
     expect(variants).toContain('post_verify_pass');
   });
 });
+
+describe('毒性早期拦截 / deviation_chain_intercept', () => {
+
+  it('正常验证通过不触发偏差拦截', async () => {
+    const ctx = testAgent({ jian: createJian('ok', 0) });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    ctx.mockNextResponse(bashCall('pnpm test'));
+    ctx.mockNextResponse({ type: 'text', text: 'done' });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'run tests' }] });
+    await ctx.untilTurnEnd();
+
+    expect(
+      historyContainsText(ctx.agent.context.history, 'deviation_chain_intercept'),
+    ).toBe(false);
+  });
+
+  it('验证失败触发偏差拦截', async () => {
+    const ctx = testAgent({ jian: createJian('tests failed', 1) });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    ctx.mockNextResponse(bashCall('pnpm test --run'));
+    ctx.mockNextResponse({ type: 'text', text: 'I need to fix the test failure.' });
+    ctx.mockNextResponse({ type: 'text', text: 'done' });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'verify' }] });
+    await ctx.untilTurnEnd();
+
+    expect(
+      historyContainsText(ctx.agent.context.history, 'MUST verify all claims with tool calls.'),
+    ).toBe(true);
+  });
+});
