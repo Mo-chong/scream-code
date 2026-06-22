@@ -201,6 +201,7 @@ export class SessionEventHandler {
       case 'compaction.blocked': break;
       case 'compaction.cancelled': this.handleCompactionCancel(event, sendQueued); break;
       case 'subagent.spawned': this.handleSubagentSpawned(event); break;
+      case 'subagent.started': this.handleSubagentStarted(event as SubagentSpawnedEvent); break;
       case 'subagent.completed': this.handleSubagentCompleted(event); break;
       case 'subagent.failed': this.handleSubagentFailed(event); break;
       case 'background.task.started':
@@ -752,6 +753,17 @@ export class SessionEventHandler {
     tc ??= this.createStandaloneSubagentToolCall(event);
     if (tc === undefined) return;
     tc.onSubagentSpawned({
+      agentId: event.subagentId,
+      agentName: event.subagentName,
+      runInBackground: event.runInBackground,
+    });
+  }
+
+  private handleSubagentStarted(event: SubagentSpawnedEvent): void {
+    if (event.runInBackground) return;
+    const tc = this.host.streamingUI.getToolComponent(event.parentToolCallId);
+    if (tc === undefined) return;
+    tc.onSubagentStarted({
       agentId: event.subagentId,
       agentName: event.subagentName,
       runInBackground: event.runInBackground,

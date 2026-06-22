@@ -394,6 +394,22 @@ function extractKeyArgument(
     Agent: ['description', 'prompt'],
   };
 
+  // Glob: concatenate pattern, optional path, and include_dirs override
+  // into a single summary so the header shows `*.ts · src · no dirs`.
+  if (toolName === 'Glob') {
+    const pattern = args['pattern'];
+    if (typeof pattern !== 'string' || pattern.length === 0) return null;
+    let summary = pattern;
+    const path = args['path'];
+    if (typeof path === 'string' && path.length > 0) {
+      summary += ` · ${makeWorkspaceRelativePath(path, workspaceDir)}`;
+    }
+    if (args['include_dirs'] === false) {
+      summary += ' · no dirs';
+    }
+    return truncateArgValue('pattern', summary);
+  }
+
   const candidates = keyMap[toolName] ?? Object.keys(args);
   for (const key of candidates) {
     const val = args[key];
@@ -915,6 +931,27 @@ export class ToolCallComponent extends Container {
     this.subagentPhase = meta.runInBackground ? 'backgrounded' : 'spawning';
     this.subagentStartedAtMs = Date.now();
     this.subagentEndedAtMs = undefined;
+    this.syncSubagentElapsedTimer();
+    this.headerText.setText(this.buildHeader());
+    this.rebuildContent();
+    this.notifySnapshotChange();
+    this.ui?.requestRender();
+  }
+
+  /** Handles SDK `subagent.started` once the child turn begins. */
+  onSubagentStarted(meta: {
+    agentId: string;
+    agentName?: string | undefined;
+    runInBackground: boolean;
+  }): void {
+    this.subagentAgentId = meta.agentId;
+    this.subagentAgentName = meta.agentName;
+    if (
+      !meta.runInBackground &&
+      this.subagentPhase === 'spawning'
+    ) {
+      this.subagentPhase = 'running';
+    }
     this.syncSubagentElapsedTimer();
     this.headerText.setText(this.buildHeader());
     this.rebuildContent();
