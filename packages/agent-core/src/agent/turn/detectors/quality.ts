@@ -11,8 +11,9 @@
  * - **BatchNorm**: stepNorm 用于场景归一化（v1: 预留）
  */
 
-import type { StepSignature, ContextSnapshot } from '../signature';
+import type { StepSignature } from '../signature';
 import type { VariantRegistry, WeightLevel } from '../variant-registry';
+import { escalateLevel } from '../variant-registry';
 
 // ── 类型 ────────────────────────────────────────────────
 
@@ -43,18 +44,16 @@ export interface QDetectionResult {
  * 扫描注册表中所有变体：
  * 1. Identity path: behavior observed → 跳过
  * 2. 注入已过 N 步但未观察行为 → decay
- * 3. 权重 ≤ B 但步行为复杂 → escalate
+ * 3. 权重为 C/D 但步行为复杂 → escalate
  *
  * @param registry - VariantRegistry 实例
  * @param sig - 当前步签名
- * @param snap - 当前步上下文快照
  * @param currentStep - 当前步号
  * @returns QDetectionResult | null（无问题返回 null）
  */
 export function detectQualityIssue(
   registry: VariantRegistry,
   sig: StepSignature,
-  snap: ContextSnapshot,
   currentStep: number,
 ): QDetectionResult | null {
   const STALE_AGE = 3; // 注入后 3 步无行为即认为衰退
@@ -83,8 +82,8 @@ export function detectQualityIssue(
     }
 
     // ── Signal 2: 权重不足但行为复杂 ──
-    // escalate: 当前权重较低（≤B）+ 本步有 action tools + 长输出
-    //   → 注入约束力可能不够
+    // escalate: 当前权重为 C/D + 本步有 action tools + 长输出
+    //   → 注入约束力可能不够。B 级以上不触发此信号（B 级已有结构约束）
     if (
       isLowLevel(record.level) &&
       sig.hasActionTools &&
@@ -137,10 +136,8 @@ export function observeBehavior(
   }
 
   // prepare_search: Grep/LSP 后使用了知识工具 → 注入生效
-  if (
-    registry.get('prepare_search') &&
-    (sig.hasKnowledgeTools || sig.hasActionTools)
-  ) {
+  // hasActionTools 不算——action 是编辑/写入，不是搜到结果后正确操作
+  if (registry.get('prepare_search') && sig.hasKnowledgeTools) {
     registry.markBehaviorObserved('prepare_search');
   }
 
@@ -157,8 +154,9 @@ export function observeBehavior(
 
 // ── 内部辅助 ─────────────────────────────────────────────
 
+/** C/D 级属于低权重，B 级为结构化，A/S 级为高权重。 */
 function isLowLevel(level: WeightLevel): boolean {
-  return level === 'C' || level === 'D' || level === 'B';
+  return level === 'C' || level === 'D';
 }
 
 /** 从两个候选结果中选出更严重的一个。 */
@@ -172,16 +170,4 @@ function betterResult(
   // 同 confidence 时优先 escalate > decay
   if (b.signal === 'escalate' && a.signal !== 'escalate') return b;
   return a;
-}
-
-// ── 权重升级（与 variant-registry.ts 共享同一逻辑）──────────────
-
-function escalateLevel(level: WeightLevel): WeightLevel {
-  switch (level) {
-    case 'C': return 'B';
-    case 'D': return 'B';
-    case 'B': return 'A';
-    case 'A': return 'S';
-    case 'S': return 'S';
-  }
 }

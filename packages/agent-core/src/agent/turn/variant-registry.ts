@@ -122,6 +122,18 @@ export class VariantRegistry {
   }
 
   /**
+   * 更新变体的权重等级和升级时间（原地更新，不创建新记录）。
+   * 用于升级链：C→B→A→S 渐进升级时改写原始变体的权重。
+   */
+  updateLevel(variant: string, newLevel: WeightLevel, step: number): void {
+    const record = this.records.get(variant);
+    if (record) {
+      record.level = newLevel;
+      record.lastEscalatedAtStep = step;
+    }
+  }
+
+  /**
    * 回合开始时清空注册表。
    */
   reset(): void {

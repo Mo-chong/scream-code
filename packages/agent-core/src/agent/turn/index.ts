@@ -30,7 +30,7 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { VariantRegistry, detectWeightLevel, type WeightLevel } from './variant-registry';
+import { VariantRegistry } from './variant-registry';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 
@@ -107,7 +107,6 @@ export class TurnFlow {
 
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
-  private qualityEscalatedThisStep = false;
 
   constructor(protected readonly agent: Agent) {}
 
@@ -412,7 +411,6 @@ export class TurnFlow {
     this.deviationChainReason = '';
     this.deviationChainBypassUsed = false;
     this.variantRegistry.reset();
-    this.qualityEscalatedThisStep = false;
     this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -669,7 +667,7 @@ export class TurnFlow {
               // ── 质量升级检测 ────────────────────────────────────
               observeBehavior(this.variantRegistry, sig);
               const qualityIssue = detectQualityIssue(
-                this.variantRegistry, sig, snap, this.currentStep,
+                this.variantRegistry, sig, this.currentStep,
               );
               if (qualityIssue) {
                 escalateQuality(
@@ -677,14 +675,14 @@ export class TurnFlow {
                   this.stepInjectedVariants,
                   (text, meta) => {
                     this.agent.context.appendSystemReminder(text, meta);
-                    this.variantRegistry.record(
-                      meta.variant,
-                      detectWeightLevel(text),
-                      this.currentStep,
-                    );
                   },
                 );
-                this.qualityEscalatedThisStep = true;
+                // P1 关键修复: 升级后回写原始变体权重，实现 C→B→A→S 渐进升级
+                this.variantRegistry.updateLevel(
+                  qualityIssue.targetVariant,
+                  qualityIssue.suggestedLevel,
+                  this.currentStep,
+                );
               }
 
               this.resetInjectorStepState();

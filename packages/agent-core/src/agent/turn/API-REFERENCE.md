@@ -72,6 +72,7 @@ interface VariantRecord {
 | `markBehaviorObserved` | `(variant) => void` | 标记行为已观察 |
 | `markBehaviorNotObserved` | `(variant) => void` | 标记行为未观察 |
 | `markEscalated` | `(variant, step) => void` | 标记已升级 |
+| `updateLevel` | `(variant, newLevel, step) => void` | 更新变体权重（原地改，用于升级链） |
 | `stepsSinceLastEscalation` | `(variant, currentStep) => number` | 距上次升级的步数 |
 | `reset` | `() => void` | 回合开始清空 |
 | `size` | `getter: number` | 当前记录数 |
@@ -165,7 +166,7 @@ interface QDetectionResult {
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `detectQualityIssue` | `(registry, sig, snap, currentStep) => QDetectionResult \| null` | 检测注入衰退 |
+| `detectQualityIssue` | `(registry, sig, currentStep) => QDetectionResult \| null` | 检测注入衰退 |
 | `observeBehavior` | `(registry, sig) => void` | 推断注入变体是否生效 |
 
 ### Detection signals
@@ -173,7 +174,7 @@ interface QDetectionResult {
 | Signal | Condition | Confidence | 说明 |
 |--------|-----------|:----------:|------|
 | decay | 注入 ≥3 步 + behaviorObserved === null | 1 | 注入可能被忽略 |
-| escalate | 权重≤B + hasActionTools + outputLength>200 | 2 | 权重不足 |
+| escalate | 权重为 C/D + hasActionTools + outputLength>200 | 2 | 权重不足 |
 
 **Identity path:** `behaviorObserved === true` → 跳过（注入生效中）
 
@@ -183,7 +184,7 @@ interface QDetectionResult {
 |---------|----------------------|
 | `post_edit` | sig.hasKnowledgeTools |
 | `prepare_bash_file` | sig.toolCounts['Read'] > 0 |
-| `prepare_search` | sig.hasKnowledgeTools \|\| sig.hasActionTools |
+| `prepare_search` | sig.hasKnowledgeTools（仅知识工具，action 不算） |
 | `post_memory` | sig.hasKnowledgeTools |
 | `prepare_verify` | sig.hasVerificationTools |
 
@@ -239,7 +240,6 @@ interface QDetectionResult {
 | `stepToolCounts` | `Record<string, number>` | 本步各工具累计次数 |
 | `currentStep` | `number` | 当前步号 |
 | `variantRegistry` | `VariantRegistry` | 回合级注入元数据注册表（P2） |
-| `qualityEscalatedThisStep` | `boolean` | 本步是否有质量升级（P2） |
 | `agent.context.appendSystemReminder` | `(text, origin) => void` | 注入方法 |
 
 ### Integration pattern (afterStep)
@@ -254,7 +254,7 @@ injectAntiConfabulation(confaResult, this.stepInjectedVariants, ...);
 
 // 质量升级检测 (P2)
 observeBehavior(this.variantRegistry, sig);
-const qualityIssue = detectQualityIssue(this.variantRegistry, sig, snap, this.currentStep);
+const qualityIssue = detectQualityIssue(this.variantRegistry, sig, this.currentStep);
 if (qualityIssue) {
   escalateQuality(qualityIssue, this.stepInjectedVariants, ...);
 }
