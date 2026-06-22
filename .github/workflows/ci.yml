@@ -105,8 +105,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: |
-          echo "provenance=false" >> .npmrc
-          cd apps/scream-code && npm publish --access public
+      - run: cd apps/scream-code && npm publish --access public --provenance=false
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
