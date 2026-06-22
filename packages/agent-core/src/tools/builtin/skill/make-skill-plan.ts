@@ -50,14 +50,48 @@ Analyze the conversation transcript and the user's explicit guidance, then produ
 The package must contain:
 - name: kebab-case skill name. Prefer the user's nameHint if it is valid kebab-case; otherwise derive a concise name from the purpose.
 - description: one sentence describing when to use this skill.
-- content: the complete Markdown body of SKILL.md, including YAML frontmatter. The frontmatter must at least contain **name** and **description**. Keep it concrete, reusable, and focused on the user's stated purpose and focus.
+- content: the complete Markdown body of SKILL.md, following the MANDATORY structure below.
 - files: optional supporting files (e.g. scripts, data files) relative to the skill directory. Empty array if none.
+
+### MANDATORY SKILL.md structure
+
+Every generated skill MUST follow this exact section structure. Do not omit any section.
+
+\`\`\`markdown
+---
+name: <kebab-case-name>
+description: <one-sentence-purpose>
+---
+
+# <Title>
+
+## 适用场景
+
+<!-- When to use this skill. List trigger phrases, project types, or situations. -->
+
+## 核心指令
+
+<!-- Step-by-step instructions. Number each step. Mention specific tools by name
+(Read, Write, Bash, Agent, Glob, Grep, LSP, etc.). -->
+
+## 示例
+
+<!-- One concrete example grounded in the conversation. Show a realistic
+user request and how this skill would handle it. -->
+
+## 质量检查清单
+
+<!-- 3-5 checklist items the agent should verify before considering the task done. -->
+- [ ] ...
+- [ ] ...
+\`\`\`
 
 Rules:
 - The skill must be reusable across similar projects, not hard-coded to the current session.
 - Mention tools by name (Read, Bash, Agent, etc.) when giving step-by-step instructions.
 - Use placeholders like <entry-file> instead of project-specific paths when possible.
 - Do not invent file content the user did not provide.
+- Match the user's language (Chinese or English) throughout the SKILL.md content.
 - Output ONLY a single fenced JSON block. No extra prose.`;
 
 const MAX_HISTORY_MESSAGES = 40;

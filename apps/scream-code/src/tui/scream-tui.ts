@@ -283,6 +283,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
     // Mount only after init() succeeds; see mountFooter().
     this.lifecycleController.mountFooter();
+    this.installFixedBottomRegion();
     this.transcriptController.renderWelcome();
     setExperimentalFlags(await this.harness.getExperimentalFlags());
     this.inputController.setupAutocomplete();
@@ -646,6 +647,32 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   resetSessionRuntime(): void {
     this.sessionManager.resetSessionRuntime();
+  }
+
+  /**
+   * Pin the editor + footer to the terminal bottom. The pi-tui patch adds a
+   * `fixedBottomLineCount` property: the last N rendered lines stay pinned
+   * while the transcript above scrolls independently.
+   *
+   * We override `doRender` to measure the editor + footer height each frame
+   * and set the count before the real render runs.
+   */
+  private installFixedBottomRegion(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ui = this.state.ui as any;
+    const originalDoRender: () => void = ui.doRender.bind(ui);
+    const editorContainer = this.state.editorContainer;
+    const footerWrap = ui.children.at(-1) as import('@earendil-works/pi-tui').Component | undefined;
+
+    ui.doRender = () => {
+      const w: number = ui.terminal?.columns ?? 0;
+      if (w > 0) {
+        const editorLines = editorContainer.render(w).length;
+        const footerLines = footerWrap ? footerWrap.render(w).length : 0;
+        ui.fixedBottomLineCount = editorLines + footerLines;
+      }
+      originalDoRender();
+    };
   }
 
   async resumeSession(targetSessionId: string): Promise<boolean> {
