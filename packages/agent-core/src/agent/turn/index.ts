@@ -30,7 +30,7 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { VariantRegistry, detectWeightLevel, type WeightLevel } from './variant-registry';
+import { VariantRegistry, detectWeightLevel, repeatDecay, type WeightLevel } from './variant-registry';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
@@ -1210,9 +1210,21 @@ export class TurnFlow {
       return;
     }
 
+    // 🆕 重复衰减: 同一变体触发 5+ 次 → 跳过
+    if (typeof meta === 'object' && 'variant' in meta &&
+        typeof meta.variant === 'string') {
+      const record = this.variantRegistry.get(meta.variant);
+      if (repeatDecay(record) === 'skip') return;
+    }
+
     const estimatedTokens = Math.ceil(text.length / 4);
     const level = detectWeightLevel(text);
     const effectiveLevel = this.getEffectiveLevel(meta, level);
+
+    // 🆕 毒性绕过: 偏差链激活 → 跳过预算检查
+    if (this.deviationChainActive) {
+      this.injectBudget.bypassBudget();
+    }
 
     if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
       return; // 静默丢弃
