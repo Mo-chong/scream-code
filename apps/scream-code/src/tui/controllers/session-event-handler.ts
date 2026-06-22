@@ -201,7 +201,7 @@ export class SessionEventHandler {
       case 'compaction.blocked': break;
       case 'compaction.cancelled': this.handleCompactionCancel(event, sendQueued); break;
       case 'subagent.spawned': this.handleSubagentSpawned(event); break;
-      case 'subagent.started': this.handleSubagentStarted(event as SubagentSpawnedEvent); break;
+      // case 'subagent.started': this.handleSubagentStarted(event as SubagentSpawnedEvent); break;
       case 'subagent.completed': this.handleSubagentCompleted(event); break;
       case 'subagent.failed': this.handleSubagentFailed(event); break;
       case 'background.task.started':

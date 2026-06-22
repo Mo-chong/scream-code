@@ -168,6 +168,8 @@ export const lightColors: ColorPalette = {
   status: light.gray700,
 };
 
+export type ResolvedTheme = 'dark' | 'light';
+
 export function getColorPalette(theme: ResolvedTheme): ColorPalette {
   return theme === 'dark' ? darkColors : lightColors;
 }
