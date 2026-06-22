@@ -631,6 +631,37 @@ describe('Agent context notification projection', () => {
     expect(textOf(messages[1]!)).toBe('No origin prompt');
     expect(textOf(messages[2]!)).toBe('Third real prompt');
   });
+
+  it('reorders tool results before intervening user injections (DeepSeek V4 Flash compat)', () => {
+    const assistantMsg: ContextMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'I will look that up.' }],
+      toolCalls: [{ id: 'call_001', name: 'Lookup', args: { query: 'moon' } }],
+    };
+    const userInjection: ContextMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: '<system-reminder>\nMUST verify\n</system-reminder>' },
+      ],
+      toolCalls: [],
+      origin: { kind: 'injection', variant: 'prepare_verify' },
+    };
+    const toolResult: ContextMessage = {
+      role: 'tool',
+      content: [{ type: 'text', text: 'lookup result' }],
+      toolCalls: [],
+      toolCallId: 'call_001',
+    };
+
+    const messages = project([assistantMsg, userInjection, toolResult]);
+
+    expect(messages).toHaveLength(3);
+    expect(messages[0]!.role).toBe('assistant');
+    expect(messages[1]!.role).toBe('tool');       // tool 结果被提到 injection 前面
+    expect(messages[2]!.role).toBe('user');        // user injection 被移到后面
+    expect(textOf(messages[1]!)).toBe('lookup result');
+    expect(textOf(messages[2]!)).toContain('MUST verify');
+  });
 });
 
 function userMessage(text: string, origin?: ContextMessage['origin']): ContextMessage {
