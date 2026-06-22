@@ -150,6 +150,42 @@ export function observeBehavior(
   if (registry.get('prepare_verify') && sig.hasVerificationTools) {
     registry.markBehaviorObserved('prepare_verify');
   }
+
+  // ── 意图变体行为观察 ─────────────────────────────────
+  if (!registry.hasIntentVariants()) return;
+
+  // intent_fix_bug: Edit 文件含 test 路径 → 写复现测试
+  if (registry.get('intent_fix_bug') && (sig.toolCounts['Edit'] ?? 0) > 0) {
+    // 标记为已观察——至少 Edit 了文件，说明在修复
+    registry.markBehaviorObserved('intent_fix_bug');
+  }
+
+  // intent_refactor: 有知识工具 → 先搜引用再改
+  if (registry.get('intent_refactor') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('intent_refactor');
+  }
+
+  // intent_add_feature: 有 Read/Glob 调用 → 先探索再实现
+  if (registry.get('intent_add_feature') &&
+      ((sig.toolCounts['Read'] ?? 0) > 0 || (sig.toolCounts['Glob'] ?? 0) > 0)) {
+    registry.markBehaviorObserved('intent_add_feature');
+  }
+
+  // intent_review: 有 Read 且无 action 工具 → 只读审查
+  if (registry.get('intent_review') &&
+      (sig.toolCounts['Read'] ?? 0) > 0 && !sig.hasActionTools) {
+    registry.markBehaviorObserved('intent_review');
+  }
+
+  // intent_research: 有知识工具 → 搜索＞动作
+  if (registry.get('intent_research') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('intent_research');
+  }
+
+  // intent_document: 有知识工具或 Edit/Write .md → 输出文档
+  if (registry.get('intent_document') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('intent_document');
+  }
 }
 
 // ── 内部辅助 ─────────────────────────────────────────────

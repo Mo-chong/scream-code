@@ -144,6 +144,17 @@ export class VariantRegistry {
   get size(): number {
     return this.records.size;
   }
+
+  /**
+   * 检查注册表中是否含有意图变体（intent_ 前缀）。
+   * 用于 observeBehavior 快速判断是否需要执行意图行为观察。
+   */
+  hasIntentVariants(): boolean {
+    for (const key of this.records.keys()) {
+      if (key.startsWith('intent_')) return true;
+    }
+    return false;
+  }
 }
 
 // ── 权重等级检测（纯函数，100% 文本模式匹配）────────────────

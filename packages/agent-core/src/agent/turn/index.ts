@@ -33,6 +33,8 @@ import { injectAntiConfabulation } from './injectors/anti_confabulation';
 import { VariantRegistry } from './variant-registry';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
+import { detectIntent } from './detectors/intent';
+import { injectIntentGuidance } from './injectors/intent';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -415,6 +417,21 @@ export class TurnFlow {
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
+
+    // ── Phase 4: 回合意图注入 ─────────────────────────────
+    if (origin.kind === 'user') {
+      const intentDetection = detectIntent(input);
+      if (intentDetection) {
+        injectIntentGuidance(intentDetection, (text, meta) => {
+          this.agent.context.appendSystemReminder(text, meta);
+        });
+        this.variantRegistry.record(
+          intentDetection.variant,
+          intentDetection.weightLevel,
+          this.currentStep,
+        );
+      }
+    }
 
     let ended: TurnEndedEvent;
     let completedStopReason: LoopTurnStopReason | undefined;

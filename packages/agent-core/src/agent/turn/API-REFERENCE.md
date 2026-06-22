@@ -268,6 +268,94 @@ if (qualityIssue) {
 
 **C组 (afterStep):** step_after_edit(A/B), step_after_search(B), step_after_verify_fail(A)
 
+**D组 (runOneTurn, intent-based):** intent_fix_bug(B/A), intent_refactor(B/A), intent_add_feature(B/A), intent_review(B/A), intent_research(B/A), intent_document(B/A)
+
+---
+
+## detectors/intent.ts — IntentDetector (Phase 4)
+
+**File:** `turn/detectors/intent.ts`
+**Role:** 回合级用户意图检测。纯函数。在 runOneTurn 中注入。
+
+### Types
+
+```typescript
+type IntentConfidence = 'low' | 'high';
+
+interface IntentDetection {
+  variant: string;            // 'intent_fix_bug', etc.
+  confidence: IntentConfidence;
+  weightLevel: WeightLevel;   // low→B, high→A
+  guidanceText: string;       // 预制好注入文本
+  reason: string;
+}
+```
+
+### Functions
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `detectIntent` | `(input: ContentPart[]) => IntentDetection \| null` | 分析 user prompt 返回最匹配意图 |
+
+### Detection rules
+
+| Variant | Keywords | High threshold | High markers | Exclude |
+|---------|----------|:--------------:|--------------|---------|
+| `intent_fix_bug` | fix, bug, error, fail, broken, crash, incorrect, wrong, regression | 2 | reproduction | — |
+| `intent_refactor` | refactor, restructure, rewrite, clean up, reorganize, modernize | 1 | migrate all, all caller, compatibility shim | test, config |
+| `intent_add_feature` | add, feature, new, implement, create, build, integrate | 3 | — | test, config |
+| `intent_review` | review, audit, check, inspect, scan | 1 | only review, just check, read only | fix, refactor, add |
+| `intent_research` | research, investigate, find out, explore, learn about, search for | 2 | deep dive, thorough, compare | — |
+| `intent_document` | document, write docs, explain, tutorial, readme | 2 | readme, api reference | — |
+
+**Weight level:** low confidence → B（结构化步骤提示）, high confidence → A（MUST/NEVER 祈使）
+
+**Identity path:** no keyword match → null（0 开销）
+
+### Integration (in runOneTurn)
+
+```typescript
+if (origin.kind === 'user') {
+  const intentDetection = detectIntent(input);
+  if (intentDetection) {
+    injectIntentGuidance(intentDetection, (text, meta) => {
+      this.agent.context.appendSystemReminder(text, meta);
+    });
+    this.variantRegistry.record(
+      intentDetection.variant, intentDetection.weightLevel, this.currentStep,
+    );
+  }
+}
+```
+
+意图变体注入后通过 VariantRegistry **自动参与** `detectQualityIssue` + `escalateQuality` 的残差升级链。
+
+---
+
+## injectors/intent.ts — Injector D (Phase 4)
+
+**File:** `turn/injectors/intent.ts`
+**Role:** 消费 IntentDetection，按置信度注入预制文本。
+
+### Functions
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `injectIntentGuidance` | `(detection, appendReminder) => void` | 注入意图指导文本 |
+
+**No dedup check needed** — `detectIntent` returns a single detection per turn, and the integration point runs once per turn (not per step).
+
+### Behavior observation (in detectors/quality.ts observeBehavior)
+
+| Variant | Observation condition |
+|---------|----------------------|
+| `intent_fix_bug` | sig.toolCounts['Edit'] > 0 |
+| `intent_refactor` | sig.hasKnowledgeTools |
+| `intent_add_feature` | sig.toolCounts['Read'] > 0 \|\| sig.toolCounts['Glob'] > 0 |
+| `intent_review` | sig.toolCounts['Read'] > 0 && !sig.hasActionTools |
+| `intent_research` | sig.hasKnowledgeTools |
+| `intent_document` | sig.hasKnowledgeTools |
+
 ---
 
 ## Future detector integration pattern
