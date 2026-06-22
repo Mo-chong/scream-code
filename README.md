@@ -34,13 +34,13 @@ Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，完�
     </td>
     <td width="50%">
       <h3>🐺 Wolfpack 群狼模式</h3>
-      <p><strong>无限并发</strong>多Agent协同，并行处理大项目任务。内置 coder/explore/plan/verify/writer 五类子 Agent。</p>
+      <p><strong>智能批量并发</strong>多Agent协同，并行处理大项目任务。内置 coder/explore/plan/verify/writer 五类子 Agent。</p>
     </td>
   </tr>
   <tr>
     <td width="50%">
       <h3>🧠 永久记忆备忘录</h3>
-      <p><strong>痛点记忆结构化SQL提取</strong>，Tag语义+向量双重检索不漂移。跨会话共享，越用越懂你。</p>
+      <p><strong>痛点记忆结构化SQL提取</strong>，FTS5全文+Tag语义+向量三重检索不漂移。跨会话共享，越用越懂你。</p>
     </td>
     <td width="50%">
       <h3>🛡️ 轻量级 pi 底层</h3>
