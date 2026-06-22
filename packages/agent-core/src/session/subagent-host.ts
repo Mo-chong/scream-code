@@ -222,6 +222,13 @@ export class SessionSubagentHost {
       options.signal.throwIfAborted();
       await this.triggerSubagentStart(parent, profileName, options.prompt, options.signal);
       options.signal.throwIfAborted();
+      parent.emitEvent({
+        type: 'subagent.started',
+        subagentId: childId,
+        parentToolCallId: options.parentToolCallId,
+        subagentName: profileName,
+        runInBackground: options.runInBackground,
+      });
 
       // Explore subagents start cold; a git-context block helps them orient
       // in the repository before searching.

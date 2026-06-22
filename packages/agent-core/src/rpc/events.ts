@@ -211,6 +211,14 @@ export interface SubagentSpawnedEvent {
   readonly runInBackground: boolean;
 }
 
+export interface SubagentStartedEvent {
+  readonly type: 'subagent.started';
+  readonly subagentId: string;
+  readonly parentToolCallId: string;
+  readonly subagentName?: string | undefined;
+  readonly runInBackground: boolean;
+}
+
 export interface SubagentCompletedEvent {
   readonly type: 'subagent.completed';
   readonly subagentId: string;
@@ -306,6 +314,7 @@ export type AgentEvent =
   | ToolListUpdatedEvent
   | McpServerStatusEvent
   | SubagentSpawnedEvent
+  | SubagentStartedEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
   | CompactionStartedEvent
