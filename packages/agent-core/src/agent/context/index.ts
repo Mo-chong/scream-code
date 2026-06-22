@@ -223,7 +223,6 @@ export class ContextMemory {
       }
       case 'step.end': {
         const openStep = this.openSteps.get(event.uuid);
-        this.openSteps.delete(event.uuid);
         if (event.usage !== undefined) {
           const openStepIndex = openStep === undefined ? -1 : this._history.indexOf(openStep);
           this._tokenCount =
@@ -239,21 +238,13 @@ export class ContextMemory {
       }
       case 'content.part': {
         const openStep = this.openSteps.get(event.stepUuid);
-        if (openStep === undefined) {
-          throw new Error(
-            `Received content_part for unknown step_uuid '${event.stepUuid}' (no open step_begin)`,
-          );
-        }
+        if (openStep === undefined) return;
         openStep.content.push(event.part);
         return;
       }
       case 'tool.call': {
         const openStep = this.openSteps.get(event.stepUuid);
-        if (openStep === undefined) {
-          throw new Error(
-            `Received tool_call for unknown step_uuid '${event.stepUuid}' (no open step_begin)`,
-          );
-        }
+        if (openStep === undefined) return;
         openStep.toolCalls.push({
           type: 'function',
           id: event.toolCallId,
