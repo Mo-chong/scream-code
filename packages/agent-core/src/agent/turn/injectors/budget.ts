@@ -32,6 +32,7 @@ export class InjectBudget {
   private stepTokens = 0;
   private variantCount = 0;
   private stepNumber = 0;
+  private toxicityBypass = false;
   readonly config: InjectBudgetConfig;
 
   constructor(config?: Partial<InjectBudgetConfig>) {
@@ -53,6 +54,14 @@ export class InjectBudget {
   }
 
   /**
+   * 毒性绕过：紧急情况下跳过预算检查，强制注入。
+   * 每次调用只生效一次，不持久改变阈值。
+   */
+  bypassBudget(): void {
+    this.toxicityBypass = true;
+  }
+
+  /**
    * 检查是否可注入。
    *
    * 实际有效上限受两个衰减因子影响:
@@ -65,6 +74,10 @@ export class InjectBudget {
    * TODO: stepNorm 和 degradationFactor 的参数需根据实际数据调优。
    */
   canInject(estimatedTokens: number, weightLevel: WeightLevel): boolean {
+    if (this.toxicityBypass) {
+      this.toxicityBypass = false; // 仅本次绕过
+      return true;
+    }
     const stepNorm = 1 + (1 / (this.stepNumber + 1));
     const degradationFactor = Math.max(0.4, 1 - this.variantCount * 0.1);
     const turnCap = Math.floor(this.config.perTurnMax[weightLevel] * degradationFactor);

@@ -32,16 +32,23 @@ export interface VariantRecord {
   behaviorObserved: boolean | null;
   /** 上一次升级时的回合步号（0 = 从未升级） */
   lastEscalatedAtStep: number;
+  /** 本回合该变体被触发的总次数（含第一次）。跨步累加。 */
+  triggerCount: number;
 }
 
 export class VariantRegistry {
   private records = new Map<string, VariantRecord>();
 
   /**
-   * 记录一个注入变体。同变体在同回合只记录第一次。
+   * 记录一个注入变体。同变体在同回合只记录第一次，
+   * 但 triggerCount 跨步累加。
    */
   record(variant: string, level: WeightLevel, step: number): void {
-    if (this.records.has(variant)) return;
+    const existing = this.records.get(variant);
+    if (existing) {
+      existing.triggerCount++;
+      return;
+    }
     this.records.set(variant, {
       variant,
       level,
@@ -49,6 +56,7 @@ export class VariantRegistry {
       turnStep: step,
       behaviorObserved: null,
       lastEscalatedAtStep: 0,
+      triggerCount: 1,
     });
   }
 
@@ -205,4 +213,25 @@ export function escalateLevel(level: WeightLevel): WeightLevel {
     case 'A': return 'S';
     case 'S': return 'S';
   }
+}
+
+// ── 重复衰减（Phase 6）──────────────────────────────────────
+
+export type RepeatAction = 'full' | 'skip';
+
+/**
+ * 同变体重复触发衰减决策。
+ *
+ * 注入文本的边际价值随同场景重复次数递减：
+ * - 首次或 behaviorObserved → full（不衰减）
+ * - 跨步累计触发 5+ 次 → skip（静默跳过）
+ *
+ * 纯函数。不返回 'short'——需要不同缩短文本的变体太多，
+ * 当前收益不足以覆盖每个变体配两版文本的成本。
+ */
+export function repeatDecay(record: VariantRecord | undefined): RepeatAction {
+  if (!record) return 'full';
+  if (record.behaviorObserved === true) return 'full';
+  if (record.triggerCount >= 5) return 'skip';
+  return 'full';
 }
