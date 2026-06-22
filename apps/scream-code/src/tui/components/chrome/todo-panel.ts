@@ -154,7 +154,7 @@ function renderRow(todo: TodoItem, colors: ColorPalette): string {
 function statusMarker(status: TodoStatus, colors: ColorPalette): string {
   switch (status) {
     case 'in_progress':
-      return chalk.hex(colors.primary).bold('●');
+      return chalk.hex(colors.primary).bold('■');
     case 'done':
       return chalk.hex(colors.success)('✓');
     case 'pending':
