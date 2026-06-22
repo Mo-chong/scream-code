@@ -96,12 +96,6 @@ function hasAnyTool(
   return false;
 }
 
-function looksLikeVerification(name: string, _count: number): boolean {
-  // Bash can be a verification command; we can't tell from name alone.
-  // For now, only exact match for verification tools.
-  return name === 'Bash'; // conservative: just Bash
-}
-
 // ── Compress ───────────────────────────────────────────
 
 /**

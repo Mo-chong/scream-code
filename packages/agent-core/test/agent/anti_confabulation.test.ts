@@ -13,9 +13,9 @@ describe('injectAntiConfabulation', () => {
     const result: DetectionResult = { confidence: 1, reason: 'low' };
     const dedup = new Set<string>();
     const calls: Array<{ text: string }> = [];
-    const append = (text: string) => { calls.push({ text }); };
+    const append = (text: string, _meta: any) => { calls.push({ text }); };
 
-    injectAntiConfabulation(result, dedup, append as any);
+    injectAntiConfabulation(result, dedup, append);
 
     expect(calls).toHaveLength(0);
     expect(dedup.has('anti_confabulation')).toBe(false);
@@ -27,7 +27,7 @@ describe('injectAntiConfabulation', () => {
     const calls: Array<{ text: string; meta: any }> = [];
     const append = (text: string, meta: any) => { calls.push({ text, meta }); };
 
-    injectAntiConfabulation(result, dedup, append as any);
+    injectAntiConfabulation(result, dedup, append);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.text).toContain('检测到可能的证据缺口');
@@ -39,9 +39,9 @@ describe('injectAntiConfabulation', () => {
     const result: DetectionResult = { confidence: 3, reason: 'high', detail: 'marker tokens' };
     const dedup = new Set<string>();
     const calls: Array<{ text: string }> = [];
-    const append = (text: string) => { calls.push({ text }); };
+    const append = (text: string, _meta: any) => { calls.push({ text }); };
 
-    injectAntiConfabulation(result, dedup, append as any);
+    injectAntiConfabulation(result, dedup, append);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.text).toContain('MUST verify');
@@ -54,9 +54,9 @@ describe('injectAntiConfabulation', () => {
     const calls: Array<{ text: string }> = [];
 
     // First call
-    injectAntiConfabulation(result, dedup, (text) => calls.push({ text }) as any);
+    injectAntiConfabulation(result, dedup, (text, _meta) => { calls.push({ text }); });
     // Second call with same dedup set
-    injectAntiConfabulation(result, dedup, (text) => calls.push({ text }) as any);
+    injectAntiConfabulation(result, dedup, (text, _meta) => { calls.push({ text }); });
 
     expect(calls).toHaveLength(1);
   });
@@ -66,7 +66,7 @@ describe('injectAntiConfabulation', () => {
     const dedup = new Set<string>(['prepare_edit']); // unrelated variant
     const calls: Array<{ text: string }> = [];
 
-    injectAntiConfabulation(result, dedup, (text) => calls.push({ text }) as any);
+    injectAntiConfabulation(result, dedup, (text, _meta) => { calls.push({ text }); });
 
     expect(calls).toHaveLength(1); // should still inject
   });

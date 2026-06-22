@@ -83,9 +83,9 @@ describe('signature / compressStep', () => {
     expect(sig.markerTokenFound).toBe(false);
   });
 
-  it('partial marker match (prefix only) does not trigger', () => {
+  it('partial marker match on substring triggers', () => {
     const sig = compressStep({}, '根据文档 是唯一的前缀');
-    expect(sig.markerTokenFound).toBe(true); // "根据文档" matches as substring
+    expect(sig.markerTokenFound).toBe(true);
   });
 
   it('toolCounts records all tools correctly', () => {
