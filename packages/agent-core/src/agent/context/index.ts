@@ -144,15 +144,22 @@ export class ContextMemory {
       }
     }
 
-    this.openSteps.clear();
-    this.pendingToolResultIds.clear();
-    this.deferredMessages = [];
-    this.agent.emitStatusUpdated();
-
-    if (!this.agent.records.restoring && (stoppedAtBoundary || removedUserCount < count)) {
-      // Throw nothing — this is a best-effort operation.  If there aren't
-      // enough user prompts to undo, we just undo what we can and stop.
+    // Clean up orphaned injection messages that are now adjacent (would
+    // produce consecutive user-role messages that some APIs reject).
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const msg = this._history[i];
+      if (msg?.origin?.kind !== 'injection') continue;
+      const prev = this._history[i - 1];
+      const next = this._history[i + 1];
+      if (
+        prev?.origin?.kind === 'injection' ||
+        next?.origin?.kind === 'injection' ||
+        i === 0 // leading injection
+      ) {
+        this._history.splice(i, 1);
+      }
     }
+
   }
 
   applyCompaction(summary: CompactionResult): void {
@@ -175,6 +182,7 @@ export class ContextMemory {
     this.tokenCountCoveredMessageCount = this._history.length;
     this.agent.injection.onContextCompacted(summary.compactedCount);
     this.agent.emitStatusUpdated();
+    this.agent.microCompaction.reset();
   }
 
   data(): AgentContextData {

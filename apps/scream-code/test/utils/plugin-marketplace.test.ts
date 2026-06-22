@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SCREAM_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
 import { loadPluginMarketplace } from '#/utils/plugin-marketplace';
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const REPO_ROOT = join(import.meta.dirname, '../../../..');
 
 describe('loadPluginMarketplace', () => {
   it('loads a local marketplace file and resolves relative plugin sources', async () => {

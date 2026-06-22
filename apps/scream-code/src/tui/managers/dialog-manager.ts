@@ -122,7 +122,7 @@ export class DialogManager {
         onSelect: (pickerId: string) => {
           const row = this.host.getSessions().find((s) => s.id === pickerId);
           const isCc = row?.metadata?.['source'] === 'cc-connect';
-          const realId = isCc ? (row!.metadata!['agentSessionId'] as string) : pickerId;
+          const realId = isCc ? (row.metadata!['agentSessionId'] as string) : pickerId;
 
           void this.host.resumeSession(realId).then(async (switched) => {
             if (switched) {

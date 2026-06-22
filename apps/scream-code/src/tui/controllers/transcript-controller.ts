@@ -25,6 +25,7 @@ import type { StreamingUIController } from './streaming-ui';
 import type { TranscriptEntry, LoginProgressSpinnerHandle } from '../types';
 import type { TUIState } from '../tui-state';
 import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attachment-store';
+import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
@@ -308,7 +309,7 @@ export class TranscriptController {
   }
 
   showError(message: string): void {
-    this.showStatus(`错误：${message}`, this.host.state.theme.colors.error);
+    this.showStatus(`错误：${replaceTabs(message)}`, this.host.state.theme.colors.error);
   }
 
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {

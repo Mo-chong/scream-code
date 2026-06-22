@@ -88,7 +88,7 @@ function readConfiguredType(): string | undefined {
 }
 
 function escapeSingleQuotes(str: string): string {
-  return str.replace(/'/g, "\\'");
+  return str.replaceAll(/'/g, "\\'");
 }
 
 function generateConfig(platform: PlatformDef): void {

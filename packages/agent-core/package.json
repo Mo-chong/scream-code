@@ -1,6 +1,6 @@
 {
   "name": "@scream-cli/agent-core",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "private": true,
   "description": "The unified agent engine for Scream",
   "license": "MIT",

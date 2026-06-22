@@ -564,7 +564,7 @@ function ccSessionToSummary(
   const updatedAt = parseCcTimestamp(cc.updated_at) ?? createdAt;
   if (createdAt === undefined && updatedAt === undefined) return undefined;
 
-  const title = cc.name?.trim() || cc.id;
+  const title = cc.name?.trim() ?? cc.id;
   const lastPrompt = lastPromptFromCcHistory(cc.history);
 
   const metadata: Record<string, JsonValue> = {

@@ -1,4 +1,4 @@
-import { createMemoryMemo, generateTags } from '@scream-code/memory';
+import { createMemoryMemo, generateTags, normalizeTags } from '@scream-code/memory';
 import { dirname, basename } from 'pathe';
 import { z } from 'zod';
 
@@ -70,10 +70,11 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
 
         const whatFailed = args.whatFailed?.trim();
         const whatWorked = args.whatWorked?.trim();
-        const tags =
+        const tags = normalizeTags(
           args.tags !== undefined && args.tags.length > 0
             ? args.tags
-            : generateTags(`${args.userNeed} ${args.approach}`);
+            : generateTags(`${args.userNeed} ${args.approach}`),
+        );
 
         const memo = createMemoryMemo({
           sourceSessionId: sessionId,

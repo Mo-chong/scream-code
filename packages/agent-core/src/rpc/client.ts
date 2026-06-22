@@ -38,6 +38,10 @@ export function createRPC<Left extends Record<string, any>, Right extends Record
   function simulateNetwork<T>(data: T): Promise<T> {
     return new Promise((resolve) => {
       setTimeout(() => {
+        // NOTE: emitEvent fires through this path. If any event carries
+        // non-JSON-serializable values (BigInt, cycles, functions),
+        // JSON.stringify throws, the RPC rejects, and the event is lost.
+        // All Event members must be JSON-safe by construction.
         const serialized = JSON.stringify(data);
         resolve(serialized === undefined ? (undefined as T) : JSON.parse(serialized));
       }, 0);

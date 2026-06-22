@@ -32,10 +32,7 @@ interface Deferred<T> {
 }
 
 function makeDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
+  const { promise, resolve } = Promise.withResolvers<T>();
   return { promise, resolve };
 }
 

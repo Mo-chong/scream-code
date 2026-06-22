@@ -200,7 +200,7 @@ describe('PluginManager', () => {
     const summary = manager.summaries().find((s) => s.id === 'superpowers');
     expect(summary).toBeDefined();
     expect(summary!.skillCount).toBe(3);
-    expect(summary!.skills.map((s) => s.name).sort()).toEqual([
+    expect(summary!.skills.map((s) => s.name).toSorted()).toEqual([
       'brainstorming',
       'systematic-debugging',
       'writing-plans',

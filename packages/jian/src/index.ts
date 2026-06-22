@@ -14,6 +14,7 @@ export {
   JianFileExistsError,
   JianPathOutsideRootError,
   JianShellNotFoundError,
+  JianExecError,
 } from './errors';
 export { LocalJian } from './local';
 export {

@@ -112,7 +112,7 @@ export class MicroCompaction {
     const contextUsageRatio =
       maxContextTokens !== undefined && maxContextTokens > 0
         ? contextTokens / maxContextTokens
-        : 1;
+        : 0;
     if (contextUsageRatio < config.minContextUsageRatio) return;
 
     const nextCutoff = Math.max(0, history.length - config.keepRecentMessages);

@@ -51,11 +51,14 @@ export class Session {
     this.resumeState = options.resumeState ?? resumeStateFromSummary(options.summary);
     this.rpc = options.rpc;
     this.onClose = options.onClose;
-    const resumedMeta = this.resumeState?.sessionMetadata as Record<string, unknown> | undefined;
-    this.metadata = resumedMeta ?? (options.summary?.metadata as Record<string, unknown>) ?? {};
-    if (!this.metadata['custom']) {
-      this.metadata['custom'] = {};
-    }
+    // resumeState.sessionMetadata 是完整 SessionMeta（含 title/agents/custom），
+    // 我们只需要其中真正的 custom bag。
+    // create 路径下 options.summary.metadata 本身就是 flat custom bag。
+    const resumedMeta = this.resumeState?.sessionMetadata;
+    const customBag = (resumedMeta?.custom as Record<string, unknown> | undefined)
+      ?? (options.summary?.metadata as Record<string, unknown> | undefined)
+      ?? {};
+    this.metadata = customBag;
   }
 
   getResumeState(): ResumedSessionState | undefined {
@@ -63,13 +66,20 @@ export class Session {
     return this.resumeState;
   }
 
+  private eventUnsubscribers = new Set<() => void>();
+
   onEvent(listener: (event: Event) => void): Unsubscribe {
     this.ensureOpen();
-    return this.rpc.onEvent((event) => {
+    const unsub = this.rpc.onEvent((event) => {
       if (event.sessionId === this.id) {
         listener(event);
       }
     });
+    this.eventUnsubscribers.add(unsub);
+    return () => {
+      unsub();
+      this.eventUnsubscribers.delete(unsub);
+    };
   }
 
   setApprovalHandler(handler: ApprovalHandler | undefined): void {
@@ -461,18 +471,20 @@ export class Session {
   async close(options: { extractMemories?: boolean } = {}): Promise<void> {
     if (this.closed) return;
     if (options.extractMemories !== false) {
-      try {
-        // Extract memories before closing — give it enough time for LLM
-        const extract = this.extractMemoriesOnExit().catch(() => {});
-        await Promise.race([
-          extract,
-          new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
-        ]);
-      } catch {
-        // Never let extraction failure block session close
-      }
+      // NOTE: the 30s timer wins the race but extractMemoriesOnExit continues
+      // in the background. There is no AbortSignal plumbing across RPC layers
+      // to cancel an in-flight LLM extraction call. This is a known limitation.
+      const extract = this.extractMemoriesOnExit();
+      await Promise.race([
+        extract.catch(() => {}),
+        new Promise<void>((r) => setTimeout(r, 30_000)),
+      ]);
     }
     this.closed = true;
+    for (const unsub of this.eventUnsubscribers) {
+      unsub();
+    }
+    this.eventUnsubscribers.clear();
     try {
       await this.rpc.closeSession({ sessionId: this.id });
     } finally {

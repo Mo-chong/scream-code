@@ -159,6 +159,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
 
   shouldCompactProactively(usedSize: number, maxOutputTokens: number): boolean {
     if (this.maxSize <= 0) return false;
+    if (this.config.triggerRatio >= 1) return false;
     const predicted = usedSize + this.estimateTurnGrowth(maxOutputTokens);
     return predicted >= this.maxSize;
   }

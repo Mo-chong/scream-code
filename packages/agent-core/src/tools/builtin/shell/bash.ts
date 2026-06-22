@@ -244,8 +244,9 @@ function commandNotFoundHint(command: string): string {
 
 
 function validateCommand(command: string, isWindows: boolean): ExecutableToolResult | null {
-  const cmd = command;
-
+  // Strip 'command ' / 'builtin ' prefixes so the shell-function shadows
+  // cannot be bypassed via direct builtin invocations.
+  const cmd = command.replace(/^(?:command\s+|builtin\s+)+/, '');
   // kill -9 -1 / kill -KILL -1 — signal all processes (POSIX)
   if (/\bkill\s+-9\s+-1\b/.test(cmd) || /\bkill\s+-KILL\s+-1\b/.test(cmd)) {
     return rejectDangerousCommand(

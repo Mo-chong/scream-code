@@ -1,6 +1,8 @@
 import type { GoalSnapshot } from '../goal';
 import { DynamicInjector } from './injector';
 
+const GOAL_REMINDER_INTERVAL = 5;
+
 export class GoalInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'goal';
 
@@ -8,10 +10,26 @@ export class GoalInjector extends DynamicInjector {
     const store = this.agent.goal;
     const goal = store.getGoal().goal;
     if (goal === null) return undefined;
+
+    // Dedup: suppress re-injection within GOAL_REMINDER_INTERVAL assistant turns
+    if (this.injectedAt !== null) {
+      const turnsSince = this.countAssistantTurnsSince(this.injectedAt);
+      if (turnsSince < GOAL_REMINDER_INTERVAL) return undefined;
+    }
+
     if (goal.status === 'active') return buildGoalReminder(goal);
     if (goal.status === 'blocked') return buildBlockedNote(goal);
     if (goal.status === 'paused') return buildPausedNote(goal);
     return undefined;
+  }
+
+  private countAssistantTurnsSince(from: number): number {
+    let count = 0;
+    const history = this.agent.context.history;
+    for (let i = from; i < history.length; i++) {
+      if (history[i]?.role === 'assistant') count++;
+    }
+    return count;
   }
 }
 

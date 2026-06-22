@@ -13,6 +13,7 @@ import {
   APIConnectionError as OpenAIConnectionError,
   APIConnectionTimeoutError as OpenAITimeoutError,
   APIError as OpenAIAPIError,
+  APIUserAbortError as OpenAIUserAbortError,
   OpenAIError,
 } from 'openai';
 export interface OpenAIContentPart {
@@ -130,6 +131,12 @@ export function convertOpenAIError(error: unknown): ChatProviderError {
   ) {
     return classifyBaseApiError(error.message);
   }
+  // APIUserAbortError — keep it as DOMException('AbortError') so the
+  // generate() caller can distinguish cancellation from provider errors.
+  if (error instanceof OpenAIUserAbortError) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
   if (error instanceof OpenAIError) {
     return new ChatProviderError(`Error: ${error.message}`);
   }
@@ -233,7 +240,7 @@ export function extractUsage(usage: unknown): TokenUsage | null {
   }
 
   return {
-    inputOther: promptTokens - cached,
+    inputOther: Math.max(0, promptTokens - cached),
     output: completionTokens,
     inputCacheRead: cached,
     inputCacheCreation: 0,

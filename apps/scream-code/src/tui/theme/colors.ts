@@ -132,7 +132,7 @@ export const darkColors: ColorPalette = {
 export const lightColors: ColorPalette = {
   primary: light.green,
   accent: light.tangerine700,
-  planMode: '#00FFFF',
+  planMode: '#00838F',
 
   text: light.gray900,
   textStrong: light.gray900,

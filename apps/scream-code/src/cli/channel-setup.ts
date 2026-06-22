@@ -113,7 +113,7 @@ const PLATFORMS: PlatformDef[] = [
 
 async function question(rl: ReturnType<typeof createInterface>, prompt: string): Promise<string> {
   return new Promise((resolve) => {
-    rl.question(prompt, (answer) => resolve(answer.trim()));
+    rl.question(prompt, (answer) =>{  resolve(answer.trim()); });
   });
 }
 

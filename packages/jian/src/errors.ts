@@ -54,3 +54,15 @@ export class JianPathOutsideRootError extends JianError {
     this.name = 'JianPathOutsideRootError';
   }
 }
+
+/** Thrown when process execution fails (spawn error, ENOENT, EACCES). */
+export class JianExecError extends JianError {
+  constructor(
+    message: string,
+    readonly command: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'JianExecError';
+  }
+}

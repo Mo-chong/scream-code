@@ -52,9 +52,7 @@ export function createFastEmbedEngine(): EmbeddingEngine {
 
       try {
         if (embedder === null) {
-          if (initPromise === null) {
-            initPromise = loadEmbedder();
-          }
+          initPromise ??= loadEmbedder();
           embedder = await initPromise;
           if (embedder === null) {
             loadFailed = true;

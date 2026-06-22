@@ -590,6 +590,10 @@ export class Agent {
       ? `${SIDE_QUESTION_SYSTEM}\n\n<conversation_context>\n${conversationContext}\n</conversation_context>`
       : SIDE_QUESTION_SYSTEM;
 
+    if (!this.config.hasModel) {
+      return 'No model configured. Run `scream config` or use `/model` to set a default model.';
+    }
+
     const response = await this.generate(
       this.config.provider,
       system,

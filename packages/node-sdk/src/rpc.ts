@@ -448,31 +448,17 @@ export class SDKRpcClient {
   async getStatus(input: SessionIdRpcInput): Promise<SessionStatus> {
     const rpc = await this.getRpc();
     const agentId = this.interactiveAgentId;
-    const config = await rpc.getConfig({
-      sessionId: input.sessionId,
-      agentId,
-    });
-    const context = await rpc.getContext({
-      sessionId: input.sessionId,
-      agentId,
-    });
-    const permission = await rpc.getPermission({
-      sessionId: input.sessionId,
-      agentId,
-    });
-    const plan = await rpc.getPlan({
-      sessionId: input.sessionId,
-      agentId,
-    });
-    const usage = await rpc.getUsage({
-      sessionId: input.sessionId,
-      agentId,
-    });
+    const [config, context, permission, plan, usage] = await Promise.all([
+      rpc.getConfig({ sessionId: input.sessionId, agentId }),
+      rpc.getContext({ sessionId: input.sessionId, agentId }),
+      rpc.getPermission({ sessionId: input.sessionId, agentId }),
+      rpc.getPlan({ sessionId: input.sessionId, agentId }),
+      rpc.getUsage({ sessionId: input.sessionId, agentId }),
+    ]);
     const maxContextTokens = config.modelCapabilities?.max_context_tokens ?? 0;
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
-    const hasUsage =
-      usage.byModel !== undefined || usage.total !== undefined || usage.currentTurn !== undefined;
+    const hasUsage = usage.byModel !== undefined || usage.total !== undefined || usage.currentTurn !== undefined;
     return {
       model: config.modelAlias ?? config.provider?.model,
       thinkingLevel: config.thinkingLevel,
@@ -567,7 +553,11 @@ export class SDKRpcClient {
     return rpc.addMcpServer({
       sessionId: input.sessionId,
       name: input.name,
-      // config shape is validated by McpServerConfigSchema in the core
+      // HACK: config is Record<string, unknown> on the RPC boundary but
+      // the core expects McpServerConfig. McpServerConfigSchema validates
+      // at runtime; the `as never` bridges the type mismatch. When
+      // McpServerConfig is exported from @scream-cli/agent-core, type
+      // AddMcpServerRpcInput.config as McpServerConfig instead.
       config: input.config as never,
     });
   }
@@ -649,7 +639,11 @@ export class SDKRpcClient {
 
   receiveEvent(event: Event): void {
     for (const listener of this.eventListeners) {
-      listener(event);
+      try {
+        listener(event);
+      } catch {
+        // One listener should not starve others.
+      }
     }
   }
 

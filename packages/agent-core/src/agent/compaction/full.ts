@@ -61,6 +61,8 @@ const COMPACTION_SYSTEM_PROMPT =
 export class FullCompaction {
   protected compactionCountInTurn = 0;
   private consecutiveCompactionFailures = 0;
+  private _shouldInjectSessionSummary = false;
+  private compactionTimedOut = false;
   protected compacting: {
     abortController: AbortController;
     promise: Promise<void>;
@@ -95,6 +97,15 @@ export class FullCompaction {
 
   get compactedHistory(): readonly CompactedHistory[] {
     return this._compactedHistory;
+  }
+
+  /** One-shot: true if session memory summary should be injected at the next step. */
+  shouldInjectSessionSummary(): boolean {
+    if (this._shouldInjectSessionSummary) {
+      this._shouldInjectSessionSummary = false;
+      return true;
+    }
+    return false;
   }
 
   begin(data: Readonly<CompactionBeginData>): void {
@@ -172,10 +183,17 @@ export class FullCompaction {
   }
 
   async handleOverflowError(signal: AbortSignal, error: unknown) {
-    const didStartCompaction = this.beginAutoCompaction();
-    if (!didStartCompaction && !this.compacting) throw error;
-    // Always block on overflow errors
-    await this.block(signal);
+    const didStartCompaction = this.beginAutoCompaction(false);
+    if (!didStartCompaction && !this.compacting) {
+      if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
+        this.agent.emitEvent({
+          type: 'warning',
+          message: '压缩熔断器已打开，使用 /compact 手动重试。',
+          code: 'compaction_circuit_open_overflow',
+        });
+      }
+      throw error;
+    }
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
@@ -187,18 +205,17 @@ export class FullCompaction {
     // the token savings micro compaction already provides.
     const effectiveTokens = this.effectiveTokenCount;
 
-    // Stage 2a: Proactive check — will the NEXT step overflow?
-    // Estimate worst-case token growth before the API call so we can
-    // compact BEFORE hitting a 413, not after.
-    const shouldCompact =
-      this.strategy.shouldCompact(effectiveTokens) ||
+    const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens);
+    const isProactiveTrigger = !isReactiveTrigger &&
       this.strategy.shouldCompactProactively(
         effectiveTokens,
         this.estimatedMaxOutputTokens,
       );
 
-    if (shouldCompact) {
+    if (isReactiveTrigger) {
       this.checkAutoCompaction();
+    } else if (isProactiveTrigger) {
+      this.beginAutoCompaction();
     }
 
     // Stage 3: Block if we're past the blocking threshold.
@@ -272,6 +289,7 @@ export class FullCompaction {
       // It may have completed between the timer firing and this callback
       // executing (race between microtask queue and timer queue).
       if (this.compacting === active) {
+        this.compactionTimedOut = true;
         this.markCanceled(
           '压缩超时（60秒），已取消。请使用 /compact 手动重试。',
         );
@@ -391,8 +409,11 @@ export class FullCompaction {
 
       // Compaction succeeded — reset circuit breaker
       this.consecutiveCompactionFailures = 0;
+      this._shouldInjectSessionSummary = true;
     } catch (error) {
-      if (!isAbortError(error)) {
+      const wasTimedOut = this.compactionTimedOut;
+      this.compactionTimedOut = false;
+      if (!isAbortError(error) || wasTimedOut) {
         const active = this.compacting;
         const blockedByTurn = active?.blockedByTurn === true;
 

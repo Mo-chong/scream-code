@@ -25,6 +25,7 @@ import Anthropic, {
   APIError as AnthropicAPIError,
   APIConnectionError as AnthropicConnectionError,
   AnthropicError,
+  APIUserAbortError as AnthropicUserAbortError,
   APIConnectionTimeoutError as AnthropicTimeoutError,
 } from '@anthropic-ai/sdk';
 import type {
@@ -554,6 +555,11 @@ export function convertAnthropicError(error: unknown): ChatProviderError {
     const reqId = error.requestID ?? null;
     return normalizeAPIStatusError(error.status, error.message, reqId);
   }
+  // APIUserAbortError — keep it as DOMException('AbortError')
+  if (error instanceof AnthropicUserAbortError) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
   if (error instanceof AnthropicError) {
     return new ChatProviderError(`Anthropic error: ${error.message}`);
   }
@@ -742,7 +748,7 @@ class AnthropicStreamedMessage implements StreamedMessage {
                 type: 'function',
                 id: block.id,
                 name: block.name,
-                arguments: '',
+                arguments: null,
                 // Carry the Anthropic block index so parallel tool_use
                 // blocks' interleaved input_json_delta chunks can be routed
                 // to the correct ToolCall by the generate loop.

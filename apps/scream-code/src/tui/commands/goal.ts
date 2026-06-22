@@ -196,7 +196,7 @@ async function showGoalStatus(host: SlashCommandHost): Promise<void> {
     const panel = new GoalStatusMessageComponent(result.goal, host.state.theme.colors);
     host.state.transcriptContainer.addChild(panel);
     activeGoalPanel = panel;
-    activeGoalTimer = setTimeout(() => dismissGoalPanel(host), GOAL_STATUS_DISMISS_MS);
+    activeGoalTimer = setTimeout(() =>{  dismissGoalPanel(host); }, GOAL_STATUS_DISMISS_MS);
     host.state.ui.requestRender();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -12,6 +12,11 @@ import type {
 } from '#/provider';
 import type { Tool } from '#/tool';
 import type { TokenUsage } from '#/usage';
+import {
+  normalizeToolCallIdsForProvider,
+  sanitizeToolCallId,
+  type ToolCallIdPolicy,
+} from '#/providers/tool-call-id';
 import OpenAI from 'openai';
 
 import { ScreamFiles } from './scream-files';
@@ -35,6 +40,11 @@ import {
   requireProviderApiKey,
   resolveAuthBackedClient,
 } from './request-auth';
+
+const OPENAI_CHAT_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
+  normalize: (id) => sanitizeToolCallId(id, 64),
+  maxLength: 64,
+};
 export interface ScreamOptions {
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
@@ -422,13 +432,18 @@ export class ScreamChatProvider implements ChatProvider {
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
+    const normalizedHistory = normalizeToolCallIdsForProvider(
+      history,
+      OPENAI_CHAT_TOOL_CALL_ID_POLICY,
+    );
     const messages: OpenAIMessage[] = [];
     if (systemPrompt) {
       messages.push({ role: 'system', content: systemPrompt });
     }
-    for (const msg of history) {
+    for (const msg of normalizedHistory) {
       messages.push(convertMessage(msg));
     }
+
 
     const kwargs: Record<string, unknown> = {
       ...this._generationKwargs,

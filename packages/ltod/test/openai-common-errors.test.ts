@@ -139,13 +139,11 @@ describe('convertOpenAIError: APIError with body skips heuristic', () => {
   });
 });
 describe('convertOpenAIError: subclass errors fall through', () => {
-  it('APIUserAbortError is not heuristically reclassified', () => {
-    // APIUserAbortError is a subclass of APIError (not exact APIError),
-    // so the heuristic branch should not apply even with network keywords.
+  it('APIUserAbortError is preserved as DOMException(AbortError)', () => {
+    // APIUserAbortError should be re-thrown as DOMException('AbortError')
+    // so the generate() caller can reliably detect cancellation.
     const err = new OpenAIUserAbortError({ message: 'connection aborted by user' });
-    const result = convertOpenAIError(err);
-    // Should fall through to generic handling, not become APIConnectionError
-    expect(result.constructor).toBe(ChatProviderError);
+    expect(() => convertOpenAIError(err)).toThrow(DOMException);
   });
 });
 describe('OpenAI streaming error propagation', () => {

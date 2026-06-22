@@ -1,7 +1,7 @@
 import type { MemoryMemo, MemoryMemoSummary } from './models.js';
 import { createMemoryMemo, toSummary } from './models.js';
 import type { MemoryMemoStore } from './store.js';
-import { STOP_WORDS, computeRelevanceScore } from './scoring.js';
+import { STOP_WORDS, computeKeywordSimilarity } from './scoring.js';
 import { normalizeTags } from './tags.js';
 
 export interface DuplicateGroup {
@@ -101,19 +101,57 @@ export async function applyConsolidation(
   let deleted = 0;
   let created = 0;
 
-  // Delete resolved memos
-  for (const memo of plan.resolved) {
-    await store.delete(memo.id);
-    deleted++;
+  // ── 1. 归档 resolved/stale 的经验（先 append，防崩溃丢数据）──
+  if (plan.resolved.length > 0) {
+    const worked = plan.resolved
+      .filter((m) => m.whatWorked)
+      .map((m) => m.whatWorked)
+      .join('; ');
+    const failed = plan.resolved
+      .filter((m) => m.whatFailed)
+      .map((m) => m.whatFailed)
+      .join('; ');
+    if (worked || failed) {
+      const archive = createMemoryMemo({
+        sourceSessionId: plan.resolved[0]!.sourceSessionId,
+        userNeed: '已解决任务的经验归档（dream 整理）',
+        approach: '多次尝试后解决',
+        outcome: '已完成',
+        whatWorked: worked || 'none',
+        whatFailed: failed || 'none',
+        tags: normalizeTags(plan.resolved.flatMap((m) => m.tags ?? [])),
+        extractionSource: 'compaction',
+      });
+      await store.append(archive);
+      created++;
+    }
+  }
+  if (plan.stale.length > 0) {
+    const worked = plan.stale
+      .filter((m) => m.whatWorked)
+      .map((m) => m.whatWorked)
+      .join('; ');
+    const failed = plan.stale
+      .filter((m) => m.whatFailed)
+      .map((m) => m.whatFailed)
+      .join('; ');
+    if (worked || failed) {
+      const archive = createMemoryMemo({
+        sourceSessionId: plan.stale[0]!.sourceSessionId,
+        userNeed: '过期记忆的经验归档（dream 整理）',
+        approach: '距今超过30天未使用',
+        outcome: '已归档',
+        whatWorked: worked || 'none',
+        whatFailed: failed || 'none',
+        tags: normalizeTags(plan.stale.flatMap((m) => m.tags ?? [])),
+        extractionSource: 'compaction',
+      });
+      await store.append(archive);
+      created++;
+    }
   }
 
-  // Delete stale memos (just remove, they're outdated)
-  for (const memo of plan.stale) {
-    await store.delete(memo.id);
-    deleted++;
-  }
-
-  // Handle duplicates: delete originals, append merged
+  // ── 2. 合并 duplicates：先建 merged 再删 originals（防崩溃）──
   for (const group of plan.duplicateGroups) {
     const newest = group.memos.reduce((a, b) =>
       a.recordedAt > b.recordedAt ? a : b,
@@ -130,18 +168,27 @@ export async function applyConsolidation(
       whatFailed: group.merged.whatFailed,
       whatWorked: group.merged.whatWorked,
       tags: group.merged.tags ?? mergedTags,
-      extractionSource: 'compaction', // merged memos are post-hoc
+      extractionSource: 'compaction',
     });
+    // 先 append merged，确保崩溃时新记录已落盘
+    await store.append(merged);
+    created++;
+  }
 
-    // Delete all originals
+  // ── 3. 删除 originals（merged 已安全落盘，崩溃可恢复）──
+  for (const group of plan.duplicateGroups) {
     for (const memo of group.memos) {
       await store.delete(memo.id);
       deleted++;
     }
-
-    // Append merged
-    await store.append(merged);
-    created++;
+  }
+  for (const memo of plan.resolved) {
+    await store.delete(memo.id);
+    deleted++;
+  }
+  for (const memo of plan.stale) {
+    await store.delete(memo.id);
+    deleted++;
   }
 
   return { deleted, created };
@@ -163,7 +210,7 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
 
       // Check similarity against all memos already in the cluster
       const isSimilar = cluster.some((m) => {
-        const score = computeRelevanceScore(
+        const score = computeKeywordSimilarity(
           candidate,
           `${m.userNeed} ${m.approach}`,
         );

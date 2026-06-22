@@ -450,7 +450,7 @@ async function discoverSkillDirs(root: string, maxDepth: number): Promise<string
 
   // Deduplicate: if a discovered dir is nested inside another discovered dir,
   // keep only the ancestor.
-  const sorted = found.sort((a, b) => a.length - b.length);
+  const sorted = found.toSorted((a, b) => a.length - b.length);
   const result: string[] = [];
   for (const dir of sorted) {
     if (!result.some((parent) => dir.startsWith(parent + path.sep))) {

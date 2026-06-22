@@ -23,9 +23,9 @@ const TIER_HIGH = 0.65;
 const TIER_MID = 0.22;
 
 // ── Raw ANSI ────────────────────────────────────────────────────────────
-const FG_RESET = '\x1b[39m';
-const BOLD_OPEN = '\x1b[1m';
-const BOLD_CLOSE = '\x1b[22m';
+const FG_RESET = '\x1B[39m';
+const BOLD_OPEN = '\x1B[1m';
+const BOLD_CLOSE = '\x1B[22m';
 
 type Tier = 'low' | 'mid' | 'high';
 
@@ -47,7 +47,7 @@ function hexToAnsi(hex: string): string {
   const r = (v >> 16) & 255;
   const g = (v >> 8) & 255;
   const b = v & 255;
-  return `\x1b[38;2;${r};${g};${b}m`;
+  return `\x1B[38;2;${r};${g};${b}m`;
 }
 
 // ── Palette compilation ─────────────────────────────────────────────────
