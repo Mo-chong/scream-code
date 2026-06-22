@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Scream Code 属于你的本地 AI 智能助手</strong>
+  <strong>Scream Code 专属于你的本地 AI 智能助手</strong>
 </p>
 
 <p align="center">
