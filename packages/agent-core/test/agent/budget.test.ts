@@ -86,7 +86,7 @@ describe('InjectBudget', () => {
     // B perTurn effective = floor(500 × 0.4) = 200
     // B perStep effective = floor(150 × 1.50 × 0.4) = 90
     budget.record(90);  // perStep now at 90
-    expect(budget.canInject(110, 'B')).toBe(false); // perTurn 200 > 90+110=200? 200! fail
+    expect(budget.canInject(110, 'B')).toBe(false); // perStep 90+110=200 > 90 → blocked by step cap
   });
 
   it('degradationFactor at variantCount=0 does not reduce caps', () => {

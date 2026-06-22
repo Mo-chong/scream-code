@@ -99,6 +99,7 @@ export class InjectBudget {
     this.stepTokens = 0;
     this.variantCount = 0;
     this.stepNumber = 0;
+    this.toxicityBypass = false;
   }
 
   /** 当前回合累计 token 数 */

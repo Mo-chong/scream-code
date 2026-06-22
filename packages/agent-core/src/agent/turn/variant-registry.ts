@@ -41,12 +41,15 @@ export class VariantRegistry {
 
   /**
    * 记录一个注入变体。同变体在同回合只记录第一次，
-   * 但 triggerCount 跨步累加。
+   * 但 triggerCount 跨步累加，stepInjected 更新为最近一次触发步号。
+   * stepInjected 被 detectQualityIssue 用于判断变体是否过期，
+   * 因此需要随触发更新（否则旧变体的衰老时钟不会重置）。
    */
   record(variant: string, level: WeightLevel, step: number): void {
     const existing = this.records.get(variant);
     if (existing) {
       existing.triggerCount++;
+      existing.stepInjected = step;
       return;
     }
     this.records.set(variant, {
