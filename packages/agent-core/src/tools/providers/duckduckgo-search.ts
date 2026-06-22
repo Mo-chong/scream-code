@@ -223,13 +223,13 @@ const LITE_SNIPPET_RE =
 function stripHtmlAndDecode(text: string): string {
   const stripped = text.replaceAll(/<[^>]*>/g, '');
   return stripped
-    .replaceAll(/&amp;/g, '&')
-    .replaceAll(/&lt;/g, '<')
-    .replaceAll(/&gt;/g, '>')
-    .replaceAll(/&quot;/g, '"')
-    .replaceAll(/&#x27;/g, "'")
-    .replaceAll(/&#39;/g, "'")
-    .replaceAll(/&nbsp;/g, ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#x27;', "'")
+    .replaceAll('&#39;', "'")
+    .replaceAll('&nbsp;', ' ')
     .trim();
 }
 

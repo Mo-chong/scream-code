@@ -26,7 +26,7 @@ import type {
   PendingApproval,
 } from '#/tui/reverse-rpc/types';
 import type { ColorPalette } from '#/tui/theme/colors';
-import { replaceTabs, TRUNCATE_LENGTHS } from '#/tui/utils/sanitize';
+import { replaceTabs } from '#/tui/utils/sanitize';
 
 export interface ApprovalPanelResponse {
   readonly response: 'approved' | 'approved_for_session' | 'rejected' | 'cancelled';

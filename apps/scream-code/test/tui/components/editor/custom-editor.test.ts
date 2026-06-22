@@ -86,8 +86,8 @@ describe('CustomEditor Kitty key release handling', () => {
 });
 
 describe('CustomEditor paste marker expansion', () => {
-  const PASTE_START = '\x1B[200~';
-  const PASTE_END = '\x1B[201~';
+  const PASTE_START = '\u001B[200~';
+  const PASTE_END = '\u001B[201~';
 
   function simulateLargePaste(editor: CustomEditor, content: string): void {
     editor.handleInput(`${PASTE_START}${content}${PASTE_END}`);
@@ -196,7 +196,7 @@ describe('CustomEditor paste marker expansion', () => {
 
     // Split: PASTE_START in chunk 1, paste-end split across chunk 2 and 3
     editor.handleInput(`${PASTE_START}data`);
-    editor.handleInput('\x1B[20');
+    editor.handleInput('\u001B[20');
     editor.handleInput('1~');
 
     expect(editor.getText()).toContain(longText);

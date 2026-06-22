@@ -3,7 +3,7 @@ import * as os from 'node:os';
 
 /** Replace tabs with spaces, keeping column alignment. Default tab width 4. */
 export function replaceTabs(text: string, tabWidth = 4): string {
-  return text.replaceAll(/\t/g, ' '.repeat(tabWidth));
+  return text.replaceAll('	', ' '.repeat(tabWidth));
 }
 
 /** Replace the home directory prefix with ~. */

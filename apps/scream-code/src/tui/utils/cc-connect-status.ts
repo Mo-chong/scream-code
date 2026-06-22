@@ -32,7 +32,7 @@ function pgrep(pattern: string): Promise<boolean> {
 }
 
 function escapeShell(pattern: string): string {
-  return `'${pattern.replaceAll(/'/g, "'\\''")}'`;
+  return `'${pattern.replaceAll('\'', "'\\''")}'`;
 }
 
 // ── Windows ────────────────────────────────────────────────────────────────

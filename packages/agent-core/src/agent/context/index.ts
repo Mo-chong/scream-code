@@ -160,6 +160,10 @@ export class ContextMemory {
       }
     }
 
+    if (!this.agent.records.restoring && (stoppedAtBoundary || removedUserCount < count)) {
+      // Throw nothing — this is a best-effort operation.
+    }
+
   }
 
   applyCompaction(summary: CompactionResult): void {

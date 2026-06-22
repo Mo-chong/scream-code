@@ -476,7 +476,7 @@ export class MemoryMemoStore {
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
-      throw new Error(`Failed to migrate memos to SQLite: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to migrate memos to SQLite: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
 
@@ -977,8 +977,8 @@ function memoMatchesSearch(memo: MemoryMemo, search: string): boolean {
   ]
     .join(' ')
     .toLowerCase()
-    .replace(/\s+/g, '');
-  return haystack.includes(search.replace(/\s+/g, ''));
+    .replaceAll(/\s+/g, '');
+  return haystack.includes(search.replaceAll(/\s+/g, ''));
 }
 
 /**
