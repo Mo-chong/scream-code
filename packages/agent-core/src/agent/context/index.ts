@@ -4,7 +4,7 @@ import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
-import { project } from './projector';
+import { assertWireFormat, project } from './projector';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -214,7 +214,9 @@ export class ContextMemory {
     // truncated to a short marker, freeing context tokens without an
     // LLM call.  Detect() is a no-op when the feature flag is off.
     this.agent.microCompaction.detect();
-    return project(this.agent.microCompaction.compact(this.history));
+    const result = project(this.agent.microCompaction.compact(this.history));
+    assertWireFormat(result);
+    return result;
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {

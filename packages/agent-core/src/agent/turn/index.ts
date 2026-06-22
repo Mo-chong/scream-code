@@ -2,7 +2,7 @@ import {
   APIContextOverflowError,
   grandTotal as ltodGrandTotal,
   type ContentPart,
-} from '@scream-code/ltod';
+} from '@scream-cli/ltod';
 
 import type { Agent } from '..';
 import {
@@ -27,6 +27,15 @@ import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../c
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
+import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
+import { detectConfabulation } from './detectors/confabulation';
+import { injectAntiConfabulation } from './injectors/anti_confabulation';
+import { VariantRegistry, detectWeightLevel, type WeightLevel } from './variant-registry';
+import { detectQualityIssue, observeBehavior } from './detectors/quality';
+import { escalateQuality } from './injectors/quality';
+import { detectIntent } from './detectors/intent';
+import { injectIntentGuidance } from './injectors/intent';
+import { InjectBudget } from './injectors/budget';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -83,6 +92,27 @@ export class TurnFlow {
   private turnStartVerificationCount = 0;
   private verificationFailureInjected = false;
   private readonly MIN_FINAL_RESPONSE_LENGTH = 60;
+
+  // ── Injection injector fields ────────────────────────────────
+  private stepInjectedVariants = new Set<string>();
+  private hasCalledLspReferencesThisStep = false;
+  private searchHadResultsThisStep = false;
+  private verifyFailedThisStep = false;
+  private editCalledSuccessThisStep = false;
+  private editWithoutLookupCount = 0;
+  private stepToolCounts: Record<string, number> = {};
+  private static readonly BASH_FILE_OPS_RE = /\b(cat|head|tail|less|more)\s+/i;
+
+  // ── Toxicity early interception fields ───────────────────────
+  private deviationChainActive = false;
+  private deviationChainReason = '';
+  private deviationChainBypassUsed = false;
+
+  // ── Quality escalation (P2) ───────────────────────────────────
+  private variantRegistry = new VariantRegistry();
+
+  // ── Inject budget (Phase 5) ───────────────────────────────────
+  private readonly injectBudget = new InjectBudget();
 
   constructor(protected readonly agent: Agent) {}
 
@@ -382,9 +412,27 @@ export class TurnFlow {
     this.currentStep = 0;
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
+    this.editWithoutLookupCount = 0;
+    this.deviationChainActive = false;
+    this.deviationChainReason = '';
+    this.deviationChainBypassUsed = false;
+    this.variantRegistry.reset();
+    this.currentStep = 0;
+    this.injectBudget.reset();
+    this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
+
+    // ── Phase 4: 回合意图注入 ─────────────────────────────
+    if (origin.kind === 'user') {
+      const intentDetection = detectIntent(input);
+      if (intentDetection) {
+        injectIntentGuidance(intentDetection, (text, meta) => {
+          this.inject(text, meta);
+        });
+      }
+    }
 
     let ended: TurnEndedEvent;
     let completedStopReason: LoopTurnStopReason | undefined;
@@ -533,17 +581,18 @@ export class TurnFlow {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
               this.currentStepHadContent = false;
+              this.injectBudget.beginStep(stepNumber);
               await this.agent.fullCompaction.beforeStep(stepSignal);
 
               const goal = this.agent.goal.getGoal().goal;
               if (stepNumber === 1 && goal?.status === 'active' && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'This turn is working toward an active goal. You MUST call TodoList to create or update the plan before making changes.',
                   { kind: 'system_trigger', name: 'todo_required' },
                 );
               }
               if (stepNumber === 2 && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'This task spans multiple steps. Use TodoList to track the remaining work and current phase.',
                   { kind: 'system_trigger', name: 'todo_suggested' },
                 );
@@ -552,7 +601,7 @@ export class TurnFlow {
               if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
                 const sessionSummary = this.agent.sessionMemory.getSessionSummary();
                 if (sessionSummary.length > 0) {
-                  this.agent.context.appendSystemReminder(sessionSummary, {
+                  this.inject(sessionSummary, {
                     kind: 'injection',
                     variant: 'session_memory',
                   });
@@ -561,7 +610,7 @@ export class TurnFlow {
 
               // Suggest /dream on the first step when conditions are met
               if (stepNumber === 1 && this.agent.dreamTracker.shouldSuggest()) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   this.agent.dreamTracker.getSuggestionMessage(),
                   { kind: 'injection', variant: 'dream_suggestion' },
                 );
@@ -576,11 +625,100 @@ export class TurnFlow {
               await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage));
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
+
+              // 🆕 C组: 步级反馈注入 — afterStep
+              if (this.editCalledSuccessThisStep && !this.hasCalledLspReferencesThisStep) {
+                this.editWithoutLookupCount++;
+                if (this.editWithoutLookupCount >= 2) {
+                  this.inject(
+                    'MUST check callers. Missing LSP.references before edit.',
+                    { kind: 'injection', variant: 'step_after_edit' },
+                  );
+                } else {
+                  this.inject(
+                    'Edit done → consider verifying before continuing.',
+                    { kind: 'injection', variant: 'step_after_edit' },
+                  );
+                }
+              } else if (this.editCalledSuccessThisStep) {
+                this.editWithoutLookupCount = 0;
+              }
+              if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
+                this.inject(
+                  'Refs found. Design change before editing.',
+                  { kind: 'injection', variant: 'step_after_search' },
+                );
+              }
+              if (this.verifyFailedThisStep && !this.stepInjectedVariants.has('step_after_verify_fail')) {
+                this.stepInjectedVariants.add('step_after_verify_fail');
+                this.inject(
+                  'NEVER downgrade. Fix the root cause, re-run verification.',
+                  { kind: 'injection', variant: 'step_after_verify_fail' },
+                );
+              }
+              // ── 毒性早期检测：偏差链追踪 ─────────────────────────
+              if (this.editWithoutLookupCount >= 3 && !this.deviationChainActive) {
+                this.deviationChainActive = true;
+                this.deviationChainReason =
+                  '连续多次 Edit 未查 LSP.references：已触发偏差拦截。';
+              }
+              if (!this.deviationChainActive && this.verifyFailedThisStep) {
+                this.deviationChainActive = true;
+                this.deviationChainReason =
+                  '验证失败：已触发偏差拦截。';
+              }
+
+              // ── 反事实检测 ──────────────────────────────────────
+              const lastText = extractLastAssistantText(this.agent.context.history);
+              const sig = compressStep(this.stepToolCounts, lastText);
+              const snap = buildContextSnapshot(this.stepToolCounts, this.currentStep);
+              const confaResult = detectConfabulation(sig, snap);
+              injectAntiConfabulation(
+                confaResult,
+                this.stepInjectedVariants,
+                (text, meta) => this.inject(text, meta),
+              );
+
+              // ── 质量升级检测 ────────────────────────────────────
+              observeBehavior(this.variantRegistry, sig);
+              const qualityIssue = detectQualityIssue(
+                this.variantRegistry, sig, this.currentStep,
+              );
+              if (qualityIssue) {
+                escalateQuality(
+                  qualityIssue,
+                  this.stepInjectedVariants,
+                  (text, meta) => {
+                    this.inject(text, meta);
+                  },
+                );
+                // P1 关键修复: 升级后回写原始变体权重，实现 C→B→A→S 渐进升级
+                this.variantRegistry.updateLevel(
+                  qualityIssue.targetVariant,
+                  qualityIssue.suggestedLevel,
+                  this.currentStep,
+                );
+              }
+
+              this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async ({ signal }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
+
+              // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
+              if (this.deviationChainActive && !this.deviationChainBypassUsed) {
+                this.deviationChainBypassUsed = true;
+                this.inject(
+                  '偏差链检测到：' + this.deviationChainReason + '\n' +
+                  '- MUST verify all claims with tool calls.\n' +
+                  '- NEVER fabricate outputs. Each claim needs tool evidence.\n' +
+                  '- Fix the root cause. Do NOT work around.',
+                  { kind: 'injection', variant: 'deviation_chain_intercept' },
+                );
+                return { continue: true };
+              }
 
               // Convergence gate: prevent the turn from ending on an empty step,
               // a missing TodoList update for an active goal, a blocking (non-exploratory)
@@ -622,7 +760,7 @@ export class TurnFlow {
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     reasons.join('\n') +
                       '\n\nDo not report completion until the above is resolved.',
                     { kind: 'system_trigger', name: 'convergence_gate' },
@@ -640,7 +778,7 @@ export class TurnFlow {
                 this.lastAssistantMessageIsTrivial()
               ) {
                 this.summaryGuardInjected = true;
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'Your final response is too brief or only acknowledges completion. ' +
                     'Before ending the turn, provide a concise but complete summary: ' +
                     'what was done, which files changed, the verification result, and any ' +
@@ -705,6 +843,63 @@ export class TurnFlow {
                       },
                     };
                   }
+                }
+              }
+
+              // 🆕 A组: 工具执行前注入 — prepareToolExecution
+              if (!this.stepInjectedVariants.has('prepare_edit') && ctx.toolCall.name === 'Edit') {
+                this.stepInjectedVariants.add('prepare_edit');
+                this.inject(
+                  'MUST update all callers after edit. Use LSP.references.',
+                  { kind: 'injection', variant: 'prepare_edit' },
+                );
+              }
+              if (!this.stepInjectedVariants.has('prepare_write') && ctx.toolCall.name === 'Write') {
+                this.stepInjectedVariants.add('prepare_write');
+                const path = (ctx.args as { path?: string }).path ?? '';
+                const text = path.endsWith('.md')
+                  ? 'MUST verify markdown output format after write.'
+                  : path.endsWith('.ts') || path.endsWith('.tsx')
+                    ? 'MUST verify build after writing new code.'
+                    : 'MUST check output correctness after write.';
+                this.inject(text, {
+                  kind: 'injection',
+                  variant: 'prepare_write',
+                });
+              }
+              if (!this.stepInjectedVariants.has('prepare_search') &&
+                  (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP')) {
+                this.stepInjectedVariants.add('prepare_search');
+                this.inject(
+                  'NEVER edit after seeing only one match. Evaluate ALL results.',
+                  { kind: 'injection', variant: 'prepare_search' },
+                );
+              }
+              if (!this.stepInjectedVariants.has('prepare_memory') && ctx.toolCall.name === 'MemoryLookup') {
+                this.stepInjectedVariants.add('prepare_memory');
+                this.inject(
+                  'MUST check whatFailed before repeating approach.',
+                  { kind: 'injection', variant: 'prepare_memory' },
+                );
+              }
+              if (!this.stepInjectedVariants.has('prepare_bash_file') && ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (TurnFlow.BASH_FILE_OPS_RE.test(cmd)) {
+                  this.stepInjectedVariants.add('prepare_bash_file');
+                  this.inject(
+                    'NEVER use Bash for file reads. Use Read/Edit/Grep.',
+                    { kind: 'injection', variant: 'prepare_bash_file' },
+                  );
+                }
+              }
+              if (!this.stepInjectedVariants.has('prepare_verify') && ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.stepInjectedVariants.add('prepare_verify');
+                  this.inject(
+                    'Fail → fix. NEVER downgrade verification.',
+                    { kind: 'injection', variant: 'prepare_verify' },
+                  );
                 }
               }
 
@@ -811,7 +1006,7 @@ export class TurnFlow {
                     : '';
                 const isExploratory =
                   ctx.toolCall.name === 'Agent'
-                    ? subagentType !== 'verify' && subagentType !== 'reviewer'
+                    ? subagentType !== 'verify' && subagentType !== 'reviewer' && subagentType !== 'explore'
                     : this.isExploratoryBashCommand(command);
                 this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
               } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
@@ -821,6 +1016,87 @@ export class TurnFlow {
                 // cleared when the turn resets.
                 if (this.lastToolFailure.isExploratory) {
                   this.lastToolFailure = null;
+                }
+              }
+
+              // 🆕 B组: 工具执行后追踪 (finalizeToolResult)
+              if (isError !== true) {
+                this.stepToolCounts[ctx.toolCall.name] =
+                  (this.stepToolCounts[ctx.toolCall.name] ?? 0) + 1;
+                if (ctx.toolCall.name === 'LSP' || ctx.toolCall.name === 'Grep') {
+                  this.searchHadResultsThisStep = true;
+                }
+                if (ctx.toolCall.name === 'Edit') {
+                  this.editCalledSuccessThisStep = true;
+                }
+              }
+              // Track LSP.references specifically for C1 upgrade detection
+              if (ctx.toolCall.name === 'LSP') {
+                const operation = (ctx.args as { operation?: string }).operation;
+                if (operation === 'references') this.hasCalledLspReferencesThisStep = true;
+              }
+              // Track verify failure for C3
+              if (ctx.toolCall.name === 'Bash' && isError === true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) this.verifyFailedThisStep = true;
+              }
+
+              // 🆕 B组: 工具执行后注入 — finalizeResult
+              if (!this.stepInjectedVariants.has('post_edit') && ctx.toolCall.name === 'Edit' && isError !== true) {
+                this.stepInjectedVariants.add('post_edit');
+                this.inject(
+                  'NEVER leave callers unverified without update.',
+                  { kind: 'injection', variant: 'post_edit' },
+                );
+              }
+              if (!this.stepInjectedVariants.has('post_search') && (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
+                const hasContent = toolOutputText(output).trim().length > 0;
+                if (hasContent) {
+                  this.stepInjectedVariants.add('post_search');
+                  this.inject(
+                    'Full picture ready. NOW design and apply the change.',
+                    { kind: 'injection', variant: 'post_search' },
+                  );
+                }
+              }
+              if (!this.stepInjectedVariants.has('post_write_large') && ctx.toolCall.name === 'Write' && isError !== true) {
+                const text = toolOutputText(output);
+                if (text.length > 500) {
+                  this.stepInjectedVariants.add('post_write_large');
+                  this.inject(
+                    'Large output written. MUST review for correctness.',
+                    { kind: 'injection', variant: 'post_write_large' },
+                  );
+                }
+              }
+              if (!this.stepInjectedVariants.has('post_verify_pass') && ctx.toolCall.name === 'Bash' && isError !== true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.stepInjectedVariants.add('post_verify_pass');
+                  this.inject(
+                    'Verification passed. Deliver the result.',
+                    { kind: 'injection', variant: 'post_verify_pass' },
+                  );
+                }
+              }
+              if (!this.stepInjectedVariants.has('post_verify_fail') && ctx.toolCall.name === 'Bash' && isError === true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.stepInjectedVariants.add('post_verify_fail');
+                  this.inject(
+                    'NEVER downgrade verification. Fix the root cause.',
+                    { kind: 'injection', variant: 'post_verify_fail' },
+                  );
+                }
+              }
+              if (!this.stepInjectedVariants.has('post_memory') && ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
+                const hasContent = toolOutputText(output).trim().length > 0;
+                if (hasContent) {
+                  this.stepInjectedVariants.add('post_memory');
+                  this.inject(
+                    'NOW apply whatFailed lessons from results above.',
+                    { kind: 'injection', variant: 'post_memory' },
+                  );
                 }
               }
 
@@ -912,6 +1188,72 @@ export class TurnFlow {
     this.currentStepByTurn.set(turnId, step);
     this.currentStep = step;
   }
+
+  // ── Inject budget + unified injection (Phase 5) ──────────────
+  /**
+   * 带预算检查 + 权重感知 + VariantRegistry 记录的注入包装。
+   *
+   * system_trigger 穿透预算（收敛机制不应被 budget 拦截）。
+   * quality_escalate_ 穿透预算（升级本身就是 budget 不足的补救）。
+   */
+  private inject(text: string, meta: PromptOrigin): void {
+    // system_trigger: 穿透预算
+    if (meta.kind === 'system_trigger') {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    // 质量升级注入: 穿透预算
+    if (typeof meta === 'object' && 'variant' in meta &&
+        typeof meta.variant === 'string' && meta.variant.startsWith('quality_escalate_')) {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    const estimatedTokens = Math.ceil(text.length / 4);
+    const level = detectWeightLevel(text);
+    const effectiveLevel = this.getEffectiveLevel(meta, level);
+
+    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
+      return; // 静默丢弃
+    }
+
+    this.agent.context.appendSystemReminder(text, meta);
+    this.injectBudget.record(estimatedTokens);
+
+    // 注册到 VariantRegistry（残差系统依赖）
+    if (typeof meta === 'object' && 'variant' in meta &&
+        typeof meta.variant === 'string') {
+      this.variantRegistry.record(meta.variant, effectiveLevel, this.currentStep);
+    }
+
+    // 同步 variant 计数到预算管理器（供 degradationFactor 使用）
+    this.injectBudget.syncVariantCount(this.variantRegistry.size);
+  }
+
+  /**
+   * 残差路径优化: 如果变体的行为已被观察，降级预算占用。
+   * 行为已观察 → identity path 直通 → 不需要高预算空间重注入。
+   */
+  private getEffectiveLevel(meta: PromptOrigin, defaultLevel: WeightLevel): WeightLevel {
+    if (typeof meta !== 'object' || !('variant' in meta)) return defaultLevel;
+    const record = this.variantRegistry.get(meta.variant as string);
+    if (record?.behaviorObserved === true) {
+      return 'C';
+    }
+    return defaultLevel;
+  }
+
+  /** Reset per-step injection tracking state (called at runOneTurn and afterStep). */
+  private resetInjectorStepState(): void {
+    this.stepInjectedVariants.clear();
+    this.hasCalledLspReferencesThisStep = false;
+    this.searchHadResultsThisStep = false;
+    this.verifyFailedThisStep = false;
+    this.editCalledSuccessThisStep = false;
+    this.stepToolCounts = {};
+  }
+
   private turnHadMeaningfulWork(): boolean {
     const workingSet = this.agent.workingSet;
     const hasNewPaths = workingSet.getPaths().length > this.turnStartWorkingSetPathCount;

@@ -1,3 +1,4 @@
+import { normalize as normalizePath } from 'node:path';
 import chalk from 'chalk';
 import {
   ScreamHarness,
@@ -42,7 +43,7 @@ export async function runPrompt(
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
   const promptProcess = io.process ?? process;
-  const workDir = process.cwd();
+  const workDir = normalizePath(process.cwd());
   const homeDir = resolveScreamHome();
   const harness = new ScreamHarness({
     homeDir,
@@ -116,7 +117,7 @@ async function resolvePromptSession(
     if (target === undefined) {
       throw new Error(`未找到会话 "${opts.session}"。`);
     }
-    if (target.workDir !== workDir) {
+    if (normalizePath(target.workDir) !== workDir) {
       stderr.write(
         `${chalk.yellow(
           `会话 "${opts.session}" 是在其他目录下创建的。\n` +
