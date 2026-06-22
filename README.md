@@ -20,7 +20,7 @@
 
 ---
 
-Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，完全本地部署运行，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！
+Scream Code 是一款省心的本地中文 AI Agent 助手。无需硬记代码，完全本地部署运行，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！
 
 ---
 
@@ -34,7 +34,7 @@ Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，完�
     </td>
     <td width="50%">
       <h3>🐺 Wolfpack 群狼模式</h3>
-      <p><strong>智能批量并发</strong>多Agent协同，并行处理大项目任务。内置 coder/explore/plan/verify/writer 五类子 Agent。</p>
+      <p><strong>智能批量并发</strong>多Agent协同，并行处理大项目任务。内置 coder/explore/plan/verify/writer 等多种子 Agent。</p>
     </td>
   </tr>
   <tr>
