@@ -62,7 +62,7 @@ const INTENT_RULES: IntentRule[] = [
       /\bregression\b/i, /\b异常\b/i, /\b修复\b/i, /\b问题\b/i,
     ],
     highConfidenceThreshold: 2,
-    highConfidenceMarkers: /\b(reproduc|failing test)\b/i,
+    highConfidenceMarkers: /\b(reproduc|failing test)/i,
   },
   {
     variant: 'intent_refactor',

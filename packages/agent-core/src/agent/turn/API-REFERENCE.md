@@ -302,11 +302,11 @@ interface IntentDetection {
 | Variant | Keywords | High threshold | High markers | Exclude |
 |---------|----------|:--------------:|--------------|---------|
 | `intent_fix_bug` | fix, bug, error, fail, broken, crash, incorrect, wrong, regression | 2 | reproduction | — |
-| `intent_refactor` | refactor, restructure, rewrite, clean up, reorganize, modernize | 1 | migrate all, all caller, compatibility shim | test, config |
-| `intent_add_feature` | add, feature, new, implement, create, build, integrate | 3 | — | test, config |
-| `intent_review` | review, audit, check, inspect, scan | 1 | only review, just check, read only | fix, refactor, add |
+| `intent_refactor` | refactor, restructure, rewrite, clean up, reorganize, modernize, migrate | 2 | all callers, compatibility shim, clean cutover | test, config |
+| `intent_add_feature` | add, feature, new, implement, create, build, integrate | 2 | — | test, config, setting |
+| `intent_review` | review, audit, check, inspect, scan | 2 | only review, read only, examine | fix, refactor, add |
 | `intent_research` | research, investigate, find out, explore, learn about, search for | 2 | deep dive, thorough, compare | — |
-| `intent_document` | document, write docs, explain, tutorial, readme | 2 | readme, api reference | — |
+| `intent_document` | document, write docs, explain, tutorial, readme | 2 | api reference, user guide | — |
 
 **Weight level:** low confidence → B（结构化步骤提示）, high confidence → A（MUST/NEVER 祈使）
 
@@ -352,6 +352,9 @@ if (origin.kind === 'user') {
 | `intent_fix_bug` | sig.toolCounts['Edit'] > 0 |
 | `intent_refactor` | sig.hasKnowledgeTools |
 | `intent_add_feature` | sig.toolCounts['Read'] > 0 \|\| sig.toolCounts['Glob'] > 0 |
+| `intent_review` | sig.toolCounts['Read'] > 0 && !sig.hasActionTools |
+| `intent_research` | sig.hasKnowledgeTools |
+| `intent_document` | sig.hasKnowledgeTools \|\| sig.toolCounts['Edit'] > 0 \|\| sig.toolCounts['Write'] > 0 |
 | `intent_review` | sig.toolCounts['Read'] > 0 && !sig.hasActionTools |
 | `intent_research` | sig.hasKnowledgeTools |
 | `intent_document` | sig.hasKnowledgeTools |

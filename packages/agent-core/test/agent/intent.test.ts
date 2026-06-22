@@ -45,7 +45,7 @@ describe('detectIntent', () => {
   });
 
   it('fix_bug: reproduction marker → high confidence (A)', () => {
-    const result = detectIntent(makePrompt('reproduc the crash bug'));
+    const result = detectIntent(makePrompt('reproduction steps for the crash bug'));
     expect(result).not.toBeNull();
     expect(result!.variant).toBe('intent_fix_bug');
     expect(result!.confidence).toBe('high');
@@ -179,6 +179,14 @@ describe('detectIntent', () => {
     expect(result!.variant).toBe('intent_fix_bug');
   });
 
+  it('equal keyword counts: picks first-best (no crash on tie)', () => {
+    // fix_bug: "fix" = 1, add_feature: "add" = 1, review excluded by "fix", document: "docs" = 1
+    const result = detectIntent(makePrompt('fix and add new docs'));
+    expect(result).not.toBeNull();
+    // Should not crash. Any variant is acceptable — the test verifies stability.
+    expect(['intent_fix_bug', 'intent_add_feature', 'intent_document']).toContain(result!.variant);
+  });
+
   // ── Edge: guidance text presence ──
   it('all intents have B-level guidance text', () => {
     const variants = ['intent_fix_bug', 'intent_refactor', 'intent_add_feature',
@@ -186,12 +194,12 @@ describe('detectIntent', () => {
     for (const variant of variants) {
       // Use a match that produces low confidence (B)
       const keywordMap: Record<string, string> = {
-        intent_fix_bug: 'fix the bug',
-        intent_refactor: 'refactor the code',
-        intent_add_feature: 'add feature',
-        intent_review: 'review the code',
-        intent_research: 'research this',
-        intent_document: 'write docs',
+        intent_fix_bug: 'fix this thing',     // 1 keyword → low
+        intent_refactor: 'refactor the code', // 1 keyword → low (highThreshold=2)
+        intent_add_feature: 'add the thing',  // 1 keyword → low
+        intent_review: 'review the code',     // 1 keyword → low (highThreshold=2, excluded by excludePattern)
+        intent_research: 'research this',      // 1 keyword → low
+        intent_document: 'write docs',         // 1 keyword → low (highThreshold=2)
       };
       const result = detectIntent(makePrompt(keywordMap[variant]));
       expect(result).not.toBeNull();

@@ -413,6 +413,7 @@ export class TurnFlow {
     this.deviationChainReason = '';
     this.deviationChainBypassUsed = false;
     this.variantRegistry.reset();
+    this.currentStep = 0;
     this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });

@@ -183,7 +183,7 @@ export function observeBehavior(
   }
 
   // intent_document: 有知识工具或 Edit/Write .md → 输出文档
-  if (registry.get('intent_document') && sig.hasKnowledgeTools) {
+  if (registry.get('intent_document') && (sig.hasKnowledgeTools || (sig.toolCounts['Edit'] ?? 0) > 0 || (sig.toolCounts['Write'] ?? 0) > 0)) {
     registry.markBehaviorObserved('intent_document');
   }
 }
