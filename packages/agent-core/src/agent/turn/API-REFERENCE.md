@@ -75,6 +75,7 @@ interface VariantRecord {
 | `updateLevel` | `(variant, newLevel, step) => void` | 更新变体权重（原地改，用于升级链） |
 | `stepsSinceLastEscalation` | `(variant, currentStep) => number` | 距上次升级的步数 |
 | `reset` | `() => void` | 回合开始清空 |
+| `hasIntentVariants` | `() => boolean` | 快速检查是否含有 intent_ 前缀变体（供 observeBehavior 优化） |
 | `size` | `getter: number` | 当前记录数 |
 
 ### Pure Functions
@@ -355,9 +356,6 @@ if (origin.kind === 'user') {
 | `intent_review` | sig.toolCounts['Read'] > 0 && !sig.hasActionTools |
 | `intent_research` | sig.hasKnowledgeTools |
 | `intent_document` | sig.hasKnowledgeTools \|\| sig.toolCounts['Edit'] > 0 \|\| sig.toolCounts['Write'] > 0 |
-| `intent_review` | sig.toolCounts['Read'] > 0 && !sig.hasActionTools |
-| `intent_research` | sig.hasKnowledgeTools |
-| `intent_document` | sig.hasKnowledgeTools |
 
 ---
 
