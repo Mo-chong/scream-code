@@ -997,7 +997,7 @@ export class TurnFlow {
                     : '';
                 const isExploratory =
                   ctx.toolCall.name === 'Agent'
-                    ? subagentType !== 'verify' && subagentType !== 'reviewer'
+                    ? subagentType !== 'verify' && subagentType !== 'reviewer' && subagentType !== 'explore'
                     : this.isExploratoryBashCommand(command);
                 this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
               } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
