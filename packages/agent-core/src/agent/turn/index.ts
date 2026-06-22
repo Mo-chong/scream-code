@@ -30,6 +30,9 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
+import { VariantRegistry, detectWeightLevel, type WeightLevel } from './variant-registry';
+import { detectQualityIssue, observeBehavior } from './detectors/quality';
+import { escalateQuality } from './injectors/quality';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -101,6 +104,10 @@ export class TurnFlow {
   private deviationChainActive = false;
   private deviationChainReason = '';
   private deviationChainBypassUsed = false;
+
+  // ── Quality escalation (P2) ───────────────────────────────────
+  private variantRegistry = new VariantRegistry();
+  private qualityEscalatedThisStep = false;
 
   constructor(protected readonly agent: Agent) {}
 
@@ -404,6 +411,8 @@ export class TurnFlow {
     this.deviationChainActive = false;
     this.deviationChainReason = '';
     this.deviationChainBypassUsed = false;
+    this.variantRegistry.reset();
+    this.qualityEscalatedThisStep = false;
     this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -608,11 +617,13 @@ export class TurnFlow {
                     'MUST check callers. Missing LSP.references before edit.',
                     { kind: 'injection', variant: 'step_after_edit' },
                   );
+                  this.variantRegistry.record('step_after_edit', 'A', this.currentStep);
                 } else {
                   this.agent.context.appendSystemReminder(
                     'Edit done → consider verifying before continuing.',
                     { kind: 'injection', variant: 'step_after_edit' },
                   );
+                  this.variantRegistry.record('step_after_edit', 'B', this.currentStep);
                 }
               } else if (this.editCalledSuccessThisStep) {
                 this.editWithoutLookupCount = 0;
@@ -622,6 +633,7 @@ export class TurnFlow {
                   'Refs found. Design change before editing.',
                   { kind: 'injection', variant: 'step_after_search' },
                 );
+                this.variantRegistry.record('step_after_search', 'B', this.currentStep);
               }
               if (this.verifyFailedThisStep && !this.stepInjectedVariants.has('step_after_verify_fail')) {
                 this.stepInjectedVariants.add('step_after_verify_fail');
@@ -629,6 +641,7 @@ export class TurnFlow {
                   'NEVER downgrade. Fix the root cause, re-run verification.',
                   { kind: 'injection', variant: 'step_after_verify_fail' },
                 );
+                this.variantRegistry.record('step_after_verify_fail', 'A', this.currentStep);
               }
               // ── 毒性早期检测：偏差链追踪 ─────────────────────────
               if (this.editWithoutLookupCount >= 3 && !this.deviationChainActive) {
@@ -652,6 +665,27 @@ export class TurnFlow {
                 this.stepInjectedVariants,
                 (text, meta) => this.agent.context.appendSystemReminder(text, meta),
               );
+
+              // ── 质量升级检测 ────────────────────────────────────
+              observeBehavior(this.variantRegistry, sig);
+              const qualityIssue = detectQualityIssue(
+                this.variantRegistry, sig, snap, this.currentStep,
+              );
+              if (qualityIssue) {
+                escalateQuality(
+                  qualityIssue,
+                  this.stepInjectedVariants,
+                  (text, meta) => {
+                    this.agent.context.appendSystemReminder(text, meta);
+                    this.variantRegistry.record(
+                      meta.variant,
+                      detectWeightLevel(text),
+                      this.currentStep,
+                    );
+                  },
+                );
+                this.qualityEscalatedThisStep = true;
+              }
 
               this.resetInjectorStepState();
             },
@@ -806,6 +840,7 @@ export class TurnFlow {
                   'MUST update all callers after edit. Use LSP.references.',
                   { kind: 'injection', variant: 'prepare_edit' },
                 );
+                this.variantRegistry.record('prepare_edit', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_write') && ctx.toolCall.name === 'Write') {
                 this.stepInjectedVariants.add('prepare_write');
@@ -819,6 +854,7 @@ export class TurnFlow {
                   kind: 'injection',
                   variant: 'prepare_write',
                 });
+                this.variantRegistry.record('prepare_write', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_search') &&
                   (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP')) {
@@ -827,6 +863,7 @@ export class TurnFlow {
                   'NEVER edit after seeing only one match. Evaluate ALL results.',
                   { kind: 'injection', variant: 'prepare_search' },
                 );
+                this.variantRegistry.record('prepare_search', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_memory') && ctx.toolCall.name === 'MemoryLookup') {
                 this.stepInjectedVariants.add('prepare_memory');
@@ -834,6 +871,7 @@ export class TurnFlow {
                   'MUST check whatFailed before repeating approach.',
                   { kind: 'injection', variant: 'prepare_memory' },
                 );
+                this.variantRegistry.record('prepare_memory', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_bash_file') && ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
@@ -843,6 +881,7 @@ export class TurnFlow {
                     'NEVER use Bash for file reads. Use Read/Edit/Grep.',
                     { kind: 'injection', variant: 'prepare_bash_file' },
                   );
+                  this.variantRegistry.record('prepare_bash_file', 'C', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('prepare_verify') && ctx.toolCall.name === 'Bash') {
@@ -853,6 +892,7 @@ export class TurnFlow {
                     'Fail → fix. NEVER downgrade verification.',
                     { kind: 'injection', variant: 'prepare_verify' },
                   );
+                  this.variantRegistry.record('prepare_verify', 'C', this.currentStep);
                 }
               }
 
@@ -1001,6 +1041,7 @@ export class TurnFlow {
                   'NEVER leave callers unverified without update.',
                   { kind: 'injection', variant: 'post_edit' },
                 );
+                this.variantRegistry.record('post_edit', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('post_search') && (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
                 const hasContent = toolOutputText(output).trim().length > 0;
@@ -1010,6 +1051,7 @@ export class TurnFlow {
                     'Full picture ready. NOW design and apply the change.',
                     { kind: 'injection', variant: 'post_search' },
                   );
+                  this.variantRegistry.record('post_search', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_write_large') && ctx.toolCall.name === 'Write' && isError !== true) {
@@ -1020,6 +1062,7 @@ export class TurnFlow {
                     'Large output written. MUST review for correctness.',
                     { kind: 'injection', variant: 'post_write_large' },
                   );
+                  this.variantRegistry.record('post_write_large', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_verify_pass') && ctx.toolCall.name === 'Bash' && isError !== true) {
@@ -1030,6 +1073,7 @@ export class TurnFlow {
                     'Verification passed. Deliver the result.',
                     { kind: 'injection', variant: 'post_verify_pass' },
                   );
+                  this.variantRegistry.record('post_verify_pass', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_verify_fail') && ctx.toolCall.name === 'Bash' && isError === true) {
@@ -1040,6 +1084,7 @@ export class TurnFlow {
                     'NEVER downgrade verification. Fix the root cause.',
                     { kind: 'injection', variant: 'post_verify_fail' },
                   );
+                  this.variantRegistry.record('post_verify_fail', 'A', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_memory') && ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
@@ -1050,6 +1095,7 @@ export class TurnFlow {
                     'NOW apply whatFailed lessons from results above.',
                     { kind: 'injection', variant: 'post_memory' },
                   );
+                  this.variantRegistry.record('post_memory', 'B', this.currentStep);
                 }
               }
 
