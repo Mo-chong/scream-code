@@ -283,7 +283,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
     // Mount only after init() succeeds; see mountFooter().
     this.lifecycleController.mountFooter();
-    this.installFixedBottomRegion();
     this.transcriptController.renderWelcome();
     setExperimentalFlags(await this.harness.getExperimentalFlags());
     this.inputController.setupAutocomplete();
@@ -657,25 +656,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
    * We override `doRender` to measure the editor + footer height each frame
    * and set the count before the real render runs.
    */
-  private installFixedBottomRegion(): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ui = this.state.ui as any;
-    const originalDoRender: () => void = ui.doRender.bind(ui);
-    const editor = this.state.editorContainer;
-    const footer = ui.children.at(-1) as import('@earendil-works/pi-tui').Component | undefined;
-    let lastWidth = -1;
-    let fixedCount = 0;
-
-    ui.doRender = () => {
-      const w: number = ui.terminal?.columns ?? 0;
-      if (w > 0 && w !== lastWidth) {
-        fixedCount = editor.render(w).length + (footer ? footer.render(w).length : 0);
-        lastWidth = w;
-      }
-      ui.fixedBottomLineCount = fixedCount;
-      originalDoRender();
-    };
-  }
 
   async resumeSession(targetSessionId: string): Promise<boolean> {
     const result = await this.sessionManager.resumeSession(targetSessionId);
