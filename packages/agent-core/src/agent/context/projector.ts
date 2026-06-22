@@ -17,7 +17,58 @@ export function project(history: readonly ContextMessage[]): Message[] {
   const last = usable.at(-1);
   const repaired =
     last?.role === 'assistant' && last.toolCalls.length > 0 ? usable.slice(0, -1) : usable;
-  return mergeAdjacentUserMessages(repaired);
+  const reordered = reorderToolResults(repaired);
+  return mergeAdjacentUserMessages(reordered);
+}
+
+/**
+ * Reorder messages so that tool results immediately follow their
+ * originating assistant message, before any intervening user-role
+ * injections. Strict providers (e.g. DeepSeek V4 Flash) reject
+ * requests where a user message appears between an assistant's
+ * `tool_calls` and the matching `tool` results.
+ */
+function reorderToolResults(history: readonly ContextMessage[]): ContextMessage[] {
+  const result: ContextMessage[] = [];
+  let i = 0;
+
+  while (i < history.length) {
+    const message = history[i]!;
+
+    if (message.role !== 'assistant' || message.toolCalls.length === 0) {
+      result.push(message);
+      i += 1;
+      continue;
+    }
+
+    const toolCallIds = new Set(message.toolCalls.map((tc) => tc.id));
+    const segmentTools: ContextMessage[] = [];
+    const segmentOthers: ContextMessage[] = [];
+    let j = i + 1;
+
+    for (; j < history.length; j += 1) {
+      const next = history[j]!;
+      if (next.role === 'assistant') break;
+
+      if (
+        next.role === 'tool' &&
+        next.toolCallId !== undefined &&
+        toolCallIds.has(next.toolCallId)
+      ) {
+        segmentTools.push(next);
+      } else {
+        segmentOthers.push(next);
+      }
+    }
+
+    result.push(message);
+    result.push(...segmentTools);
+    result.push(...segmentOthers);
+
+    i = j;
+  }
+
+  return result;
 }
 
 function mergeAdjacentUserMessages(history: readonly ContextMessage[]): Message[] {
