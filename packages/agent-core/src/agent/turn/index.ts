@@ -27,6 +27,9 @@ import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../c
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
+import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
+import { detectConfabulation } from './detectors/confabulation';
+import { injectAntiConfabulation } from './injectors/anti_confabulation';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -91,6 +94,7 @@ export class TurnFlow {
   private verifyFailedThisStep = false;
   private editCalledSuccessThisStep = false;
   private editWithoutLookupCount = 0;
+  private stepToolCounts: Record<string, number> = {};
   private static readonly BASH_FILE_OPS_RE = /\b(cat|head|tail|less|more)\s+/i;
 
   // ── Toxicity early interception fields ───────────────────────
@@ -633,10 +637,22 @@ export class TurnFlow {
                   '连续多次 Edit 未查 LSP.references：已触发偏差拦截。';
               }
               if (!this.deviationChainActive && this.verifyFailedThisStep) {
-                  this.deviationChainActive = true;
-                  this.deviationChainReason =
-                    '验证失败：已触发偏差拦截。';
+                this.deviationChainActive = true;
+                this.deviationChainReason =
+                  '验证失败：已触发偏差拦截。';
               }
+
+              // ── 反事实检测 ──────────────────────────────────────
+              const lastText = extractLastAssistantText(this.agent.context.history);
+              const sig = compressStep(this.stepToolCounts, lastText);
+              const snap = buildContextSnapshot(this.stepToolCounts, this.currentStep);
+              const confaResult = detectConfabulation(sig, snap);
+              injectAntiConfabulation(
+                confaResult,
+                this.stepInjectedVariants,
+                (text, meta) => this.agent.context.appendSystemReminder(text, meta),
+              );
+
               this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
@@ -958,6 +974,8 @@ export class TurnFlow {
 
               // 🆕 B组: 工具执行后追踪 (finalizeToolResult)
               if (isError !== true) {
+                this.stepToolCounts[ctx.toolCall.name] =
+                  (this.stepToolCounts[ctx.toolCall.name] ?? 0) + 1;
                 if (ctx.toolCall.name === 'LSP' || ctx.toolCall.name === 'Grep') {
                   this.searchHadResultsThisStep = true;
                 }
@@ -1130,6 +1148,7 @@ export class TurnFlow {
     this.searchHadResultsThisStep = false;
     this.verifyFailedThisStep = false;
     this.editCalledSuccessThisStep = false;
+    this.stepToolCounts = {};
   }
 
   private turnHadMeaningfulWork(): boolean {
