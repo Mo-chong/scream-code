@@ -30,11 +30,12 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { VariantRegistry } from './variant-registry';
+import { VariantRegistry, detectWeightLevel, type WeightLevel } from './variant-registry';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
 import { injectIntentGuidance } from './injectors/intent';
+import { InjectBudget } from './injectors/budget';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -109,6 +110,9 @@ export class TurnFlow {
 
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
+
+  // ── Inject budget (Phase 5) ───────────────────────────────────
+  private readonly injectBudget = new InjectBudget();
 
   constructor(protected readonly agent: Agent) {}
 
@@ -414,6 +418,7 @@ export class TurnFlow {
     this.deviationChainBypassUsed = false;
     this.variantRegistry.reset();
     this.currentStep = 0;
+    this.injectBudget.reset();
     this.resetInjectorStepState();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -424,13 +429,8 @@ export class TurnFlow {
       const intentDetection = detectIntent(input);
       if (intentDetection) {
         injectIntentGuidance(intentDetection, (text, meta) => {
-          this.agent.context.appendSystemReminder(text, meta);
+          this.inject(text, meta);
         });
-        this.variantRegistry.record(
-          intentDetection.variant,
-          intentDetection.weightLevel,
-          this.currentStep,
-        );
       }
     }
 
@@ -581,17 +581,18 @@ export class TurnFlow {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
               this.currentStepHadContent = false;
+              this.injectBudget.beginStep(stepNumber);
               await this.agent.fullCompaction.beforeStep(stepSignal);
 
               const goal = this.agent.goal.getGoal().goal;
               if (stepNumber === 1 && goal?.status === 'active' && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'This turn is working toward an active goal. You MUST call TodoList to create or update the plan before making changes.',
                   { kind: 'system_trigger', name: 'todo_required' },
                 );
               }
               if (stepNumber === 2 && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'This task spans multiple steps. Use TodoList to track the remaining work and current phase.',
                   { kind: 'system_trigger', name: 'todo_suggested' },
                 );
@@ -600,7 +601,7 @@ export class TurnFlow {
               if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
                 const sessionSummary = this.agent.sessionMemory.getSessionSummary();
                 if (sessionSummary.length > 0) {
-                  this.agent.context.appendSystemReminder(sessionSummary, {
+                  this.inject(sessionSummary, {
                     kind: 'injection',
                     variant: 'session_memory',
                   });
@@ -609,7 +610,7 @@ export class TurnFlow {
 
               // Suggest /dream on the first step when conditions are met
               if (stepNumber === 1 && this.agent.dreamTracker.shouldSuggest()) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   this.agent.dreamTracker.getSuggestionMessage(),
                   { kind: 'injection', variant: 'dream_suggestion' },
                 );
@@ -629,35 +630,31 @@ export class TurnFlow {
               if (this.editCalledSuccessThisStep && !this.hasCalledLspReferencesThisStep) {
                 this.editWithoutLookupCount++;
                 if (this.editWithoutLookupCount >= 2) {
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'MUST check callers. Missing LSP.references before edit.',
                     { kind: 'injection', variant: 'step_after_edit' },
                   );
-                  this.variantRegistry.record('step_after_edit', 'A', this.currentStep);
                 } else {
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'Edit done → consider verifying before continuing.',
                     { kind: 'injection', variant: 'step_after_edit' },
                   );
-                  this.variantRegistry.record('step_after_edit', 'B', this.currentStep);
                 }
               } else if (this.editCalledSuccessThisStep) {
                 this.editWithoutLookupCount = 0;
               }
               if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'Refs found. Design change before editing.',
                   { kind: 'injection', variant: 'step_after_search' },
                 );
-                this.variantRegistry.record('step_after_search', 'B', this.currentStep);
               }
               if (this.verifyFailedThisStep && !this.stepInjectedVariants.has('step_after_verify_fail')) {
                 this.stepInjectedVariants.add('step_after_verify_fail');
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'NEVER downgrade. Fix the root cause, re-run verification.',
                   { kind: 'injection', variant: 'step_after_verify_fail' },
                 );
-                this.variantRegistry.record('step_after_verify_fail', 'A', this.currentStep);
               }
               // ── 毒性早期检测：偏差链追踪 ─────────────────────────
               if (this.editWithoutLookupCount >= 3 && !this.deviationChainActive) {
@@ -679,7 +676,7 @@ export class TurnFlow {
               injectAntiConfabulation(
                 confaResult,
                 this.stepInjectedVariants,
-                (text, meta) => this.agent.context.appendSystemReminder(text, meta),
+                (text, meta) => this.inject(text, meta),
               );
 
               // ── 质量升级检测 ────────────────────────────────────
@@ -692,7 +689,7 @@ export class TurnFlow {
                   qualityIssue,
                   this.stepInjectedVariants,
                   (text, meta) => {
-                    this.agent.context.appendSystemReminder(text, meta);
+                    this.inject(text, meta);
                   },
                 );
                 // P1 关键修复: 升级后回写原始变体权重，实现 C→B→A→S 渐进升级
@@ -713,7 +710,7 @@ export class TurnFlow {
               // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
               if (this.deviationChainActive && !this.deviationChainBypassUsed) {
                 this.deviationChainBypassUsed = true;
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   '偏差链检测到：' + this.deviationChainReason + '\n' +
                   '- MUST verify all claims with tool calls.\n' +
                   '- NEVER fabricate outputs. Each claim needs tool evidence.\n' +
@@ -763,7 +760,7 @@ export class TurnFlow {
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     reasons.join('\n') +
                       '\n\nDo not report completion until the above is resolved.',
                     { kind: 'system_trigger', name: 'convergence_gate' },
@@ -781,7 +778,7 @@ export class TurnFlow {
                 this.lastAssistantMessageIsTrivial()
               ) {
                 this.summaryGuardInjected = true;
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'Your final response is too brief or only acknowledges completion. ' +
                     'Before ending the turn, provide a concise but complete summary: ' +
                     'what was done, which files changed, the verification result, and any ' +
@@ -852,11 +849,10 @@ export class TurnFlow {
               // 🆕 A组: 工具执行前注入 — prepareToolExecution
               if (!this.stepInjectedVariants.has('prepare_edit') && ctx.toolCall.name === 'Edit') {
                 this.stepInjectedVariants.add('prepare_edit');
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'MUST update all callers after edit. Use LSP.references.',
                   { kind: 'injection', variant: 'prepare_edit' },
                 );
-                this.variantRegistry.record('prepare_edit', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_write') && ctx.toolCall.name === 'Write') {
                 this.stepInjectedVariants.add('prepare_write');
@@ -866,49 +862,44 @@ export class TurnFlow {
                   : path.endsWith('.ts') || path.endsWith('.tsx')
                     ? 'MUST verify build after writing new code.'
                     : 'MUST check output correctness after write.';
-                this.agent.context.appendSystemReminder(text, {
+                this.inject(text, {
                   kind: 'injection',
                   variant: 'prepare_write',
                 });
-                this.variantRegistry.record('prepare_write', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_search') &&
                   (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP')) {
                 this.stepInjectedVariants.add('prepare_search');
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'NEVER edit after seeing only one match. Evaluate ALL results.',
                   { kind: 'injection', variant: 'prepare_search' },
                 );
-                this.variantRegistry.record('prepare_search', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_memory') && ctx.toolCall.name === 'MemoryLookup') {
                 this.stepInjectedVariants.add('prepare_memory');
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'MUST check whatFailed before repeating approach.',
                   { kind: 'injection', variant: 'prepare_memory' },
                 );
-                this.variantRegistry.record('prepare_memory', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('prepare_bash_file') && ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (TurnFlow.BASH_FILE_OPS_RE.test(cmd)) {
                   this.stepInjectedVariants.add('prepare_bash_file');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'NEVER use Bash for file reads. Use Read/Edit/Grep.',
                     { kind: 'injection', variant: 'prepare_bash_file' },
                   );
-                  this.variantRegistry.record('prepare_bash_file', 'C', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('prepare_verify') && ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
                   this.stepInjectedVariants.add('prepare_verify');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'Fail → fix. NEVER downgrade verification.',
                     { kind: 'injection', variant: 'prepare_verify' },
                   );
-                  this.variantRegistry.record('prepare_verify', 'C', this.currentStep);
                 }
               }
 
@@ -1053,65 +1044,59 @@ export class TurnFlow {
               // 🆕 B组: 工具执行后注入 — finalizeResult
               if (!this.stepInjectedVariants.has('post_edit') && ctx.toolCall.name === 'Edit' && isError !== true) {
                 this.stepInjectedVariants.add('post_edit');
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'NEVER leave callers unverified without update.',
                   { kind: 'injection', variant: 'post_edit' },
                 );
-                this.variantRegistry.record('post_edit', 'A', this.currentStep);
               }
               if (!this.stepInjectedVariants.has('post_search') && (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
                 const hasContent = toolOutputText(output).trim().length > 0;
                 if (hasContent) {
                   this.stepInjectedVariants.add('post_search');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'Full picture ready. NOW design and apply the change.',
                     { kind: 'injection', variant: 'post_search' },
                   );
-                  this.variantRegistry.record('post_search', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_write_large') && ctx.toolCall.name === 'Write' && isError !== true) {
                 const text = toolOutputText(output);
                 if (text.length > 500) {
                   this.stepInjectedVariants.add('post_write_large');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'Large output written. MUST review for correctness.',
                     { kind: 'injection', variant: 'post_write_large' },
                   );
-                  this.variantRegistry.record('post_write_large', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_verify_pass') && ctx.toolCall.name === 'Bash' && isError !== true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
                   this.stepInjectedVariants.add('post_verify_pass');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'Verification passed. Deliver the result.',
                     { kind: 'injection', variant: 'post_verify_pass' },
                   );
-                  this.variantRegistry.record('post_verify_pass', 'B', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_verify_fail') && ctx.toolCall.name === 'Bash' && isError === true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
                   this.stepInjectedVariants.add('post_verify_fail');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'NEVER downgrade verification. Fix the root cause.',
                     { kind: 'injection', variant: 'post_verify_fail' },
                   );
-                  this.variantRegistry.record('post_verify_fail', 'A', this.currentStep);
                 }
               }
               if (!this.stepInjectedVariants.has('post_memory') && ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
                 const hasContent = toolOutputText(output).trim().length > 0;
                 if (hasContent) {
                   this.stepInjectedVariants.add('post_memory');
-                  this.agent.context.appendSystemReminder(
+                  this.inject(
                     'NOW apply whatFailed lessons from results above.',
                     { kind: 'injection', variant: 'post_memory' },
                   );
-                  this.variantRegistry.record('post_memory', 'B', this.currentStep);
                 }
               }
 
@@ -1202,6 +1187,61 @@ export class TurnFlow {
   private beginTrackedStep(turnId: number, step: number): void {
     this.currentStepByTurn.set(turnId, step);
     this.currentStep = step;
+  }
+
+  // ── Inject budget + unified injection (Phase 5) ──────────────
+  /**
+   * 带预算检查 + 权重感知 + VariantRegistry 记录的注入包装。
+   *
+   * system_trigger 穿透预算（收敛机制不应被 budget 拦截）。
+   * quality_escalate_ 穿透预算（升级本身就是 budget 不足的补救）。
+   */
+  private inject(text: string, meta: PromptOrigin): void {
+    // system_trigger: 穿透预算
+    if (meta.kind === 'system_trigger') {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    // 质量升级注入: 穿透预算
+    if (typeof meta === 'object' && 'variant' in meta &&
+        typeof meta.variant === 'string' && meta.variant.startsWith('quality_escalate_')) {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    const estimatedTokens = Math.ceil(text.length / 4);
+    const level = detectWeightLevel(text);
+    const effectiveLevel = this.getEffectiveLevel(meta, level);
+
+    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
+      return; // 静默丢弃
+    }
+
+    this.agent.context.appendSystemReminder(text, meta);
+    this.injectBudget.record(estimatedTokens);
+
+    // 注册到 VariantRegistry（残差系统依赖）
+    if (typeof meta === 'object' && 'variant' in meta &&
+        typeof meta.variant === 'string') {
+      this.variantRegistry.record(meta.variant, effectiveLevel, this.currentStep);
+    }
+
+    // 同步 variant 计数到预算管理器（供 degradationFactor 使用）
+    this.injectBudget.syncVariantCount(this.variantRegistry.size);
+  }
+
+  /**
+   * 残差路径优化: 如果变体的行为已被观察，降级预算占用。
+   * 行为已观察 → identity path 直通 → 不需要高预算空间重注入。
+   */
+  private getEffectiveLevel(meta: PromptOrigin, defaultLevel: WeightLevel): WeightLevel {
+    if (typeof meta !== 'object' || !('variant' in meta)) return defaultLevel;
+    const record = this.variantRegistry.get(meta.variant as string);
+    if (record?.behaviorObserved === true) {
+      return 'C';
+    }
+    return defaultLevel;
   }
 
   /** Reset per-step injection tracking state (called at runOneTurn and afterStep). */

@@ -359,6 +359,83 @@ if (origin.kind === 'user') {
 
 ---
 
+## injectors/budget.ts — InjectBudget (Phase 5)
+
+**File:** `turn/injectors/budget.ts`
+**Role:** 回合级注入预算控制。权重感知，与残差系统融合。
+
+### Class: InjectBudget
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `canInject` | `(estimatedTokens, weightLevel) => boolean` | 检查是否可注入（含 stepNorm + degradationFactor） |
+| `record` | `(actualTokens) => void` | 记录注入 token |
+| `syncVariantCount` | `(count) => void` | 同步外部 variant 计数（供 degradationFactor） |
+| `beginStep` | `(stepNumber) => void` | 每步开始重置 step 计数器 |
+| `reset` | `() => void` | 每回合重置全部计数器 |
+| `turnUsage` | `getter: number` | 当前回合累计 token |
+| `stepUsage` | `getter: number` | 当前步累计 token |
+
+### Budget thresholds (per weight level, before decay)
+
+| Level | perTurn | perStep | Override allowed |
+|:-----:|:-------:|:-------:|:----------------:|
+| S | 800 | 250 | Yes (2x) |
+| A | 600 | 200 | Yes (1.5x) |
+| B | 500 | 150 | No |
+| C | 300 | 100 | No |
+| D | 200 | 80 | No |
+
+### Dynamic decay factors
+
+**stepNorm:** `1 + (1 / (stepNumber + 1))` — perStep cap shrinks as steps advance.
+| step | factor | B-perStep effective |
+|:----:|:------:|:-------------------:|
+| 1 | 1.50 | 100 |
+| 3 | 1.25 | 120 |
+| 5 | 1.17 | 128 |
+| 10 | 1.09 | 137 |
+
+**degradationFactor:** `max(0.4, 1 - variantCount × 0.1)` — more variants = less budget per new inject.
+| variantCount | factor | B-perTurn effective |
+|:-----------:|:------:|:-------------------:|
+| 0 | 1.00 | 500 |
+| 3 | 0.70 | 350 |
+| 5 | 0.50 | 250 |
+| 6+ | 0.40 | 200 |
+
+Actual cap = `floor(configCap × stepNorm × degradationFactor)`
+
+**NOTE:** Both decay factors are heuristic parameters. Tune after gathering production metrics.
+
+### Integration
+
+```typescript
+// TurnFlow 字段:
+private readonly injectBudget = new InjectBudget();
+
+// beforeStep 中:
+this.injectBudget.beginStep(stepNumber);
+
+// runOneTurn 中:
+this.injectBudget.reset();
+
+// 统一注入包装（替代所有直接 appendSystemReminder）:
+private inject(text: string, meta: PromptOrigin): void {
+  // system_trigger / quality_escalate_ → 穿透
+  // 其他 → detectWeightLevel + getEffectiveLevel + canInject + record
+  // 注册到 VariantRegistry + 同步 variantCount
+}
+```
+
+### Bypass rules
+
+- `meta.kind === 'system_trigger'`: 穿透预算（收敛机制不应被 budget 拦截）
+- `variant.startsWith('quality_escalate_')`: 穿透预算（升级本身就是 budget 不足的补救）
+- `behaviorObserved === true`: 降级到 C 级预算占用（identity path）
+
+---
+
 ## Future detector integration pattern
 
 ```typescript
@@ -367,7 +444,8 @@ const sig = compressStep(this.stepToolCounts, extractLastAssistantText(this.agen
 const snap = buildContextSnapshot(this.stepToolCounts, this.currentStep);
 const result = yourDetector(sig, snap);     // ← 你的纯函数
 yourInjector(result, this.stepInjectedVariants, (text, meta) =>
-  this.agent.context.appendSystemReminder(text, meta));
+  this.inject(text, meta));
 // signature.ts 已提供 compressStep + buildContextSnapshot
 // variant-registry.ts 提供行为追踪和权重检测
+// injectors/budget.ts 提供预算控制
 ```
