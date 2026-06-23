@@ -32,6 +32,7 @@ import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
 import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, type WeightLevel } from './variant-registry';
 import { TurnEventLog } from './event-log';
+import { EventSnapshotBuffer } from './event-snapshot';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
@@ -130,7 +131,12 @@ export class TurnFlow {
   // ── Interception event log (Phase 10) ──────────────────────────
   private readonly eventLog = new TurnEventLog();
 
-  constructor(protected readonly agent: Agent) {}
+  // ── Event snapshot persistence (Phase 10+) ─────────────────────
+  private eventBuffer!: EventSnapshotBuffer;
+
+  constructor(protected readonly agent: Agent) {
+    this.eventBuffer = new EventSnapshotBuffer(agent);
+  }
 
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
@@ -522,6 +528,11 @@ export class TurnFlow {
     if (errorEvent !== undefined) {
       this.agent.emitEvent(errorEvent);
     }
+
+    // 🆕 Phase 10+: 回合拦截事件持久化（异步，不阻塞）
+    const turnEvents = this.eventLog.getTurnEvents(turnId);
+    this.eventBuffer.pushTurn(turnId, turnEvents, this.currentStep);
+
     this.currentStepByTurn.delete(turnId);
     return {
       event: ended,
@@ -755,6 +766,14 @@ export class TurnFlow {
               if (eventSummary.length > 0) {
                 this.inject(eventSummary, {
                   kind: 'injection', variant: 'interception_log',
+                });
+              }
+
+              // 🆕 Phase 10+: 元日志健康检查 — 超 10 步无日志时后台报警
+              if (this.currentStep > 10 && this.eventLog.getTurnEvents(this.currentTurnId).length === 0) {
+                this.agent.log.warn('eventLog empty but turn > 10 steps', {
+                  turnId: this.currentTurnId,
+                  step: this.currentStep,
                 });
               }
 
