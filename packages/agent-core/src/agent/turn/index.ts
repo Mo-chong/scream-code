@@ -649,8 +649,7 @@ export class TurnFlow {
                   { kind: 'injection', variant: 'step_after_search' },
                 );
               }
-              if (this.verifyFailedThisStep && !this.stepInjectedVariants.has('step_after_verify_fail')) {
-                this.stepInjectedVariants.add('step_after_verify_fail');
+              if (this.verifyFailedThisStep) {
                 this.inject(
                   'NEVER downgrade. Fix the root cause, re-run verification.',
                   { kind: 'injection', variant: 'step_after_verify_fail' },
@@ -847,15 +846,13 @@ export class TurnFlow {
               }
 
               // 🆕 A组: 工具执行前注入 — prepareToolExecution
-              if (!this.stepInjectedVariants.has('prepare_edit') && ctx.toolCall.name === 'Edit') {
-                this.stepInjectedVariants.add('prepare_edit');
+              if (ctx.toolCall.name === 'Edit') {
                 this.inject(
                   'MUST update all callers after edit. Use LSP.references.',
                   { kind: 'injection', variant: 'prepare_edit' },
                 );
               }
-              if (!this.stepInjectedVariants.has('prepare_write') && ctx.toolCall.name === 'Write') {
-                this.stepInjectedVariants.add('prepare_write');
+              if (ctx.toolCall.name === 'Write') {
                 const path = (ctx.args as { path?: string }).path ?? '';
                 const text = path.endsWith('.md')
                   ? 'MUST verify markdown output format after write.'
@@ -867,35 +864,30 @@ export class TurnFlow {
                   variant: 'prepare_write',
                 });
               }
-              if (!this.stepInjectedVariants.has('prepare_search') &&
-                  (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP')) {
-                this.stepInjectedVariants.add('prepare_search');
+              if (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') {
                 this.inject(
                   'NEVER edit after seeing only one match. Evaluate ALL results.',
                   { kind: 'injection', variant: 'prepare_search' },
                 );
               }
-              if (!this.stepInjectedVariants.has('prepare_memory') && ctx.toolCall.name === 'MemoryLookup') {
-                this.stepInjectedVariants.add('prepare_memory');
+              if (ctx.toolCall.name === 'MemoryLookup') {
                 this.inject(
                   'MUST check whatFailed before repeating approach.',
                   { kind: 'injection', variant: 'prepare_memory' },
                 );
               }
-              if (!this.stepInjectedVariants.has('prepare_bash_file') && ctx.toolCall.name === 'Bash') {
+              if (ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (TurnFlow.BASH_FILE_OPS_RE.test(cmd)) {
-                  this.stepInjectedVariants.add('prepare_bash_file');
                   this.inject(
                     'NEVER use Bash for file reads. Use Read/Edit/Grep.',
                     { kind: 'injection', variant: 'prepare_bash_file' },
                   );
                 }
               }
-              if (!this.stepInjectedVariants.has('prepare_verify') && ctx.toolCall.name === 'Bash') {
+              if (ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
-                  this.stepInjectedVariants.add('prepare_verify');
                   this.inject(
                     'Fail → fix. NEVER downgrade verification.',
                     { kind: 'injection', variant: 'prepare_verify' },
@@ -1042,57 +1034,51 @@ export class TurnFlow {
               }
 
               // 🆕 B组: 工具执行后注入 — finalizeResult
-              if (!this.stepInjectedVariants.has('post_edit') && ctx.toolCall.name === 'Edit' && isError !== true) {
-                this.stepInjectedVariants.add('post_edit');
+              if (ctx.toolCall.name === 'Edit' && isError !== true) {
                 this.inject(
                   'NEVER leave callers unverified without update.',
                   { kind: 'injection', variant: 'post_edit' },
                 );
               }
-              if (!this.stepInjectedVariants.has('post_search') && (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
+              if ((ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
                 const hasContent = toolOutputText(output).trim().length > 0;
                 if (hasContent) {
-                  this.stepInjectedVariants.add('post_search');
                   this.inject(
                     'Full picture ready. NOW design and apply the change.',
                     { kind: 'injection', variant: 'post_search' },
                   );
                 }
               }
-              if (!this.stepInjectedVariants.has('post_write_large') && ctx.toolCall.name === 'Write' && isError !== true) {
+              if (ctx.toolCall.name === 'Write' && isError !== true) {
                 const text = toolOutputText(output);
                 if (text.length > 500) {
-                  this.stepInjectedVariants.add('post_write_large');
                   this.inject(
                     'Large output written. MUST review for correctness.',
                     { kind: 'injection', variant: 'post_write_large' },
                   );
                 }
               }
-              if (!this.stepInjectedVariants.has('post_verify_pass') && ctx.toolCall.name === 'Bash' && isError !== true) {
+              if (ctx.toolCall.name === 'Bash' && isError !== true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
-                  this.stepInjectedVariants.add('post_verify_pass');
                   this.inject(
                     'Verification passed. Deliver the result.',
                     { kind: 'injection', variant: 'post_verify_pass' },
                   );
                 }
               }
-              if (!this.stepInjectedVariants.has('post_verify_fail') && ctx.toolCall.name === 'Bash' && isError === true) {
+              if (ctx.toolCall.name === 'Bash' && isError === true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
-                  this.stepInjectedVariants.add('post_verify_fail');
                   this.inject(
                     'NEVER downgrade verification. Fix the root cause.',
                     { kind: 'injection', variant: 'post_verify_fail' },
                   );
                 }
               }
-              if (!this.stepInjectedVariants.has('post_memory') && ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
+              if (ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
                 const hasContent = toolOutputText(output).trim().length > 0;
                 if (hasContent) {
-                  this.stepInjectedVariants.add('post_memory');
                   this.inject(
                     'NOW apply whatFailed lessons from results above.',
                     { kind: 'injection', variant: 'post_memory' },
@@ -1196,50 +1182,55 @@ export class TurnFlow {
    * system_trigger 穿透预算（收敛机制不应被 budget 拦截）。
    * quality_escalate_ 穿透预算（升级本身就是 budget 不足的补救）。
    */
+  /**
+   * 带去重 + 预算 + 权重感知 + VariantRegistry 记录的注入包装。
+   *
+   * 所有 callsite 只需传 text 和 meta。去重/注册由本方法统一处理。
+   * system_trigger 和 quality_escalate_ 穿透预算，走各自独立路径。
+   */
   private inject(text: string, meta: PromptOrigin): void {
-    // system_trigger: 穿透预算
+    // 提取 variant 名（部分 PromptOrigin 不含 variant）
+    const variant = typeof meta === 'object' && 'variant' in meta &&
+      typeof meta.variant === 'string' ? meta.variant : undefined;
+
+    // system_trigger: 穿透一切（收敛机制）
     if (meta.kind === 'system_trigger') {
       this.agent.context.appendSystemReminder(text, meta);
       return;
     }
 
-    // 质量升级注入: 穿透预算
-    if (typeof meta === 'object' && 'variant' in meta &&
-        typeof meta.variant === 'string' && meta.variant.startsWith('quality_escalate_')) {
+    // quality_escalate_: 穿透预算，去重由 escalateQuality() 负责
+    if (variant?.startsWith('quality_escalate_')) {
       this.agent.context.appendSystemReminder(text, meta);
       return;
     }
 
-    // 🆕 重复衰减: 同一变体触发 5+ 次 → 跳过
-    if (typeof meta === 'object' && 'variant' in meta &&
-        typeof meta.variant === 'string') {
-      const record = this.variantRegistry.get(meta.variant);
+    // 重复衰减: 同变体触发 5+ 次 → 跳过
+    if (variant) {
+      const record = this.variantRegistry.get(variant);
       if (repeatDecay(record) === 'skip') return;
     }
+
+    // 步级去重: 同一步同一 variant 只注入一次
+    if (variant && this.stepInjectedVariants.has(variant)) return;
+    if (variant) this.stepInjectedVariants.add(variant);
 
     const estimatedTokens = Math.ceil(text.length / 4);
     const level = detectWeightLevel(text);
     const effectiveLevel = this.getEffectiveLevel(meta, level);
 
-    // 🆕 毒性绕过: 偏差链激活 → 跳过预算检查
-    if (this.deviationChainActive) {
-      this.injectBudget.bypassBudget();
-    }
+    // 毒性绕过: 偏差链激活 → 跳过预算
+    if (this.deviationChainActive) this.injectBudget.bypassBudget();
 
-    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
-      return; // 静默丢弃
-    }
+    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) return;
 
     this.agent.context.appendSystemReminder(text, meta);
     this.injectBudget.record(estimatedTokens);
 
     // 注册到 VariantRegistry（残差系统依赖）
-    if (typeof meta === 'object' && 'variant' in meta &&
-        typeof meta.variant === 'string') {
-      this.variantRegistry.record(meta.variant, effectiveLevel, this.currentStep);
+    if (variant) {
+      this.variantRegistry.record(variant, effectiveLevel, this.currentStep);
     }
-
-    // 同步 variant 计数到预算管理器（供 degradationFactor 使用）
     this.injectBudget.syncVariantCount(this.variantRegistry.size);
   }
 
