@@ -231,3 +231,108 @@ export function repeatDecay(record: VariantRecord | undefined): RepeatAction {
   if (record.triggerCount >= 5) return 'skip';
   return 'full';
 }
+
+// ── ResNet 残差注意力模型 (Phase 9) ─────────────────────────
+
+/**
+ * 每个 variant 的残差注意力配置。
+ *
+ * R = W × D^Δs
+ * R < threshold → 注意力不足 → 需要注入
+ * R >= threshold → 注意力还够 → 跳过
+ */
+export interface VariantMeta {
+  /** 静态权重 (0-1)，越高越重要 */
+  weight: number;
+  /** 每步衰减系数 (0.8-0.99)，越高衰减越慢 */
+  decayPerStep: number;
+  /** 触发阈值 (0-1)，低于此值触发注入 */
+  threshold: number;
+  /** 最小步间隔，防止高频重复 */
+  minStepGap: number;
+}
+
+export const VARIANT_META: Record<string, VariantMeta> = {
+  // system_trigger / 紧急 → 永不跳过
+  system_trigger:              { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
+  deviation_chain_intercept:   { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
+
+  // intent — 回合开始时注入，不跨步衰减
+  intent_fix_bug:              { weight: 0.9, decayPerStep: 0.92, threshold: 0.3, minStepGap: 0 },
+  intent_refactor:             { weight: 0.9, decayPerStep: 0.92, threshold: 0.3, minStepGap: 0 },
+  intent_add_feature:          { weight: 0.9, decayPerStep: 0.92, threshold: 0.3, minStepGap: 0 },
+  intent_review:               { weight: 0.8, decayPerStep: 0.90, threshold: 0.3, minStepGap: 0 },
+  intent_research:             { weight: 0.8, decayPerStep: 0.90, threshold: 0.3, minStepGap: 0 },
+  intent_document:             { weight: 0.7, decayPerStep: 0.88, threshold: 0.3, minStepGap: 0 },
+
+  // A组: prepare — 工具执行前提醒
+  prepare_edit:                { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+  prepare_write:               { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+  prepare_search:              { weight: 0.7, decayPerStep: 0.85, threshold: 0.40, minStepGap: 3 },
+  prepare_memory:              { weight: 0.7, decayPerStep: 0.85, threshold: 0.40, minStepGap: 3 },
+  prepare_bash_file:           { weight: 0.5, decayPerStep: 0.82, threshold: 0.40, minStepGap: 3 },
+  prepare_verify:              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+
+  // B组: post — 工具执行后反馈
+  post_edit:                   { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  post_search:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  post_write_large:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  post_verify_pass:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  post_verify_fail:            { weight: 0.9, decayPerStep: 0.88, threshold: 0.30, minStepGap: 3 },
+  post_memory:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+
+  // C组: step_after — 步级行为反馈
+  step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
+  step_after_search:           { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
+  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+};
+
+/**
+ * ResNet 残差注意力决策。
+ * 根据 variant 的剩余注意力水平决定是否需要注入。
+ *
+ * 首次注入始终允许（无 record）。后续注入按残差公式判断。
+ *
+ * @returns true = 需要注入, false = 注意力还够，跳过
+ */
+export function shouldInjectByResidual(
+  record: VariantRecord | undefined,
+  currentStep: number,
+  meta: VariantMeta,
+): boolean {
+  if (!record) return true;
+  const stepDelta = currentStep - record.stepInjected;
+  if (stepDelta < meta.minStepGap) return false;
+  const residual = meta.weight * Math.pow(meta.decayPerStep, stepDelta);
+  return residual < meta.threshold;
+}
+
+/**
+ * 根据残差值决定是否使用短文本。
+ *
+ * residual > threshold × 0.5 → 短文本（刚过阈值，轻度提醒即可）
+ * residual <= threshold × 0.5 → 长文本（远低于阈值，需要完整提醒）
+ */
+export function shouldUseShortText(
+  record: VariantRecord | undefined,
+  currentStep: number,
+  meta: VariantMeta,
+): boolean {
+  if (!record) return false;
+  const stepDelta = currentStep - record.stepInjected;
+  const residual = meta.weight * Math.pow(meta.decayPerStep, stepDelta);
+  return residual > meta.threshold * 0.5;
+}
+
+/**
+ * 缩短注入文本：保留核心祈使句，去掉论证和语气词。
+ * 用于注意力衰减刚过阈值时的轻度提醒。
+ */
+export function shortenText(text: string): string {
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  // 优先取 MUST/NEVER/ALWAYS 祈使句
+  const imperative = lines.find(l => /\b(MUST|NEVER|ALWAYS)\b/.test(l));
+  if (imperative) return imperative;
+  // 回退到第一条非空行
+  return lines[0] ?? text;
+}
