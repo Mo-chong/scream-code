@@ -116,6 +116,10 @@ export class TurnFlow {
   private verifyFailStep = -1;
   private toolCountsBeforeVerifyRetry: Record<string, number> = {};
 
+  // ── Phase 9: Convergence gate: turn-level LSP/edit tracking ──
+  private turnHasCalledAnyLsp = false;
+  private totalFilesModifiedThisTurn = 0;
+
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
 
@@ -428,6 +432,8 @@ export class TurnFlow {
     this.confabulationBlocked = false;
     this.verifyFailStep = -1;
     this.toolCountsBeforeVerifyRetry = {};
+    this.turnHasCalledAnyLsp = false;
+    this.totalFilesModifiedThisTurn = 0;
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -730,6 +736,10 @@ export class TurnFlow {
                 }
               }
 
+              // 🆕 Phase 9: Turn-level LSP + edit tracking for convergence gate
+              if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
+              if (this.editCalledSuccessThisStep) this.totalFilesModifiedThisTurn++;
+
               this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
@@ -811,6 +821,13 @@ export class TurnFlow {
                   reasons.push(
                     'The last verification pass may be a false pass — no substantive changes were made. ' +
                     'Make an actual fix and re-verify.',
+                  );
+                }
+                // 🆕 Phase 9: 整回合无 LSP 但修改了大量文件
+                if (!this.turnHasCalledAnyLsp && this.totalFilesModifiedThisTurn >= 3) {
+                  reasons.push(
+                    'Edited ' + this.totalFilesModifiedThisTurn + '+ files this turn without any ' +
+                    'LSP.references call. Verify callers before reporting completion.',
                   );
                 }
 
