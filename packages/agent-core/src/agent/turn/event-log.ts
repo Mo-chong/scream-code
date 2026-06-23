@@ -11,13 +11,13 @@
 export interface InterceptionEvent {
   /** 全局序列号。单调递增。 */
   seq: number;
-  /** 事件种类：injection_skipped | injection_delivered | convergence_gate | deviation_chain */
+  /** 事件种类：injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail */
   kind: string;
   /** 相关 variant 名称（无 variant 的穿件传空字符串） */
   variant: string;
   /** 记录时的回合步号 */
   step: number;
-  /** 具体动作：skipped_residual | skipped_budget | injected | gate_held | gate_passed */
+  /** 具体动作：skipped_residual | skipped_budget | injected | gate_held | gate_passed | detected */
   action: string;
   /** 人类可读的原因说明 */
   reason: string;

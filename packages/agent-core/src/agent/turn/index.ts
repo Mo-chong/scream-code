@@ -1373,7 +1373,14 @@ export class TurnFlow {
     }
 
     // 步级去重: 同一步同一 variant 只注入一次
-    if (variant && this.stepInjectedVariants.has(variant)) return;
+    if (variant && this.stepInjectedVariants.has(variant)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_dedup',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Dedup skip: ${variant} already injected this step`,
+      });
+      return;
+    }
     if (variant) this.stepInjectedVariants.add(variant);
 
     const estimatedTokens = Math.ceil(text.length / 4);
