@@ -31,6 +31,7 @@ import { compressStep, buildContextSnapshot, extractLastAssistantText } from './
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
 import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, type WeightLevel } from './variant-registry';
+import { TurnEventLog } from './event-log';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
@@ -125,6 +126,9 @@ export class TurnFlow {
 
   // ── Inject budget (Phase 5) ───────────────────────────────────
   private readonly injectBudget = new InjectBudget();
+
+  // ── Interception event log (Phase 10) ──────────────────────────
+  private readonly eventLog = new TurnEventLog();
 
   constructor(protected readonly agent: Agent) {}
 
@@ -438,6 +442,7 @@ export class TurnFlow {
     this.currentStep = 0;
     this.injectBudget.reset();
     this.resetInjectorStepState();
+    this.eventLog.clear();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
@@ -698,6 +703,11 @@ export class TurnFlow {
               // 🆕 Phase 8: 反事实高置信度 → 设置阻断标志
               if (confaResult.confidence >= 3) {
                 this.confabulationBlocked = true;
+                this.eventLog.record({
+                  kind: 'confabulation', variant: '', action: 'detected',
+                  step: this.currentStep, turnId: this.currentTurnId,
+                  reason: `High-confidence unfounded claims (score=${confaResult.confidence})`,
+                });
               }
 
               // ── 质量升级检测 ────────────────────────────────────
@@ -740,6 +750,14 @@ export class TurnFlow {
               if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
               if (this.editCalledSuccessThisStep) this.totalStepsWithEditsThisTurn++;
 
+              // 🆕 Phase 10: 增量回合摘要注入（每步新事件）
+              const eventSummary = this.eventLog.getNewTurnSummary(this.currentTurnId);
+              if (eventSummary.length > 0) {
+                this.inject(eventSummary, {
+                  kind: 'injection', variant: 'interception_log',
+                });
+              }
+
               this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
@@ -750,6 +768,11 @@ export class TurnFlow {
               // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
               if (this.deviationChainActive && !this.deviationChainBypassUsed) {
                 this.deviationChainBypassUsed = true;
+                this.eventLog.record({
+                  kind: 'deviation_chain', variant: 'deviation_chain_intercept', action: 'gate_held',
+                  step: this.currentStep, turnId: this.currentTurnId,
+                  reason: this.deviationChainReason,
+                });
                 this.inject(
                   '偏差链检测到：' + this.deviationChainReason + '\n' +
                   '- MUST verify all claims with tool calls.\n' +
@@ -833,6 +856,12 @@ export class TurnFlow {
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
+                  const heldReason = reasons[0] ?? 'unspecified';
+                  this.eventLog.record({
+                    kind: 'convergence_gate', variant: '', action: 'gate_held',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: heldReason.length > 120 ? heldReason.slice(0, 117) + '...' : heldReason,
+                  });
                   this.inject(
                     reasons.join('\n') +
                       '\n\nDo not report completion until the above is resolved.',
@@ -878,6 +907,14 @@ export class TurnFlow {
                   },
                 );
                 return { continue: true };
+              }
+              // 🆕 Phase 10: 收敛门放行记录
+              if (this.convergenceInjections > 0) {
+                this.eventLog.record({
+                  kind: 'convergence_gate', variant: '', action: 'gate_passed',
+                  step: this.currentStep, turnId: this.currentTurnId,
+                  reason: `Turn allowed to end after ${this.convergenceInjections} gate holds`,
+                });
               }
               return { continue: false };
             },
@@ -1127,7 +1164,14 @@ export class TurnFlow {
               // Track verify failure for C3
               if (ctx.toolCall.name === 'Bash' && isError === true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
-                if (looksLikeVerificationCommand(cmd)) this.verifyFailedThisStep = true;
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.verifyFailedThisStep = true;
+                  this.eventLog.record({
+                    kind: 'verify_fail', variant: '', action: 'gate_held',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: `Verification failed: ${cmd.slice(0, 80)}`,
+                  });
+                }
               }
 
               // 🆕 B组: 工具执行后注入 — finalizeResult
@@ -1310,12 +1354,19 @@ export class TurnFlow {
 
     // 🆕 Phase 9: ResNet 残差注意力 — 注意力还够时跳过注入
     if (variant) {
-      const meta = VARIANT_META[variant];
-      if (meta) {
+      const vm = VARIANT_META[variant];
+      if (vm) {
         const record = this.variantRegistry.get(variant);
-        if (!shouldInjectByResidual(record, this.currentStep, meta)) return;
+        if (!shouldInjectByResidual(record, this.currentStep, vm)) {
+          this.eventLog.record({
+            kind: 'injection_skipped', variant, action: 'skipped_residual',
+            step: this.currentStep, turnId: this.currentTurnId,
+            reason: `R≥T for ${variant}`,
+          });
+          return;
+        }
         // 残差刚过阈值用短文本
-        if (shouldUseShortText(record, this.currentStep, meta)) {
+        if (shouldUseShortText(record, this.currentStep, vm)) {
           text = shortenText(text);
         }
       }
@@ -1332,7 +1383,14 @@ export class TurnFlow {
     // 毒性绕过: 偏差链激活 → 跳过预算
     if (this.deviationChainActive) this.injectBudget.bypassBudget();
 
-    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) return;
+    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant: variant ?? '', action: 'skipped_budget',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Budget denies ${variant ?? 'unknown'} (t≈${estimatedTokens}, lv=${effectiveLevel})`,
+      });
+      return;
+    }
 
     this.agent.context.appendSystemReminder(text, meta);
     this.injectBudget.record(estimatedTokens);
@@ -1342,6 +1400,12 @@ export class TurnFlow {
       this.variantRegistry.record(variant, effectiveLevel, this.currentStep);
     }
     this.injectBudget.syncVariantCount(this.variantRegistry.size);
+
+    this.eventLog.record({
+      kind: 'injection_delivered', variant: variant ?? '', action: 'injected',
+      step: this.currentStep, turnId: this.currentTurnId,
+      reason: `Injected ${variant ?? 'unknown'} (lv=${effectiveLevel})`,
+    });
   }
 
   /**
