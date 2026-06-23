@@ -614,8 +614,8 @@ Async persistence buffer. Collects turn-end snapshots and flushes to disk when t
 **Disk format** (human-readable Markdown):
 
 ```
-<agentsDir>/interception-logs/        ← agentsDir = dirname(agent.homedir)
-  ├── 2026-06-22.md          ← Markdown, per-date
+<screamHome>/interception-logs/        ← screamHome = resolveScreamHome()
+  ├── 2026-06-22.md          ← Markdown, per-date, [sessionId] prefix per entry
   ├── 2026-06-21.md
   └── INDEX.json             ← atomicWrite protected
 ```
