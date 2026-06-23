@@ -25,6 +25,7 @@ tools:
   - ReadMediaFile
   - TodoList
   - MemoryLookup
+  - MemoryEdit
   - MemoryConsolidatePlan
   - MemoryConsolidateApply
   - MemoryWrite
