@@ -108,6 +108,14 @@ export class TurnFlow {
   private deviationChainReason = '';
   private deviationChainBypassUsed = false;
 
+  // ── Deviation chain: resolved tracking (Phase 8) ─────────────
+  private deviationChainResolved = false;
+
+  // ── Phase 8: 三路硬化字段 ─────────────────────────────────────
+  private confabulationBlocked = false;
+  private verifyFailStep = -1;
+  private toolCountsBeforeVerifyRetry: Record<string, number> = {};
+
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
 
@@ -416,6 +424,10 @@ export class TurnFlow {
     this.deviationChainActive = false;
     this.deviationChainReason = '';
     this.deviationChainBypassUsed = false;
+    this.deviationChainResolved = false;
+    this.confabulationBlocked = false;
+    this.verifyFailStep = -1;
+    this.toolCountsBeforeVerifyRetry = {};
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -677,6 +689,10 @@ export class TurnFlow {
                 this.stepInjectedVariants,
                 (text, meta) => this.inject(text, meta),
               );
+              // 🆕 Phase 8: 反事实高置信度 → 设置阻断标志
+              if (confaResult.confidence >= 3) {
+                this.confabulationBlocked = true;
+              }
 
               // ── 质量升级检测 ────────────────────────────────────
               observeBehavior(this.variantRegistry, sig);
@@ -697,6 +713,21 @@ export class TurnFlow {
                   qualityIssue.suggestedLevel,
                   this.currentStep,
                 );
+              }
+
+              // 🆕 Phase 8: 偏差链修复跟踪
+              if (this.deviationChainActive && !this.deviationChainResolved) {
+                if (this.deviationChainReason.includes('Edit 未查引用')) {
+                  if (this.hasCalledLspReferencesThisStep) {
+                    this.deviationChainResolved = true;
+                  }
+                } else if (this.deviationChainReason.includes('验证失败')) {
+                  const lastText = extractLastAssistantText(this.agent.context.history);
+                  const sig = compressStep(this.stepToolCounts, lastText);
+                  if (sig.hasVerificationTools) {
+                    this.deviationChainResolved = true;
+                  }
+                }
               }
 
               this.resetInjectorStepState();
@@ -754,6 +785,25 @@ export class TurnFlow {
                   reasons.push(
                     `The last verification command failed (${latestVerification.command}). ` +
                       'Fix the failure before re-running verification. Do NOT downgrade to runtime smoke tests.',
+                  );
+                }
+                // 🆕 Phase 8: 反事实阻断 — 高置信度编造且无证据链
+                if (this.confabulationBlocked) {
+                  const sig = compressStep(this.stepToolCounts,
+                    extractLastAssistantText(this.agent.context.history));
+                  if (sig.hasKnowledgeTools) {
+                    this.confabulationBlocked = false;
+                  } else {
+                    reasons.push(
+                      'High-confidence unfounded claims detected. Provide tool evidence before ending.',
+                    );
+                  }
+                }
+                // 🆕 Phase 8: 偏差链修复跟踪 — 已激活但未修复
+                if (this.deviationChainActive && !this.deviationChainResolved) {
+                  reasons.push(
+                    `Deviation chain still active: ${this.deviationChainReason}. ` +
+                    'Resolve the underlying issue before ending the turn.',
                   );
                 }
 
@@ -952,6 +1002,29 @@ export class TurnFlow {
                     if (this.lastToolFailure?.toolName === 'Bash') {
                       this.lastToolFailure = null;
                     }
+                  }
+                }
+              }
+              // 🆕 Phase 8: 验证假通过检测 — 跟踪失败→通过的改动量
+              if (ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd) && isError === true && this.verifyFailStep < 0) {
+                  this.verifyFailStep = this.currentStep;
+                  this.toolCountsBeforeVerifyRetry = { ...this.stepToolCounts };
+                }
+                if (looksLikeVerificationCommand(cmd) && isError !== true && this.verifyFailStep >= 0) {
+                  const editDelta = (this.stepToolCounts['Edit'] ?? 0) -
+                    (this.toolCountsBeforeVerifyRetry['Edit'] ?? 0);
+                  const writeDelta = (this.stepToolCounts['Write'] ?? 0) -
+                    (this.toolCountsBeforeVerifyRetry['Write'] ?? 0);
+                  if (editDelta === 0 && writeDelta === 0) {
+                    this.inject(
+                      '验证通过但本轮无实质性改动，可能是假通过。重新验证确认。',
+                      { kind: 'injection', variant: 'post_verify_pass' },
+                    );
+                    if (this.convergenceInjections > 0) this.convergenceInjections--;
+                  } else {
+                    this.verifyFailStep = -1;
                   }
                 }
               }
