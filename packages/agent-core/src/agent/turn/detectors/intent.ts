@@ -1,14 +1,13 @@
 /**
  * Intent Detector — 回合级用户意图检测。
  *
- * ## ResNet logic
- *
- * - **Identity path**: 无匹配 → null（0 开销）
- * - **Residual**: 检测到意图 → IntentDetection + 建议权重等级
- * - **BatchNorm**: 置信度基于匹配词密度
- *
  * 纯函数。分析 user prompt 文本，返回检测到的意图。
  * 不产生副作用，不依赖注入器。
+ *
+ * Detection paths:
+ * - 无匹配 → null（0 开销）
+ * - 检测到意图 → IntentDetection + 建议权重等级
+ * - 置信度基于匹配词密度
  *
  * ## 指令权重映射
  *

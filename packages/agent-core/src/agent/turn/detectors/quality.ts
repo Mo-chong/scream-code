@@ -1,14 +1,12 @@
 /**
  * Quality Detector — 注入质量衰退检测器。
  *
- * 残差检测当前回合已注入变体的效果。
+ * 检测当前回合已注入变体的效果。
  * 纯函数。不依赖注入器，仅消费 VariantRegistry + StepSignature。
  *
- * ## ResNet logic
- *
- * - **Identity path**: behaviorObserved === true → 直通（注入生效中，不升级）
- * - **Residual**: 注入后 N 步无对应行为 → decay；当前权重不足 → escalate
- * - **BatchNorm**: stepNorm 用于场景归一化（v1: 预留）
+ * Detection paths:
+ * - 行为已观察 → 直通（注入生效中，不升级）
+ * - 注入后 N 步无对应行为 → decay；当前权重不足 → escalate
  */
 
 import type { StepSignature } from '../signature';
@@ -42,7 +40,7 @@ export interface QDetectionResult {
  * 检测注入质量衰退。
  *
  * 扫描注册表中所有变体：
- * 1. Identity path: behavior observed → 跳过
+ * 1. 行为已观察 → 跳过
  * 2. 注入已过 N 步但未观察行为 → decay
  * 3. 权重为 C/D 但步行为复杂 → escalate
  *
@@ -62,7 +60,7 @@ export function detectQualityIssue(
   let bestResult: QDetectionResult | null = null;
 
   for (const record of registry.getAll()) {
-    // ── Identity path: 行为已观察 → 直通 ──
+    // ── 行为已观察 → 跳过 ──
     if (record.behaviorObserved === true) continue;
 
     const age = currentStep - record.stepInjected;
@@ -76,7 +74,7 @@ export function detectQualityIssue(
         targetVariant: record.variant,
         currentLevel: record.level,
         suggestedLevel: escalateLevel(record.level),
-        reason: `${record.variant}: injected ${age} steps ago, behavior not observed; escalating ${record.level}→${escalateLevel(record.level)}`,
+        reason: `${record.variant}: injected ${age} steps ago (triggered ${record.triggerCount}x), behavior not observed; escalating ${record.level}→${escalateLevel(record.level)}`,
       });
       continue;
     }
@@ -95,7 +93,7 @@ export function detectQualityIssue(
         targetVariant: record.variant,
         currentLevel: record.level,
         suggestedLevel: escalateLevel(record.level),
-        reason: `${record.variant}: action-heavy step with low-weight injection (${record.level}); escalating ${record.level}→${escalateLevel(record.level)}`,
+        reason: `${record.variant}: action-heavy step with low-weight injection (${record.level}, triggered ${record.triggerCount}x); escalating ${record.level}→${escalateLevel(record.level)}`,
       });
       continue;
     }
@@ -149,6 +147,32 @@ export function observeBehavior(
   // prepare_verify: 后续有 verify 工具调用 → 注入生效
   if (registry.get('prepare_verify') && sig.hasVerificationTools) {
     registry.markBehaviorObserved('prepare_verify');
+  }
+
+  // ── Phase 7.5 补全: 此前遗漏的观察条件 ────────────────
+  // prepare_edit: 提醒后调了知识工具（LSP.references）→ 生效
+  if (registry.get('prepare_edit') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('prepare_edit');
+  }
+  // prepare_write: 写大文件后调了验证工具 → 生效
+  if (registry.get('prepare_write') && sig.hasVerificationTools) {
+    registry.markBehaviorObserved('prepare_write');
+  }
+  // prepare_memory: 查记忆后用了知识工具 → 生效
+  if (registry.get('prepare_memory') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('prepare_memory');
+  }
+  // step_after_edit: 被提醒后调了知识工具 → 生效
+  if (registry.get('step_after_edit') && sig.hasKnowledgeTools) {
+    registry.markBehaviorObserved('step_after_edit');
+  }
+  // step_after_search: 搜到结果后有了 action（改代码）→ 生效
+  if (registry.get('step_after_search') && sig.hasActionTools) {
+    registry.markBehaviorObserved('step_after_search');
+  }
+  // step_after_verify_fail: 验证失败后重新验证 → 生效
+  if (registry.get('step_after_verify_fail') && sig.hasVerificationTools) {
+    registry.markBehaviorObserved('step_after_verify_fail');
   }
 
   // ── 意图变体行为观察 ─────────────────────────────────

@@ -1,11 +1,9 @@
 /**
  * Confabulation Detector — residual-based anti-fabrication check.
  *
- * ## ResNet logic
- *
- * - **Identity path**: if the step has knowledge tools → evidence channel exists → confidence 0.
- * - **Residual**: score what the model output exceeds available evidence.
- * - **BatchNorm**: stepNorm is a no-op for v1 (always 0.0).
+ * Detection paths:
+ * - Evidence path active (has knowledge tools) → confidence 0
+ * - Score what the model output exceeds available evidence
  *
  * Pure functions. No side effects. Does not read model output semantically.
  */
@@ -29,7 +27,7 @@ export function detectConfabulation(
   sig: StepSignature,
   ctx: ContextSnapshot,
 ): DetectionResult {
-  // ── Identity path: evidence channel active → skip ──
+  // ── Evidence path: knowledge tools active → skip ──
   if (sig.hasKnowledgeTools) {
     return { confidence: 0, reason: 'identity: step has knowledge tools' };
   }
@@ -39,7 +37,7 @@ export function detectConfabulation(
     return { confidence: 0, reason: 'delivery phase: knowledge tools not expected' };
   }
 
-  // ── Residual scoring in BottleNeck space ──
+  // ── Scoring ──
   let score = 0;
   const signals: string[] = [];
 
@@ -61,7 +59,7 @@ export function detectConfabulation(
     signals.push('action-only step with substantive output');
   }
 
-  // ── BatchNorm (v1: no-op) ──
+  // ── Normalize (v1: no-op) ──
   // score = Math.round(score * (1 - ctx.stepNormRate));
 
   // ── Confidence mapping ──

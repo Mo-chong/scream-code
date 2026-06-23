@@ -1,15 +1,8 @@
 /**
- * Step signature (BottleNeck) — low-dimensional compression of one execution step.
+ * Step signature — low-dimensional compression of one execution step.
  *
  * Transforms full step context (tool calls, output text) into a compact signature
  * that detectors can work with. Pure functions only — no side effects, no `this`.
- *
- * ## ResNet mapping
- *
- * | ResNet      | signature.ts                        |
- * |-------------|-------------------------------------|
- * | BottleNeck  | Full step → low-dim StepSignature   |
- * | Identity    | evidence path check (hasKnowledge)  |
  */
 
 import type { ContextMessage } from '../context';

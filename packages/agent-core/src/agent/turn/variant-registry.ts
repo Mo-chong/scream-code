@@ -3,13 +3,6 @@
  *
  * 纯数据层。记录本回合每个注入变体的权重等级、注入时机和行为观察状态。
  * 不依赖任何检测器或注入器。谁都能读。
- *
- * ## ResNet mapping
- *
- * | 概念        | VariantRegistry                  |
- * |-------------|----------------------------------|
- * | Shortcut    | behaviorObserved === true 直通   |
- * | Residual    | 注入后无对应行为 → 需要升级     |
  */
 
 export type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
