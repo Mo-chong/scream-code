@@ -35,6 +35,7 @@ import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos } from '@scream-code/memory';
+import { searchPendingDoc } from './turn/memory-rules';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import { WolfPackMode } from './wolfpack';
@@ -493,6 +494,19 @@ export class Agent {
   async extractMemoriesOnExit(): Promise<void> {
     if (!this.memoStore) return;
     await this.memoStore.init();
+
+    // ── Phase 12: pending-doc 退出兜底 ─────────────────────────
+    const pendingDocs = await searchPendingDoc(this.memoStore);
+    if (pendingDocs.length > 0) {
+      this.log.warn('Pending docs unresolved at session exit', {
+        count: pendingDocs.length,
+        topics: pendingDocs.map(m => m.approach.replace(/^\[pending-doc\]\s*/, '')),
+      });
+      // 清理残留 pending-doc（避免越积越多）
+      for (const doc of pendingDocs) {
+        await this.memoStore.delete(doc.id).catch(() => {});
+      }
+    }
 
     const history = this.context.history;
     if (history.length < 4) return; // Too short to contain meaningful task loops

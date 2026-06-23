@@ -80,3 +80,52 @@ export function detectSceneQuery(userInput: readonly { type: string; text?: stri
 
   return undefined;
 }
+
+/**
+ * 搜索 pending-doc 标签的记忆（待写入的系统知识）。
+ *
+ * 用于延迟写入方案——发现 doc-worthy 事件时，AI 用 MemoryWrite
+ * 创建 pending-doc 记忆（outcome: "pending", tags: ["pending-doc"]），
+ * 然后在交付前强制检查是否有未写入的 pending-doc。
+ */
+export async function searchPendingDoc(
+  store: MemoryMemoStore | undefined,
+): Promise<MemoryMemo[]> {
+  if (!store) return [];
+  try {
+    const candidates = await store.search('pending-doc', { candidateLimit: 20 });
+    return candidates.filter(
+      (m) => m.outcome === 'pending' && m.tags?.includes('pending-doc'),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 格式化 pending-doc 注入文本。
+ *
+ * 输出示例：
+ *   【知识记录】本回合有 2 条待写入知识：
+ *     1. [P0] FTS5 不索引 tags 列
+ *     2. [P1] 中文指令权重大于英文
+ *
+ *   写入位置：SYSTEM/*.md（系统限制/踩坑）、DECISIONS/*.md（架构决策）、pitfalls.md（踩坑记录）
+ *   P0 项必须在本回合写入——这是交付的一部分。
+ *   写入后更新对应 INDEX.md，并删除对应的 pending-doc 记忆。
+ */
+export function formatPendingDocInject(memos: MemoryMemo[]): string {
+  const hasP0 = memos.some(m => m.userNeed.includes('[P0]'));
+  return [
+    '【知识记录】本回合有 ' + memos.length + ' 条待写入知识：',
+    ...memos.map((m, i) => {
+      const topic = m.approach.replace(/^\[pending-doc\]\s*/, '');
+      const priority = m.userNeed.includes('[P0]') ? 'P0' : 'P1';
+      return '  ' + (i + 1) + '. [' + priority + '] ' + topic;
+    }),
+    '',
+    '写入位置：SYSTEM/*.md（系统限制/踩坑）、DECISIONS/*.md（架构决策）、pitfalls.md（踩坑记录）',
+    hasP0 ? 'P0 项必须在本回合写入——这是交付的一部分。' : '建议在本回合写入后再交付。',
+    '写入后更新对应 INDEX.md，并删除对应的 pending-doc 记忆。',
+  ].join('\n');
+}

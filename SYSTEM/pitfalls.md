@@ -13,6 +13,7 @@
 - [注入系统](#注入系统)
 - [拦截系统](#拦截系统)
 - [设计误区](#设计误区)
+- [调试教训](#调试教训)
 
 ---
 
@@ -101,15 +102,44 @@ pnpm build (scream-code)  # 打包进最终 bundle ← 这步必须做
 
 ## 回合控制
 
-### LSP 在 root agent 不可用，在 reviewer 可用
+### LSP 在 root agent 连续超时 120s — 3 个独立 bug 的链式故障（2026-06-23 修复）
 
-**问题**：root agent 没有 LSP tool，偏差链要求调 LSP.references 但调不了。
+**现象**：`LSP.references` 和 `LSP.definition` 始终 120s 超时（`DEFAULT_REQUEST_TIMEOUT_MS`），但 `LSP.diagnostics` 能立刻返回。子 agent reviewer 的 LSP 可用。
 
-**根因**：`Agent` 类的 `tools` 加载按类型筛选。LSP 服务端是独立进程，root agent 每步都要做 LLM 调用，负担重，所以 LSP 只部署在 reviewer 子 Agent 上。
+**表面迷惑性**：diagnostics 能通让人误以为 LSP 服务器正常，实际上 diagnostics 是 server-push notification（无需 request-response），而 references/definition 需要完整的 request-response 通路。三个 bug 依次叠加：
 
-**解决**：要么派 reviewer 做 LSP 验证，要么用 Grep 等效替代。
+**Bug 1 — 僵尸 client 缓存（registry.ts + client.ts）**
 
-**教训**：验证调用者不一定需要 LSP。Grep 可以用作 fallback，但需要人工判断是否覆盖全量。
+**症状**：第一次调用 `typescript-language-server` 时 spawn ENOENT（PATH 里找不到命令），但 `LspClient.start()` 在进程创建前就设了 `this.started = true`，且 `LspRegistry.getClient()` 在 `client.start()` 完成前就 `this.clients.set(key, client)`。失败后死进程被永久缓存。后续请求发过去静默丢弃（`send()` 里 `if (this.process === undefined) return`），Promise 永不 resolve，直到 120s 超时。
+
+**修复**：① `client.ts`：`this.started = true` 放在进程创建成功 + stdout/stderr 绑定之后；② `registry.ts`：`await client.start()` 通过后才 `set()` 缓存。
+
+**Bug 2 — workspace root 无 tsconfig.json（registry.ts）**
+
+**症状**：TypeScript LSP 启动后对 `workspaceRoot` 全目录扫描寻找项目。`workspaceRoot = D:/AI/allgzmulu`（会话当前目录）没有 `tsconfig.json`，TS server 一直扫到超时。
+
+**修复**：`getClient()` 改为从文件路径往上找最近有 `tsconfig.json`/`jsconfig.json` 的祖先目录做 project root。
+
+**Bug 3 — Windows spawn 不能跑 `.cmd` 文件（registry.ts）**
+
+**症状**：全局安装的 `typescript-language-server` 入口是 `.cmd` 文件（`%APPDATA%/npm/typescript-language-server.cmd`）。Node `child_process.spawn` 不能直接执行 `.cmd`，抛出 `spawn EINVAL`。
+
+**修复**：`_resolveCmd()` 用 `npm root -g` 找到全局 node_modules，解析到 `lib/cli.mjs` 真实入口，用 `node <entry> --stdio` 启动。
+
+**链式故障示意图**：
+```
+spawn typescript-language-server → ENOENT（PATH 无 cmd，Bug 1 僵尸）
+→ 下次请求 → 僵尸 client 静默丢包 → 120s 超时（Bug 1 症状）
+→ 全局安装后 → spawn 不跑 .cmd → EINVAL（Bug 3）
+→ 绕路 npx → 捆绑环境 PATH 无 npx.cmd → 依然 EINVAL
+→ resolveProjectRoot 无 tsconfig → scan 2min → 超时（Bug 2 叠加）
+```
+
+**教训**：
+1. symptoms can be the same for different root causes — 别只看现象换方向
+2. Windows 上 spawn 不能跑 `.cmd` 文件，必须用 `node <entry>` 或 `cmd /c`
+3. LSP diagnostics 通 ≠ LSP 完全可用，references/definition 是独立的 request-response 通路
+4. bundle 环境 PATH 与开发环境不同，所有外部命令依赖必须显式处理
 
 ### shouldContinueAfterStop 收敛门有注入次数上限
 
@@ -221,3 +251,46 @@ pnpm build (scream-code)  # 打包进最终 bundle ← 这步必须做
 **事实**：ContextFusion 是做 RAG 上下文的压缩路由，MEM1 是做 RL 训练让模型自己学会压缩。我们的场景是"少量规则注入 + 系统行为拦截"——路径不同。
 
 **教训**：开源工具解决的是通用问题。先确认自己的问题是不是通用问题。
+
+---
+
+## 调试教训
+
+### 症状相同 ≠ 根因相同 — LSP 超时调试的链式故障反思（2026-06-23）
+
+**经过**：修复 LSP.references 超时用了 10+ 轮对话，尝试了 5 种不同方向（agent.yaml 工具注册、僵尸进程、workspace root、npx fallback、全局安装、Windows .cmd）才全部解决。
+
+**为什么绕了这么久**：
+
+1. **只看错误消息改方向**：`ENOENT` → 装全局 → `EINVAL` → 改 npx → `npx ENOENT` → 改 bundle → 每次发现一个问题就以为"哦原来就是这个"，修了立刻试，试了还不行再换下一个。实际上 3 个 bug 叠加，修 1 个 2 个都不够。
+
+2. **没做"症状排除矩阵"**：如果一开始就把三个 LSP 功能（references/definition/diagnostics）都试一遍，就会发现 diagnostics 可用 → 不是 agent.yaml 工具注册问题。这才是关键阻断信息——单靠这一个排除就能省掉第一轮绕路。
+
+3. **过早怀疑非代码原因**：第一轮 LSP 调用失败就抛出"tool not found"，但误以为是"网络问题"、"路径问题"、"权限问题""换网络"——其实看错误码 `ENOENT` 就是命令不在 PATH，非常直接。
+
+4. **修复后没确认 bundle 确实更新**：改了代码、build 通过、重启，但 `spawn EINVAL` 仍然是旧代码报的——说明 bundle 没清缓存或 build 没正确 link。应该用 `strings bundle | grep "npx.cmd"` 确认新代码真的进去了。
+
+**总结 — LSP debugging checklist**：
+
+```
+症状：references/definition 均 120s 超时，但 diagnostics 正常
+
+Step 1：排除法（30s）
+  diagnostics 可用 → LSP 进程可启动 → 排除 agent.yaml/工具注册问题
+  → 问题在 request-response 路径
+
+Step 2：看错误类型（2min）
+  ENOENT → 命令不在 PATH
+  EINVAL → Windows spawn 不支持 .cmd
+  EFATAL/TIMEOUT → 进程可启动但卡死在项目扫描
+
+Step 3：验证修复（30s）
+  strings dist/app-*.mjs | grep "npx.cmd"  确认新旧代码
+  重启后 LSP.references 直接试，不要猜
+```
+
+**教训**：
+1. 多个 bug 叠加导致同一症状时，修了还不行不代表方向错——可能只修了冰山一角
+2. diagnostics vs references 功能差异是 LSP 调试的关键排除点
+3. 每次修复完先确认 bundle 有没有新代码再试，避免"修了 = 等于没修"的无效循环
+4. 错误码是线索不是判决——ENOENT 后面接 EINVAL 说明路径方向对但 spawn 方式错
