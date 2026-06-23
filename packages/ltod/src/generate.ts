@@ -1,5 +1,10 @@
 import { APIEmptyResponseError } from './errors';
 import {
+  getStreamFirstItemTimeoutMs,
+  getStreamIdleTimeoutMs,
+  iterateWithIdleTimeout,
+} from './idle-iterator';
+import {
   isContentPart,
   isToolCall,
   isToolCallPart,
@@ -111,7 +116,17 @@ export async function generate(
   // the stream.
   await throwIfAborted(options?.signal, stream);
 
-  for await (const part of stream) {
+  const idleTimeoutMs = getStreamIdleTimeoutMs();
+  const firstItemTimeoutMs = getStreamFirstItemTimeoutMs(idleTimeoutMs);
+  const watchedStream = iterateWithIdleTimeout(stream, {
+    idleTimeoutMs,
+    firstItemTimeoutMs,
+    abortSignal: options?.signal,
+    errorMessage: `Stream stalled — no data for ${idleTimeoutMs ?? 0}ms. Provider: ${provider.name}, model: ${provider.modelName}`,
+    firstItemErrorMessage: `Stream stalled — no first token within ${firstItemTimeoutMs ?? 0}ms. Provider: ${provider.name}, model: ${provider.modelName}`,
+  });
+
+  for await (const part of watchedStream) {
     await throwIfAborted(options?.signal, stream);
 
     // Notify raw part callback (deep copy to avoid aliasing mutations).

@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
-import { describe, expect, it } from 'vitest';
+import { resetCapabilitiesCache, setCapabilities } from '@earendil-works/pi-tui';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   parseReadMediaOutput,
@@ -58,6 +59,7 @@ describe('parseReadMediaOutput', () => {
     expect(m?.path).toBe('/tmp/a.png');
     expect(m?.mimeType).toBe('image/png');
     expect(m?.bytes).toBeGreaterThan(0);
+    expect(m?.base64).toBe(PNG_B64);
     expect(m?.originalSize).toBe('1x1px');
   });
 
@@ -106,14 +108,34 @@ describe('readMediaChip', () => {
 });
 
 describe('readMediaSummary renderer', () => {
-  it('renders an empty body when collapsed (chip carries the info)', () => {
+  afterEach(() => {
+    resetCapabilitiesCache();
+  });
+
+  it('renders an empty body when collapsed on terminals without image protocol', () => {
+    setCapabilities({ images: null, trueColor: false, hyperlinks: false });
     const out = joinRender(
       readMediaSummary(call('ReadMediaFile'), result(imageOutput('/tmp/a.png')), ctx),
     );
     expect(out.trim()).toBe('');
   });
 
+  it('renders the inline image even when collapsed on kitty-capable terminals', () => {
+    setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true });
+    const components = readMediaSummary(
+      call('ReadMediaFile'),
+      result(imageOutput('/tmp/a.png')),
+      ctx,
+    );
+    const renders = components.map((c) => c.render(100).join('\n'));
+    const hasImage = renders.some((r) => r.includes('\x1b_G'));
+    expect(hasImage).toBe(true);
+    // Path/meta text is suppressed when collapsed (chip carries it)
+    expect(renders.join('\n')).not.toContain('/tmp/a.png');
+  });
+
   it('renders path + meta line when expanded — never the base64 blob', () => {
+    setCapabilities({ images: null, trueColor: false, hyperlinks: false });
     const out = strip(
       joinRender(
         readMediaSummary(call('ReadMediaFile'), result(imageOutput('/tmp/a.png')), expandedCtx),
@@ -124,6 +146,37 @@ describe('readMediaSummary renderer', () => {
     // Crucially: the base64 must never reach the screen.
     expect(out).not.toContain(PNG_B64);
     expect(out).not.toContain(PNG_DATA_URL);
+  });
+
+  it('renders an inline image component on kitty-capable terminals when expanded', () => {
+    setCapabilities({ images: 'kitty', trueColor: true, hyperlinks: true });
+    const components = readMediaSummary(
+      call('ReadMediaFile'),
+      result(imageOutput('/tmp/a.png')),
+      expandedCtx,
+    );
+    // At least one component carries the kitty graphics escape — that is
+    // the inline image. The base64 travels inside the escape, which is
+    // correct: it is image data, not human-readable text.
+    const renders = components.map((c) => c.render(100).join('\n'));
+    const hasImage = renders.some((r) => r.includes('\x1b_G'));
+    expect(hasImage).toBe(true);
+    // The data-URL prefix must never leak as readable text.
+    expect(renders.join('\n')).not.toContain(PNG_DATA_URL);
+  });
+
+  it('falls back to a placeholder text on terminals without image protocol', () => {
+    setCapabilities({ images: null, trueColor: false, hyperlinks: false });
+    const components = readMediaSummary(
+      call('ReadMediaFile'),
+      result(imageOutput('/tmp/a.png')),
+      expandedCtx,
+    );
+    const out = strip(joinRender(components));
+    // No kitty graphics escape emitted.
+    expect(out).not.toContain('\x1b_G');
+    // A readable image label is shown instead.
+    expect(out).toContain('image/png');
   });
 
   it('falls back to truncated renderer for errors', () => {

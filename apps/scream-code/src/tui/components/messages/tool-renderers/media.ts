@@ -13,10 +13,15 @@
  * message.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { Text } from '@earendil-works/pi-tui';
+import {
+  getCapabilities,
+  getImageDimensions,
+  type Component,
+  Text,
+} from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { createImageComponent } from '#/tui/components/media/image-thumbnail';
 import type { ChipProvider } from './chip';
 import { renderTruncated } from './truncated';
 import type { ResultRenderer } from './types';
@@ -26,6 +31,7 @@ export interface ReadMediaSummary {
   path?: string;
   mimeType?: string;
   bytes?: number;
+  base64?: string;
   url?: string;
   originalSize?: string;
 }
@@ -54,6 +60,7 @@ export function parseReadMediaOutput(output: string): ReadMediaSummary | null {
   let path: string | undefined;
   let mimeType: string | undefined;
   let bytes: number | undefined;
+  let base64: string | undefined;
   let url: string | undefined;
   let originalSize: string | undefined;
   let foundMedia = false;
@@ -88,6 +95,7 @@ export function parseReadMediaOutput(output: string): ReadMediaSummary | null {
           if (data && data[1] !== undefined && data[2] !== undefined) {
             mimeType = data[1];
             bytes = bytesFromBase64(data[2]);
+            base64 = data[2];
           } else {
             url = u;
           }
@@ -102,6 +110,7 @@ export function parseReadMediaOutput(output: string): ReadMediaSummary | null {
   if (path !== undefined) summary.path = path;
   if (mimeType !== undefined) summary.mimeType = mimeType;
   if (bytes !== undefined) summary.bytes = bytes;
+  if (base64 !== undefined) summary.base64 = base64;
   if (url !== undefined) summary.url = url;
   if (originalSize !== undefined) summary.originalSize = originalSize;
   return summary;
@@ -136,17 +145,43 @@ export const readMediaSummary: ResultRenderer = (toolCall, result, ctx) => {
   if (result.is_error) return renderTruncated(toolCall, result, ctx);
   const summary = parseReadMediaOutput(result.output);
   if (summary === null) return renderTruncated(toolCall, result, ctx);
-  if (!ctx.expanded) return [];
 
   const dim = chalk.dim;
   const out: Component[] = [];
-  if (summary.path !== undefined) {
-    out.push(new Text(`  ${dim(summary.path)}`, 0, 0));
+  // path/meta 文本行只在展开时显示——chip 已有摘要，折叠时不必重复
+  if (ctx.expanded) {
+    if (summary.path !== undefined) {
+      out.push(new Text(`  ${dim(summary.path)}`, 0, 0));
+    }
+    const meta = metaSegments(summary);
+    const tail: string[] = [summary.kind];
+    if (meta.length > 0) tail.push(meta.join(', '));
+    if (summary.url !== undefined) tail.push(summary.url);
+    out.push(new Text(`  ${dim(tail.join(' · '))}`, 0, 0));
   }
-  const meta = metaSegments(summary);
-  const tail: string[] = [summary.kind];
-  if (meta.length > 0) tail.push(meta.join(', '));
-  if (summary.url !== undefined) tail.push(summary.url);
-  out.push(new Text(`  ${dim(tail.join(' · '))}`, 0, 0));
+
+  // 图片在折叠和展开状态都尝试渲染——图片是 ReadMediaFile 的主要输出，
+  // 不应该需要 ctrl+o 才能看到。但终端不支持图形协议时，折叠状态跳过
+  // fallback text（chip 已显示路径），只在展开时显示 [mime] 占位符
+  if (summary.kind === 'image' && summary.base64 !== undefined && summary.mimeType !== undefined) {
+    const caps = getCapabilities();
+    const supportsInline = caps.images === 'kitty' || caps.images === 'iterm2';
+    if (ctx.expanded || supportsInline) {
+      const dims = getImageDimensions(summary.base64, summary.mimeType) ?? { widthPx: 800, heightPx: 600 };
+      out.push(
+        createImageComponent(
+          {
+            base64: summary.base64,
+            mime: summary.mimeType,
+            width: dims.widthPx,
+            height: dims.heightPx,
+            filename: summary.path,
+          },
+          ctx.colors,
+        ),
+      );
+    }
+  }
+
   return out;
 };

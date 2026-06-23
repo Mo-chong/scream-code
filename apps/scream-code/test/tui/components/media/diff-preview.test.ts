@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import chalk from 'chalk';
+
 import {
   computeDiffLines,
   renderDiffLines,
   renderDiffLinesClustered,
 } from '#/tui/components/media/diff-preview';
 import { getColorPalette } from '#/tui/theme/colors';
+
+// Force chalk to emit ANSI codes even under vitest's non-TTY stdout so the
+// intra-line inverse highlight can be detected by its escape sequence.
+chalk.level = 1;
 
 const COLORS = getColorPalette('dark');
 
@@ -64,6 +70,28 @@ describe('renderDiffLines', () => {
     expect(text).toContain('-2');
     expect(text).toContain('C');
     expect(text).toContain('D');
+  });
+
+  it('applies intra-line word diff to single-line replacement pairs', () => {
+    const output = renderDiffLines('const foo = 1;', 'const bar = 2;', 'test.ts', COLORS, false, 1, 1);
+    // output[0] = header, output[1] = delete line, output[2] = add line
+    expect(output.length).toBe(3);
+    const rawDelete = output[1]!;
+    const rawAdd = output[2]!;
+    // The changed words (foo/bar) should be present in the stripped text
+    expect(stripAnsi(rawDelete)).toContain('foo');
+    expect(stripAnsi(rawAdd)).toContain('bar');
+    // Inverse escape (chalk.inverse emits \x1b[7m) should be present in the raw output
+    // — that is the intra-line highlight marker
+    expect(rawDelete).toContain('\x1b[7m');
+    expect(rawAdd).toContain('\x1b[7m');
+  });
+
+  it('keeps whole-line coloring for multi-line delete/add blocks', () => {
+    const output = renderDiffLines('old line 1\nold line 2', 'new line 1\nnew line 2', 'test.ts', COLORS, false, 1, 1);
+    const raw = output.join('\n');
+    // No inverse highlight — multi-line blocks stay as whole-line green/red
+    expect(raw).not.toContain('\x1b[7m');
   });
 });
 

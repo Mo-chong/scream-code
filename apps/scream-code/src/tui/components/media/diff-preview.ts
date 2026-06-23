@@ -6,6 +6,7 @@
  */
 
 import chalk from 'chalk';
+import { diffWords } from 'diff';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 
@@ -29,6 +30,73 @@ function makeDiffStyles(colors: ColorPalette): DiffStyles {
     gutter: (s) => chalk.hex(colors.diffGutter)(s),
     meta: (s) => chalk.hex(colors.diffMeta)(s),
   };
+}
+
+/**
+ * Compute word-level diff between two single lines and highlight the changed
+ * words with `chalk.inverse()`. Only the first removed/added part has its
+ * leading whitespace stripped, so indentation isn't highlighted.
+ *
+ * Ported from oh-my-pi `packages/coding-agent/src/modes/components/diff.ts:55-95`.
+ * Returns the two lines with inline inverse highlighting applied; caller wraps
+ * them in the usual add/del gutter + line color.
+ */
+function renderIntraLineDiff(
+  oldContent: string,
+  newContent: string,
+): { removedLine: string; addedLine: string } {
+  const wordDiff = diffWords(oldContent, newContent);
+
+  let removedLine = '';
+  let addedLine = '';
+  let isFirstRemoved = true;
+  let isFirstAdded = true;
+
+  for (const part of wordDiff) {
+    if (part.removed) {
+      let value = part.value;
+      if (isFirstRemoved) {
+        const leadingWs = value.match(/^(\s*)/)?.[1] ?? '';
+        value = value.slice(leadingWs.length);
+        removedLine += leadingWs;
+        isFirstRemoved = false;
+      }
+      if (value) removedLine += chalk.inverse(value);
+    } else if (part.added) {
+      let value = part.value;
+      if (isFirstAdded) {
+        const leadingWs = value.match(/^(\s*)/)?.[1] ?? '';
+        value = value.slice(leadingWs.length);
+        addedLine += leadingWs;
+        isFirstAdded = false;
+      }
+      if (value) addedLine += chalk.inverse(value);
+    } else {
+      removedLine += part.value;
+      addedLine += part.value;
+    }
+  }
+
+  return { removedLine, addedLine };
+}
+
+/**
+ * Check whether a delete line at index `i` and an add line at index `i+1`
+ * form an isolated single-line replacement — the only case where intra-line
+ * word diff is meaningful. We require both sides to be single-line blocks
+ * (prev of delete is not delete; next of add is not add) so multi-line
+ * delete/add blocks stay as whole-line coloring.
+ */
+function isIsolatedSingleLinePair(lines: DiffLine[], i: number): boolean {
+  const curr = lines[i];
+  const next = lines[i + 1];
+  if (curr === undefined || next === undefined) return false;
+  if (curr.kind !== 'delete' || next.kind !== 'add') return false;
+  const prev = lines[i - 1];
+  if (prev !== undefined && prev.kind === 'delete') return false;
+  const after = lines[i + 2];
+  if (after !== undefined && after.kind === 'add') return false;
+  return true;
 }
 
 export interface DiffLine {
@@ -133,10 +201,22 @@ export function renderDiffLines(
       ? changedLines.slice(0, maxLines)
       : changedLines;
 
-  for (const line of shown) {
+  let i = 0;
+  while (i < shown.length) {
+    if (isIsolatedSingleLinePair(shown, i)) {
+      const line = shown[i]!;
+      const next = shown[i + 1]!;
+      const { removedLine, addedLine } = renderIntraLineDiff(line.code, next.code);
+      output.push(s.gutter(String(line.lineNum).padStart(4) + ' ') + s.del('- ' + removedLine));
+      output.push(s.gutter(String(next.lineNum).padStart(4) + ' ') + s.add('+ ' + addedLine));
+      i += 2;
+      continue;
+    }
+    const line = shown[i]!;
     const marker = line.kind === 'add' ? '+' : '-';
     const color = line.kind === 'add' ? s.add : s.del;
     output.push(s.gutter(String(line.lineNum).padStart(4) + ' ') + color(marker + ' ' + line.code));
+    i += 1;
   }
 
   const hidden = changedLines.length - shown.length;
@@ -281,16 +361,35 @@ export function renderDiffLinesClustered(
     // a single huge cluster (e.g. the whole file replaced inline) still
     // shows the leading lines instead of degenerating to "N changes
     // hidden" with no body at all.
-    for (let i = cluster.start; i <= cluster.end; i++) {
+    let i = cluster.start;
+    while (i <= cluster.end) {
       if (body >= cap) {
         truncated = true;
         break outer;
       }
       const line = diffLines[i]!;
+      if (i + 1 <= cluster.end && isIsolatedSingleLinePair(diffLines, i)) {
+        const next = diffLines[i + 1]!;
+        const { removedLine, addedLine } = renderIntraLineDiff(line.code, next.code);
+        output.push(s.gutter(String(line.lineNum).padStart(4) + ' ') + s.del('- ' + removedLine));
+        body++;
+        if (body >= cap) {
+          truncated = true;
+          prevEnd = i;
+          break outer;
+        }
+        output.push(s.gutter(String(next.lineNum).padStart(4) + ' ') + s.add('+ ' + addedLine));
+        body++;
+        shownChanges += 2;
+        prevEnd = i + 1;
+        i += 2;
+        continue;
+      }
       output.push(formatDiffRow(line, s));
       body++;
       if (line.kind !== 'context') shownChanges++;
       prevEnd = i;
+      i += 1;
     }
   }
 

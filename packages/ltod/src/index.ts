@@ -66,6 +66,23 @@ export {
   isRetryableGenerateError,
 } from './errors';
 
+// Rate limit classification
+export {
+  calculateRateLimitBackoffMs,
+  isUsageLimitError,
+  parseRateLimitReason,
+} from './rate-limit-utils';
+export type { RateLimitReason } from './rate-limit-utils';
+
+// Stream idle watchdog
+export {
+  StreamIdleTimeoutError,
+  getStreamFirstItemTimeoutMs,
+  getStreamIdleTimeoutMs,
+  iterateWithIdleTimeout,
+} from './idle-iterator';
+export type { IdleTimeoutIteratorOptions } from './idle-iterator';
+
 // Tool call ID sanitization
 export {
   normalizeToolCallIdsForProvider,

@@ -19,6 +19,26 @@ export interface LspDiagnostic {
   readonly message: string;
 }
 
+export interface LspTextEdit {
+  readonly range: {
+    readonly start: { readonly line: number; readonly character: number };
+    readonly end: { readonly line: number; readonly character: number };
+  };
+  readonly newText: string;
+}
+
+export interface LspTextDocumentEdit {
+  readonly textDocument: { readonly uri: string; readonly version?: number | null };
+  readonly edits: LspTextEdit[];
+}
+
+export type LspDocumentChange = LspTextDocumentEdit;
+
+export interface LspWorkspaceEdit {
+  readonly changes?: Record<string, LspTextEdit[]>;
+  readonly documentChanges?: LspDocumentChange[];
+}
+
 interface JsonRpcMessage {
   readonly jsonrpc: '2.0';
   readonly id?: number;
@@ -83,7 +103,12 @@ export class LspClient {
     await this.request('initialize', {
       processId: process.pid,
       rootUri: pathToUri(this.workspaceRoot),
-      capabilities: {},
+      capabilities: {
+        textDocument: {
+          synchronization: { willSave: false, willSaveWaitUntil: false, didSave: false },
+          rename: { prepareSupport: false },
+        },
+      },
     });
     this.notify('initialized', {});
   }
@@ -138,6 +163,20 @@ export class LspClient {
     })) as LspLocation | LspLocation[] | null;
     if (result === null) return [];
     return Array.isArray(result) ? result : [result];
+  }
+
+  async rename(
+    path: string,
+    line: number,
+    character: number,
+    newName: string,
+  ): Promise<LspWorkspaceEdit | null> {
+    const result = (await this.request('textDocument/rename', {
+      textDocument: { uri: pathToUri(path) },
+      position: { line, character },
+      newName,
+    })) as LspWorkspaceEdit | null;
+    return result;
   }
 
   async diagnostics(path: string, timeoutMs = 5000): Promise<LspDiagnostic[]> {
@@ -242,6 +281,24 @@ export function pathToUri(path: string): string {
 
   const absolute = path.startsWith('/') ? path : `/${path}`;
   return `file://${absolute}`;
+}
+
+/**
+ * Convert a `file://` URI back to a filesystem path. Tolerates
+ * percent-encoded characters and lax servers that send raw paths.
+ */
+export function uriToPath(uri: string): string {
+  if (!uri.startsWith('file://')) return uri;
+  let filePath = uri.slice('file://'.length);
+  try {
+    filePath = decodeURIComponent(filePath);
+  } catch {
+    // Invalid percent-encoding — treat as a literal path.
+  }
+  if (process.platform === 'win32' && filePath.startsWith('/') && /^[A-Za-z]:/.test(filePath.slice(1))) {
+    filePath = filePath.slice(1);
+  }
+  return filePath;
 }
 
 function sleep(ms: number): Promise<void> {

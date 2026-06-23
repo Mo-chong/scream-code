@@ -101,6 +101,16 @@ describe('APIProviderRateLimitError', () => {
     const err = new APIProviderRateLimitError('rate limited');
     expect(err.requestId).toBeNull();
   });
+
+  it('defaults reason to UNKNOWN when not provided', () => {
+    const err = new APIProviderRateLimitError('rate limited');
+    expect(err.reason).toBe('UNKNOWN');
+  });
+
+  it('carries the reason passed in', () => {
+    const err = new APIProviderRateLimitError('quota will reset', null, 'QUOTA_EXHAUSTED');
+    expect(err.reason).toBe('QUOTA_EXHAUSTED');
+  });
 });
 
 describe('isRetryableGenerateError', () => {
@@ -124,6 +134,16 @@ describe('isRetryableGenerateError', () => {
     ).toBe(false);
     expect(isRetryableGenerateError(new Error('boom'))).toBe(false);
     expect(isRetryableGenerateError('boom')).toBe(false);
+  });
+
+  it('retries rate-limit 429 unless quota is exhausted', () => {
+    const transient = new APIProviderRateLimitError('rate limit per minute', null, 'RATE_LIMIT_EXCEEDED');
+    const capacity = new APIProviderRateLimitError('overloaded', null, 'MODEL_CAPACITY_EXHAUSTED');
+    const quota = new APIProviderRateLimitError('quota will reset', null, 'QUOTA_EXHAUSTED');
+
+    expect(isRetryableGenerateError(transient)).toBe(true);
+    expect(isRetryableGenerateError(capacity)).toBe(true);
+    expect(isRetryableGenerateError(quota)).toBe(false);
   });
 });
 
@@ -201,6 +221,15 @@ describe('normalizeAPIStatusError', () => {
     expect(error).toBeInstanceOf(APIStatusError);
     expect(error.statusCode).toBe(429);
     expect(error.requestId).toBe('req-rate');
+  });
+
+  it('parses the reason from the 429 message', () => {
+    const quota = normalizeAPIStatusError(429, 'Your quota will reset after 24h');
+    const capacity = normalizeAPIStatusError(429, 'The model is overloaded');
+    const rateLimit = normalizeAPIStatusError(429, 'rate limit per minute exceeded');
+    expect((quota as APIProviderRateLimitError).reason).toBe('QUOTA_EXHAUSTED');
+    expect((capacity as APIProviderRateLimitError).reason).toBe('MODEL_CAPACITY_EXHAUSTED');
+    expect((rateLimit as APIProviderRateLimitError).reason).toBe('RATE_LIMIT_EXCEEDED');
   });
 });
 

@@ -1,3 +1,6 @@
+import type { RateLimitReason } from './rate-limit-utils';
+import { parseRateLimitReason } from './rate-limit-utils';
+
 /**
  * Base error for all chat provider errors.
  */
@@ -56,12 +59,17 @@ export class APIContextOverflowError extends APIStatusError {
 
 /**
  * HTTP status error that specifically means the provider rate-limited the
- * request.
+ * request. Carries a `reason` so retry logic can pick the right backoff
+ * (quota exhaustion needs 30min or a credential switch; a transient 529
+ * just needs 45s) instead of treating every 429 the same.
  */
 export class APIProviderRateLimitError extends APIStatusError {
-  constructor(message: string, requestId?: string | null) {
+  readonly reason: RateLimitReason;
+
+  constructor(message: string, requestId?: string | null, reason?: RateLimitReason) {
     super(429, message, requestId);
     this.name = 'APIProviderRateLimitError';
+    this.reason = reason ?? 'UNKNOWN';
   }
 }
 
@@ -81,6 +89,12 @@ export function isRetryableGenerateError(error: unknown): boolean {
   }
   if (error instanceof APIEmptyResponseError) {
     return true;
+  }
+  if (error instanceof APIProviderRateLimitError) {
+    // Quota exhaustion won't clear in the retry window — retrying just wastes
+    // attempts. Fail fast so the user sees "switch credential" instead of
+    // three 30-min backoffs.
+    return error.reason !== 'QUOTA_EXHAUSTED';
   }
   return error instanceof APIStatusError && [429, 500, 502, 503, 504].includes(error.statusCode);
 }
@@ -116,7 +130,7 @@ export function normalizeAPIStatusError(
   requestId?: string | null,
 ): APIStatusError {
   if (statusCode === 429) {
-    return new APIProviderRateLimitError(message, requestId);
+    return new APIProviderRateLimitError(message, requestId, parseRateLimitReason(message));
   }
   if (isContextOverflowStatusError(statusCode, message)) {
     return new APIContextOverflowError(statusCode, message, requestId);

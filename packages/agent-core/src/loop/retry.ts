@@ -1,6 +1,10 @@
 import { sleep } from '@antfu/utils';
 import * as retry from 'retry';
-import { APIContextOverflowError } from '@scream-code/ltod';
+import {
+  APIContextOverflowError,
+  APIProviderRateLimitError,
+  calculateRateLimitBackoffMs,
+} from '@scream-code/ltod';
 
 import type { Logger } from '#/logging/types';
 
@@ -56,12 +60,23 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
         throw error;
       }
 
+      // Quota-exhaustion 429s won't clear in the retry window — the account is
+      // out of daily/monthly quota. Fail fast so the user sees "switch
+      // credential" instead of waiting through a 30min backoff ×3.
+      if (error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED') {
+        logRequestFailure(input, error, attempt, maxAttempts);
+        throw error;
+      }
+
       if (attempt >= maxAttempts || !input.llm.isRetryableError(error)) {
         logRequestFailure(input, error, attempt, maxAttempts);
         throw error;
       }
 
-      const delayMs = delays[attempt - 1] ?? 0;
+      // Rate-limited requests get reason-aware backoff instead of the default
+      // exponential 300ms-5s. A 529 (MODEL_CAPACITY) needs 45-75s; a per-minute
+      // rate limit needs 30s; the default exponential stays for network/timeout.
+      const delayMs = computeDelayMs(error, delays, attempt);
       input.params.signal.throwIfAborted();
       input.dispatchEvent({
         type: 'step.retrying',
@@ -77,6 +92,13 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
       await sleepForRetry(delayMs, input.params.signal);
     }
   }
+}
+
+function computeDelayMs(error: unknown, delays: number[], attempt: number): number {
+  if (error instanceof APIProviderRateLimitError) {
+    return calculateRateLimitBackoffMs(error.reason);
+  }
+  return delays[attempt - 1] ?? 0;
 }
 
 function logRequestFailure(
