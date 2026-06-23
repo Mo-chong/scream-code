@@ -565,3 +565,77 @@ injectAntiConfabulation(confaResult, this.stepInjectedVariants,
 | C (afterStep) | step_after_edit(A/B), step_after_search(B), step_after_verify_fail(A) |
 | D (runOneTurn) | intent_fix_bug(B/A), intent_refactor(B/A), intent_add_feature(B/A), intent_review(B/A), intent_research(B/A), intent_document(B/A) |
 | Special | deviation_chain_intercept(S), quality_escalate_*(penetrate), system_trigger(penetrate) |
+
+---
+
+## 12. Interception Event Log
+
+**File:** `event-log.ts`, `event-snapshot.ts`
+
+Records system-level interception events — what the injection system did, not what the AI did. 10 hardcoded `record()` calls inside `inject()`, `afterStep`, `finalizeToolResult`, and `shouldContinueAfterStop`. AI has no bypass capability.
+
+### TurnEventLog (event-log.ts)
+
+In-memory ring buffer (200 events max). Per-turn incremental summary injected into AI context via `getNewTurnSummary()`.
+
+```typescript
+interface InterceptionEvent {
+  seq: number;                              // Monotonic sequence
+  kind: string;                             // injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail
+  variant: string;                          // Variant name (empty string for non-variant events)
+  step: number;                             // Turn step number
+  action: string;                           // skipped_residual | skipped_budget | skipped_dedup | injected | gate_held | gate_passed | detected
+  reason: string;                           // Human-readable description
+  turnId: number;
+}
+```
+
+### Sampling (W-driven)
+
+Uses `VARIANT_META.W` (ResNet weight) to calculate sampling rate:
+
+```
+sampleRate = clamp(W × 0.5 + 0.1, 0.1, 1.0)
+未配置 variant → 1.0 (全量)
+```
+
+Deterministic hash-based sampling (not `Math.random`) ensures stable behavior per variant per turn. Only affects persistence and memory — injection flow is untouched.
+
+### EventSnapshotBuffer (event-snapshot.ts)
+
+Async persistence buffer. Collects turn-end snapshots and flushes to disk when thresholds are met. Architecture reuses `FileSystemAgentRecordPersistence` pattern: `pendingEntries → shouldFlush → scheduleFlush → ensureFlush → drainBatch`.
+
+**Flush triggers** (any match):
+- 5 pending rounds
+- Degradation threshold: `max(1, 5 - floor(eventCount/25))` — more events = more aggressive
+- 30 minutes since last flush
+- Session close
+
+**Disk format** (human-readable Markdown):
+
+```
+.scream-sessions/interception-logs/
+  ├── 2026-06-22.md          ← Markdown, per-date
+  ├── 2026-06-21.md
+  └── INDEX.json             ← atomicWrite protected
+```
+
+`INDEX.json` accumulates cross-session statistics (totalEvents, byKind, byVariant). Written via `atomicWrite` (write-tmp → fsync → rename) for crash safety.
+
+### Integration points in index.ts
+
+| Location | What happens |
+|----------|-------------|
+| `runOneTurn` reset | `eventLog.clear()` — clear per-turn state |
+| `inject()` residual skip | `eventLog.record(injection_skipped/skipped_residual)` |
+| `inject()` budget skip | `eventLog.record(injection_skipped/skipped_budget)` |
+| `inject()` delivered | `eventLog.record(injection_delivered/injected)` |
+| `inject()` step dedup skip | `eventLog.record(injection_skipped/skipped_dedup)` |
+| `finalizeToolResult` verify fail | `eventLog.record(verify_fail/gate_held)` |
+| `afterStep` confabulation | `eventLog.record(confabulation/detected)` |
+| `afterStep` summary | `eventLog.getNewTurnSummary() → inject(interception_log)` |
+| `afterStep` health check | `agent.log.warn` if 10+ steps with 0 events |
+| `shouldContinueAfterStop` deviation chain | `eventLog.record(deviation_chain/gate_held)` |
+| `shouldContinueAfterStop` convergence held | `eventLog.record(convergence_gate/gate_held)` |
+| `shouldContinueAfterStop` convergence passed | `eventLog.record(convergence_gate/gate_passed)` |
+| `runOneTurn` turn end | `eventBuffer.pushTurn()` (async, non-blocking) |
