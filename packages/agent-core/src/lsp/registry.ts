@@ -1,3 +1,6 @@
+import { access } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
+import { dirname, join, sep } from 'pathe';
 import type { Jian } from '@scream-code/jian';
 
 import { LspClient } from './client';
@@ -5,6 +8,30 @@ import { LspClient } from './client';
 export interface LspCommand {
   readonly command: string[];
   readonly languageId: string;
+}
+
+/** Resolve npm binary commands to `node <entry>` on Windows (bypass .cmd wrappers). */
+const _cmdCache = new Map<string, string[]>();
+
+async function _resolveCmd(desc: LspCommand): Promise<string[]> {
+  const key = desc.command.join(' ');
+  const cached = _cmdCache.get(key);
+  if (cached) return cached;
+
+  if (process.platform === 'win32' && desc.languageId.startsWith('typescript')) {
+    // On Windows, npm-installed .cmd wrappers can't be spawned directly.
+    // Resolve to `node <lib/cli.mjs>` via the global npm root.
+    try {
+      const npmRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+      const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
+      await access(entry); // confirm it exists
+      const resolved: string[] = [process.execPath, entry, '--stdio'];
+      _cmdCache.set(key, resolved);
+      return resolved;
+    } catch { /* fallthrough to raw command */ }
+  }
+  _cmdCache.set(key, desc.command);
+  return desc.command;
 }
 
 const LANGUAGE_SERVERS: Readonly<Record<string, LspCommand>> = {
@@ -23,20 +50,22 @@ export class LspRegistry {
   constructor(private readonly jian: Jian) {}
 
   /**
-   * Get or create an LSP client for the given file path and workspace root.
-   * Returns undefined if the file type is not supported.
+   * Get or create an LSP client for the given file path.
+   * Automatically resolves the TS project root (first ancestor dir with tsconfig.json).
    */
-  async getClient(path: string, workspaceRoot: string): Promise<LspClient | undefined> {
+  async getClient(path: string, _workspaceRoot: string): Promise<LspClient | undefined> {
     const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
     const config = LANGUAGE_SERVERS[ext];
     if (config === undefined) return undefined;
 
-    const key = `${workspaceRoot}\0${config.command.join(' ')}`;
+    const resolvedCmd = await _resolveCmd(config);
+    const projectRoot = await resolveProjectRoot(path);
+    const key = `${projectRoot}\0${resolvedCmd.join(' ')}`;
     let client = this.clients.get(key);
     if (client === undefined) {
-      client = new LspClient(config.command, workspaceRoot, this.jian);
-      this.clients.set(key, client);
+      client = new LspClient(resolvedCmd, projectRoot, this.jian);
       await client.start();
+      this.clients.set(key, client);
     }
     return client;
   }
@@ -50,4 +79,28 @@ export class LspRegistry {
     await Promise.all([...this.clients.values()].map((client) => client.stop()));
     this.clients.clear();
   }
+}
+
+/**
+ * Walk up from `filePath` to find the nearest ancestor directory containing a
+ * `tsconfig.json` (or `jsconfig.json`). Falls back to `dirname(filePath)`.
+ * This prevents TypeScript LSP from scanning huge unscoped directories.
+ */
+async function resolveProjectRoot(filePath: string): Promise<string> {
+  let dir = dirname(filePath);
+  const root = /^[A-Za-z]:[\\/]$/.test(dir) ? dir : sep;
+  while (dir.length >= root.length) {
+    try {
+      await access(join(dir, 'tsconfig.json'));
+      return dir;
+    } catch {
+      try {
+        await access(join(dir, 'jsconfig.json'));
+        return dir;
+      } catch {
+        dir = dirname(dir);
+      }
+    }
+  }
+  return dirname(filePath);
 }

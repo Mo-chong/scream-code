@@ -39,7 +39,7 @@ import { detectIntent } from './detectors/intent';
 import { injectIntentGuidance } from './injectors/intent';
 import { InjectBudget } from './injectors/budget';
 import { checkGuard, type StepToolSummary } from './guard-engine';
-import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery } from './memory-rules';
+import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendingDoc, formatPendingDocInject } from './memory-rules';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -497,6 +497,18 @@ export class TurnFlow {
             { kind: 'system_trigger', name: 'behavior_rule' },
           );
         }
+      }
+    }
+
+    // ── Phase 12: pending-doc 检测（开局注入）─────────────────
+    if (origin.kind === 'user' && this.agent.memoStore) {
+      const pendingDocs = await searchPendingDoc(this.agent.memoStore);
+      if (pendingDocs.length > 0) {
+        const hasP0 = pendingDocs.some(m => m.userNeed.includes('[P0]'));
+        this.inject(
+          formatPendingDocInject(pendingDocs),
+          { kind: 'system_trigger', name: hasP0 ? 'convergence_gate' : 'injection' },
+        );
       }
     }
 
@@ -962,6 +974,16 @@ export class TurnFlow {
                     'Edited ' + this.totalStepsWithEditsThisTurn + '+ files this turn without any ' +
                     'LSP.references call. Verify callers before reporting completion.',
                   );
+                }
+                // 🆕 Phase 12: pending-doc 未写入检测
+                if (reasons.length === 0 && this.agent.memoStore) {
+                  const pendingDocs = await searchPendingDoc(this.agent.memoStore);
+                  if (pendingDocs.some(m => m.userNeed.includes('[P0]'))) {
+                    reasons.push(
+                      '有 P0 级待写入知识未处理。请先写入 SYSTEM/*.md / DECISIONS/*.md / pitfalls.md 再交付。\n' +
+                      formatPendingDocInject(pendingDocs),
+                    );
+                  }
                 }
 
                 if (reasons.length > 0) {

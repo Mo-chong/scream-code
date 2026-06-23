@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import type { Jian, JianProcess } from '@scream-code/jian';
 
 export interface LspLocation {
@@ -75,7 +76,6 @@ export class LspClient {
 
   async start(): Promise<void> {
     if (this.started) return;
-    this.started = true;
 
     if (this.command.length === 0) {
       throw new Error('LSP command is empty');
@@ -84,11 +84,31 @@ export class LspClient {
     try {
       this.process = await this.jian.exec(...this.command);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to start language server ${this.command[0]}: ${message}`, {
-        cause: error,
-      });
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        // Command not found in PATH — retry via npx (same dir as node.exe)
+        try {
+          const nodeBin = dirname(process.execPath);
+          this.process = await this.jian.exec(
+            join(nodeBin, 'npx.cmd'),
+            '-y',
+            ...this.command,
+          );
+        } catch (npxError) {
+          const msg = npxError instanceof Error ? npxError.message : String(npxError);
+          throw new Error(
+            `LSP command '${this.command[0]}' not found in PATH and npx fallback failed: ${msg}`,
+            { cause: npxError },
+          );
+        }
+      } else {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to start language server ${this.command[0]}: ${message}`, {
+          cause: error,
+        });
+      }
     }
+
+    this.started = true;
 
     this.process.stdout.on('data', (chunk: Buffer) => {
       this.buffer += chunk.toString('utf8');
