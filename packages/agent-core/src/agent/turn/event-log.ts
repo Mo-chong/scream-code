@@ -8,6 +8,8 @@
  * SessionMemory 记工具执行，TurnEventLog 记拦截事件。
  */
 
+import { VARIANT_META } from './variant-registry';
+
 export interface InterceptionEvent {
   /** 全局序列号。单调递增。 */
   seq: number;
@@ -34,12 +36,19 @@ export class TurnEventLog {
   /** 增量摘要追踪：用于 afterStep 只注入新事件。 */
   private lastSummarizedTurnId = -1;
   private lastSummarizedSeq = 0;
+  /** 当前回合采样决策缓存：variant → 本回合是否采样 */
+  private turnSampleCache = new Map<string, boolean>();
 
   /**
    * 记录一条拦截事件。
+   *
+   * 采样过滤：高频 variant 按 ResNet W 权重降采样。
    * seq 自动分配。事件数超 MAX_EVENTS 时丢弃最旧的事件。
    */
   record(event: Omit<InterceptionEvent, 'seq'>): void {
+    // W 驱动采样：高频 variant 降采样减少记录量
+    if (!this.shouldSample(event.variant)) return;
+
     this.events.push({ ...event, seq: this.nextSeq++ });
     if (this.events.length > MAX_EVENTS) {
       this.events = this.events.slice(-MAX_EVENTS);
@@ -88,6 +97,32 @@ export class TurnEventLog {
     this.nextSeq = 1;
     this.lastSummarizedTurnId = -1;
     this.lastSummarizedSeq = 0;
+    this.turnSampleCache.clear();
+  }
+
+  // ── W 驱动采样 ─────────────────────────────────────────
+
+  /**
+   * 根据 ResNet VARIANT_META.W 权重判断本条事件是否应该记录。
+   *
+   * 高频 variant（低 W）降采样减少记录量。
+   * 低频重要 variant（高 W 或无配置）全量记录。
+   *
+   * 同 variant 在同一回合中采样决策一致（回合开始时缓存）。
+   */
+  private shouldSample(variant: string): boolean {
+    if (!variant) return true;
+    const cached = this.turnSampleCache.get(variant);
+    if (cached !== undefined) return cached;
+
+    const rate = sampleRateForVariant(variant);
+    if (rate >= 1.0) {
+      this.turnSampleCache.set(variant, true);
+      return true;
+    }
+    const sampled = hashVariant(variant) % 100 < rate * 100;
+    this.turnSampleCache.set(variant, sampled);
+    return sampled;
   }
 
   /** 将事件列表格式化为摘要文本。 */
@@ -115,4 +150,32 @@ export class TurnEventLog {
 
     return lines.join('\n');
   }
+}
+
+// ── W 驱动采样率计算 ────────────────────────────────────────
+
+/**
+ * 根据 ResNet VARIANT_META.W 权重计算采样率。
+ *
+ * 公式: sampleRate = clamp(W × 0.5 + 0.1, 0.1, 1.0)
+ * W=1.0 → 60%, W=0.8 → 50%, W=0.5 → 35%, 未配置 → 100%（保守全量）
+ */
+function sampleRateForVariant(variant: string): number {
+  const meta = VARIANT_META[variant];
+  if (!meta) return 1.0;
+  return Math.min(1.0, Math.max(0.1, meta.weight * 0.5 + 0.1));
+}
+
+/**
+ * 基于 variant 名称的确定性哈希。
+ * 确保同 variant 在同一回合中采样决策一致。
+ */
+function hashVariant(variant: string): number {
+  let hash = 0;
+  for (let i = 0; i < variant.length; i++) {
+    const char = variant.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0; // 转 32-bit int
+  }
+  return Math.abs(hash);
 }
