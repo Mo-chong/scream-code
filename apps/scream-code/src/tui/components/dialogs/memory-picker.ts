@@ -105,6 +105,16 @@ function formatTags(memo: MemoryMemoSummary): string {
   return memo.tags.join(', ');
 }
 
+/** Build status badge icons from memo tags. */
+function memoBadges(tags: string[] | undefined): string {
+  if (!tags || tags.length === 0) return '';
+  const icons: string[] = [];
+  if (tags.includes('baohu')) icons.push('🔒');
+  if (tags.includes('ding')) icons.push('📌');
+  if (tags.includes('chundu')) icons.push('🧠');
+  return icons.length > 0 ? icons.join('') : '';
+}
+
 export interface MemoryPickerOptions {
   store: MemoryMemoStore;
   memos: MemoryMemoSummary[];
@@ -400,7 +410,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     const time = formatRelativeTime(memo.recordedAt);
     const src = sourceLabel(memo.extractionSource);
-    const trailingParts = [time, src].filter((p) => p.length > 0);
+    const badges = memoBadges(memo.tags);
+    const trailingParts = [badges, time, src].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1;
@@ -472,6 +483,12 @@ export class MemoryPickerComponent extends Container implements Focusable {
     ));
     const project = formatProject(memo);
     const tags = formatTags(memo);
+    const badges = memoBadges(memo.tags);
+    if (badges.length > 0) {
+      lines.push(chalk.hex(c.textMuted)(
+        truncateToWidth(`${indent}状态: ${badges}`, width, ELLIPSIS),
+      ));
+    }
     if (project.length > 0) {
       lines.push(chalk.hex(c.textMuted)(
         truncateToWidth(`${indent}项目: ${project}`, width, ELLIPSIS),

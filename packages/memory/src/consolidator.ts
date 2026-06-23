@@ -44,8 +44,13 @@ export interface ConsolidationPlan {
     resolvedFound: number;
     staleFound: number;
     memosAfterConsolidation: number;
+    /** Number of protected (baohu-tagged) memos skipped. */
+    skippedProtected: number;
   };
 }
+
+/** Tags that immunize a memo from all consolidation (merge, delete, archive). */
+const PROTECTED_TAGS = ['baohu'];
 
 const SIMILARITY_THRESHOLD = 0.45;
 const STALE_DAYS = 30;
@@ -65,7 +70,11 @@ export async function buildConsolidationPlan(
     allMemos.push(memo);
   }
 
-  const summaries = allMemos.map(toSummary);
+  // 🆕 Protected memos (tagged 'baohu') are immune from merge/delete/stale.
+  const protectedCount = allMemos.filter(m => m.tags?.includes('baohu')).length;
+  const active = allMemos.filter(m => !m.tags?.includes('baohu'));
+
+  const summaries = active.map(toSummary);
   const duplicateGroups = findDuplicateGroups(summaries);
   const relatedGroups = findRelatedGroups(summaries, duplicateGroups);
   const resolved = findResolved(summaries);
@@ -86,6 +95,7 @@ export async function buildConsolidationPlan(
       staleFound: stale.length,
       memosAfterConsolidation:
         allMemos.length - dedupedCount - resolved.length - stale.length,
+      skippedProtected: protectedCount,
     },
   };
 }
