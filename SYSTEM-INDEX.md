@@ -53,6 +53,9 @@
 | 拼音标签体系 | `SYSTEM/memory-store.md` §标签体系 |
 | behavior-rule 怎么过滤 | `SYSTEM/memory-store.md` §纯度控制 |
 | 搜索评分 ding 权重 | `SYSTEM/memory-store.md` §dingBoost |
+| MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
+| 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
+| 数据库直接在哪里 | `SYSTEM/memory-store.md` §直接数据库操作 |
 
 ### 决策文档
 
