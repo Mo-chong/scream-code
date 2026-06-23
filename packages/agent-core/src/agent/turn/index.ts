@@ -38,6 +38,8 @@ import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
 import { injectIntentGuidance } from './injectors/intent';
 import { InjectBudget } from './injectors/budget';
+import { checkGuard, type StepToolSummary } from './guard-engine';
+import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery } from './memory-rules';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -121,6 +123,11 @@ export class TurnFlow {
   // ── Phase 9: Convergence gate: turn-level LSP/edit tracking ──
   private turnHasCalledAnyLsp = false;
   private totalStepsWithEditsThisTurn = 0;
+
+  // ── Guard 规则引擎 (Phase 11) ────────────────────────────────
+  private lastBashExitCode: number | null = null;
+  private hasKnowledgeToolsThisStep = false;
+  private hasWriteToolsThisStep = false;
 
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
@@ -449,6 +456,7 @@ export class TurnFlow {
     this.injectBudget.reset();
     this.resetInjectorStepState();
     this.eventLog.clear();
+    this.lastBashExitCode = null;
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
@@ -460,6 +468,30 @@ export class TurnFlow {
         injectIntentGuidance(intentDetection, (text, meta) => {
           this.inject(text, meta);
         });
+      }
+    }
+
+    // ── Phase 11: 回合开局规则记忆注入 ────────────────────
+    if (origin.kind === 'user' && this.agent.memoStore) {
+      const userText = input.map(c => c.type === 'text' ? (c.text ?? '') : '').join(' ');
+      const sceneQuery = detectSceneQuery(input);
+      if (!sceneQuery && userText.length > 0) {
+        // 无场景关键词匹配时，用用户输入作为搜索 query
+        const turnRules = await searchBehaviorRules(this.agent.memoStore, userText, 1);
+        if (turnRules.length > 0) {
+          this.inject(
+            formatBehaviorRule(turnRules[0]!),
+            { kind: 'system_trigger', name: 'behavior_rule' },
+          );
+        }
+      } else if (sceneQuery) {
+        const turnRules = await searchBehaviorRules(this.agent.memoStore, sceneQuery, 1);
+        if (turnRules.length > 0) {
+          this.inject(
+            formatBehaviorRule(turnRules[0]!),
+            { kind: 'system_trigger', name: 'behavior_rule' },
+          );
+        }
       }
     }
 
@@ -777,6 +809,48 @@ export class TurnFlow {
                 });
               }
 
+              // 🆕 Phase 11: Guard 规则引擎检测 — afterStep
+              const guardResult = checkGuard(this.agent.context.history, {
+                hasKnowledgeTools: this.hasKnowledgeToolsThisStep,
+                hasWriteTools: this.hasWriteToolsThisStep,
+                lastBashExitCode: this.lastBashExitCode,
+              });
+              if (guardResult.rule > 0) {
+                if (guardResult.block) {
+                  // Rule 1: 谎报测试通过 → 硬拦截
+                  this.confabulationBlocked = true;
+                  this.eventLog.record({
+                    kind: 'confabulation', variant: 'guard_rule_1', action: 'detected',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: guardResult.reason,
+                  });
+                } else {
+                  // Rule 2/3: 观察模式 → 只记录
+                  this.eventLog.record({
+                    kind: 'guard_observe', variant: `guard_rule_${guardResult.rule}`, action: 'detected',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: guardResult.reason,
+                  });
+                }
+              }
+
+              // 🆕 Phase 11: 记忆主动注入 — 场景触发注入（afterStep）
+              const lastAssistantText = extractLastAssistantText(this.agent.context.history);
+              if (lastAssistantText.length > 0 && this.agent.memoStore) {
+                const sceneQuery = detectSceneQuery(
+                  [{ type: 'text' as const, text: lastAssistantText }],
+                );
+                if (sceneQuery) {
+                  const sceneRules = await searchBehaviorRules(this.agent.memoStore, sceneQuery, 1);
+                  if (sceneRules.length > 0) {
+                    this.inject(
+                      formatBehaviorRule(sceneRules[0]!),
+                      { kind: 'system_trigger', name: 'behavior_rule' },
+                    );
+                  }
+                }
+              }
+
               this.resetInjectorStepState();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
@@ -849,6 +923,18 @@ export class TurnFlow {
                     reasons.push(
                       'High-confidence unfounded claims detected. Provide tool evidence before ending.',
                     );
+                    // 🆕 Phase 11: 收敛门增强 — 注入相关规则记忆
+                    if (this.agent.memoStore) {
+                      searchBehaviorRules(this.agent.memoStore, '编造 证据 工具调用 检查发现', 1)
+                        .then(convaRules => {
+                          if (convaRules.length > 0) {
+                            this.inject(
+                              formatBehaviorRule(convaRules[0]!),
+                              { kind: 'system_trigger', name: 'behavior_rule' },
+                            );
+                          }
+                        });
+                    }
                   }
                 }
                 // 🆕 Phase 8: 偏差链修复跟踪 — 已激活但未修复
@@ -1170,15 +1256,27 @@ export class TurnFlow {
                   (this.stepToolCounts[ctx.toolCall.name] ?? 0) + 1;
                 if (ctx.toolCall.name === 'LSP' || ctx.toolCall.name === 'Grep') {
                   this.searchHadResultsThisStep = true;
+                  this.hasKnowledgeToolsThisStep = true;
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
+                  this.hasWriteToolsThisStep = true;
+                }
+                if (ctx.toolCall.name === 'Write') {
+                  this.hasWriteToolsThisStep = true;
                 }
               }
               // Track LSP.references specifically for C1 upgrade detection
               if (ctx.toolCall.name === 'LSP') {
                 const operation = (ctx.args as { operation?: string }).operation;
                 if (operation === 'references') this.hasCalledLspReferencesThisStep = true;
+              }
+              // Track Bash exit code for Guard Rule 1
+              if (ctx.toolCall.name === 'Bash') {
+                const outputText = toolOutputText(output);
+                // Parse exit code from tool output
+                const exitMatch = outputText.match(/Command failed with exit code: (\d+)/);
+                this.lastBashExitCode = exitMatch ? Number(exitMatch[1]) : (isError === true ? 1 : 0);
               }
               // Track verify failure for C3
               if (ctx.toolCall.name === 'Bash' && isError === true) {
@@ -1454,6 +1552,8 @@ export class TurnFlow {
     this.searchHadResultsThisStep = false;
     this.verifyFailedThisStep = false;
     this.editCalledSuccessThisStep = false;
+    this.hasKnowledgeToolsThisStep = false;
+    this.hasWriteToolsThisStep = false;
     this.stepToolCounts = {};
   }
 
