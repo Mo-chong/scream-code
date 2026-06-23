@@ -54,10 +54,11 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 interface VariantRecord {
   variant: string;                    // 变体名称
   level: WeightLevel;                 // 注入时的权重等级
-  stepInjected: number;               // 本回合第几步注入
+  stepInjected: number;               // 最近一次注入的步号（Phase 6: 重复注入时更新）
   turnStep: number;                   // 全局步号
   behaviorObserved: boolean | null;   // 行为观察状态
   lastEscalatedAtStep: number;        // 上次升级时的步号
+  triggerCount: number;               // Phase 6: 跨步累计触发次数（≥5 → repeatDecay 跳过）
 }
 ```
 
@@ -65,7 +66,7 @@ interface VariantRecord {
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `record` | `(variant, level, step) => void` | 记录变体。同变体只记第一次 |
+| `record` | `(variant, level, step) => void` | 记录变体。Phase 6: 重复触发累加 triggerCount + 更新 stepInjected |
 | `get` | `(variant) => VariantRecord \| undefined` | 获取变体记录 |
 | `getAll` | `() => VariantRecord[]` | 获取全部记录 |
 | `getStale` | `(currentStep, maxAge) => VariantRecord[]` | 获取过期变体 |
@@ -84,6 +85,7 @@ interface VariantRecord {
 |------|------|------|
 | `detectWeightLevel` | `(text: string) => WeightLevel` | 根据文本模式判断权重等级。100% 规则匹配 |
 | `escalateLevel` | `(level: WeightLevel) => WeightLevel` | 权重提升一级。C/D→B, B→A, A→S, S→S |
+| `repeatDecay` | `(record: VariantRecord \| undefined) => 'full' \| 'skip'` | Phase 6: triggerCount ≥5 且 behaviorObserved !== true → skip，阻止重复注入 |
 
 ### Weight detection rules (pure text pattern, no NL)
 
@@ -372,7 +374,8 @@ if (origin.kind === 'user') {
 | `record` | `(actualTokens) => void` | 记录注入 token |
 | `syncVariantCount` | `(count) => void` | 同步外部 variant 计数（供 degradationFactor） |
 | `beginStep` | `(stepNumber) => void` | 每步开始重置 step 计数器 |
-| `reset` | `() => void` | 每回合重置全部计数器 |
+| `reset` | `() => void` | 每回合重置全部计数器（Phase 6: 同时清 toxicityBypass） |
+| `bypassBudget` | `() => void` | Phase 6: 单次穿透绕过预算限制（偏差链激活时调用） |
 | `turnUsage` | `getter: number` | 当前回合累计 token |
 | `stepUsage` | `getter: number` | 当前步累计 token |
 
@@ -433,6 +436,8 @@ private inject(text: string, meta: PromptOrigin): void {
 - `meta.kind === 'system_trigger'`: 穿透预算（收敛机制不应被 budget 拦截）
 - `variant.startsWith('quality_escalate_')`: 穿透预算（升级本身就是 budget 不足的补救）
 - `behaviorObserved === true`: 降级到 C 级预算占用（identity path）
+- Phase 6 `bypassBudget()`: 单次穿透。偏差链激活（`deviationChainActive`）时 `inject()` 自动调用—毒性绕过
+- Phase 6 `repeatDecay()`: triggerCount ≥5 且未 observed → `inject()` 静默跳过，不检查预算
 
 ---
 
