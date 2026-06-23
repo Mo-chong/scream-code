@@ -1,20 +1,22 @@
 /**
  * EventSnapshotBuffer — 回合拦截事件持久化缓冲区。
  *
- * 内存缓冲区 + 异步刷盘。回合结束时接收 TurnEventLog 的快照，
- * 攒批阈值触发后格式化为 Markdown 写入磁盘文件。
+ * 内存缓冲区 + 即时刷盘。回合结束时接收 TurnEventLog 的快照，
+ * 每个有事件的回合立即写入 Markdown 到磁盘文件。
  *
  * 架构复用自 FileSystemAgentRecordPersistence：
  *   pendingEntries → shouldFlush → scheduleFlush → ensureFlush → drainBatch
  *
- * 磁盘路径: <sessionDir>/interception-logs/<YYYY-MM-DD>.md
- *          <sessionDir>/interception-logs/INDEX.json  (atomicWrite)
+ * 磁盘路径: <screamHome>/interception-logs/<YYYY-MM-DD>.md
+ *          <screamHome>/interception-logs/INDEX.json  (atomicWrite)
+ *          screamHome ≈ ~/.scream-code/  (resolveScreamHome)
  */
 
 import { mkdir, open, readFile } from 'node:fs/promises';
-import { join, dirname } from 'pathe';
+import { basename, dirname, join } from 'pathe';
 
 import type { Agent } from '..';
+import { resolveScreamHome } from '../../config/path';
 import { atomicWrite } from '../../utils/fs';
 import type { InterceptionEvent } from './event-log';
 
@@ -40,8 +42,9 @@ interface IndexStats {
 
 // ── 阈值 ────────────────────────────────────────────────────────
 
-const MAX_PENDING_ROUNDS = 5;
-const MIN_FLUSH_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
+// 立即刷盘 — 每个有事件的回合都写入，不攒批
+const MAX_PENDING_ROUNDS = 1;
+const MIN_FLUSH_INTERVAL_MS = 0;
 
 // ── EventSnapshotBuffer ─────────────────────────────────────────
 
@@ -80,20 +83,8 @@ export class EventSnapshotBuffer {
   // ── Flush 判定 ────────────────────────────────────────────
 
   private shouldFlush(): boolean {
-    // 最多攒 5 回合
-    if (this.pendingEntries.length >= MAX_PENDING_ROUNDS) return true;
-
-    const totalEvents = this.pendingEntries.reduce((s, e) => s + e.events.length, 0);
-    // 事件量退化因子：每 25 条降低 1 回合阈值
-    if (totalEvents > 25) {
-      const threshold = Math.max(1, MAX_PENDING_ROUNDS - Math.floor(totalEvents / 25));
-      if (this.pendingEntries.length >= threshold) return true;
-    }
-
-    // 距离上次写超过 30 分钟
-    if (Date.now() - this.lastFlushTime > MIN_FLUSH_INTERVAL_MS && this.pendingEntries.length > 0) return true;
-
-    return false;
+    // MAX_PENDING_ROUNDS=1 → 有事件就刷盘
+    return this.pendingEntries.length >= MAX_PENDING_ROUNDS;
   }
 
   // ── 异步刷盘管道（复用 FileSystemAgentRecordPersistence 模式）─
@@ -163,7 +154,7 @@ export class EventSnapshotBuffer {
     }
 
     for (const entry of entries) {
-      lines.push(`## Turn #${entry.turnId} — ${formatTime(entry.timestamp)} | ${entry.stepCount} steps`);
+      lines.push(`## [${this.sessionId}] Turn #${entry.turnId} — ${formatTime(entry.timestamp)} | ${entry.stepCount} steps`);
       lines.push(...this.formatTurnEvents(entry.events));
       lines.push('---');
       lines.push('');
@@ -230,9 +221,16 @@ export class EventSnapshotBuffer {
     }
   }
 
+  /** 提取 sessionId: homedir = <projectDir>/<sessionId>/agents/<agentId> */
+  private get sessionId(): string {
+    const h = this.agent.homedir;
+    if (!h) return 'unknown';
+    return basename(dirname(dirname(h)));
+  }
+
   private resolveBaseDir(): string {
-    const base = this.agent.homedir ? dirname(this.agent.homedir) : '.';
-    return join(base, 'interception-logs');
+    // 集中存到 .scream-code/interception-logs/，不跟 session 绑定
+    return join(resolveScreamHome(), 'interception-logs');
   }
 
   // ── 格式化 ─────────────────────────────────────────────────

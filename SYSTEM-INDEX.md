@@ -24,8 +24,11 @@
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 1737 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
+| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出 |
+| **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
 | **整体架构** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
+| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复等实踩记录 |
 | **行为矫正方案** | `../DECISIONS/行为矫正系统-完整实战方案.md` | 融合 Guard + 记忆注入 + 收敛门的完整计划 |
 
 ---
@@ -56,14 +59,23 @@
 | MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
 | 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
 | 数据库直接在哪里 | `SYSTEM/memory-store.md` §直接数据库操作 |
+| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 |
+| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction |
+| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction |
+| 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
+| 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
+| 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
 
-### 决策文档
+### 决策文档 / ADR（ZHU/DECISIONS/）
+
+先看 `DECISIONS/INDEX.md` 分类索引（ADR/方案/分析/执行记录全分类）。
 
 | 文档 | 内容 |
 |------|------|
+| `DECISIONS/INDEX.md` | DECISIONS/ 目录的全量分类索引 |
 | `DECISIONS/行为矫正系统-完整实战方案.md` | 融合方案总设计 |
 | `DECISIONS/Guard规则引擎-实战执行方案.md` | Guard 执行细节 |
-| `DECISIONS/免费四件套-实战落地版.md` | 早期方案分析 |
+| `DECISIONS/扩展方向-架构进化路线-行为学习与闭环.md` | 未来方向：P0反馈/P1学习/P2沙盒 |
 
 ---
 

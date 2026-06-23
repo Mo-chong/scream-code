@@ -145,6 +145,11 @@ export class TurnFlow {
     this.eventBuffer = new EventSnapshotBuffer(agent);
   }
 
+  /** 刷新拦截事件日志到磁盘（会话关闭前调用）。 */
+  async flushEventLog(): Promise<void> {
+    await this.eventBuffer.flush();
+  }
+
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
     this.agent.records.logRecord({
