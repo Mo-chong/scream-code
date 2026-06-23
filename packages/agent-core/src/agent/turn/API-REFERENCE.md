@@ -572,7 +572,7 @@ injectAntiConfabulation(confaResult, this.stepInjectedVariants,
 
 **File:** `event-log.ts`, `event-snapshot.ts`
 
-Records system-level interception events — what the injection system did, not what the AI did. 10 hardcoded `record()` calls inside `inject()`, `afterStep`, `finalizeToolResult`, and `shouldContinueAfterStop`. AI has no bypass capability.
+Records system-level interception events — what the injection system did, not what the AI did. 9 hardcoded `record()` calls inside `inject()` (4), `afterStep` (1), `finalizeToolResult` (1), and `shouldContinueAfterStop` (3). AI has no bypass capability.
 
 ### TurnEventLog (event-log.ts)
 
@@ -614,7 +614,7 @@ Async persistence buffer. Collects turn-end snapshots and flushes to disk when t
 **Disk format** (human-readable Markdown):
 
 ```
-.scream-sessions/interception-logs/
+<agentsDir>/interception-logs/        ← agentsDir = dirname(agent.homedir)
   ├── 2026-06-22.md          ← Markdown, per-date
   ├── 2026-06-21.md
   └── INDEX.json             ← atomicWrite protected

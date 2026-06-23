@@ -11,6 +11,8 @@ export interface RelevanceFactors {
   projectBoost: number; // 0-1
   /** Tag overlap between this memo and the current project's tag cloud. */
   tagOverlap: number; // 0-1
+  /** 🆕 ding boost: +0.25 for pinned (ding-tagged) memos. */
+  dingBoost: number; // 0-0.25
 }
 
 export interface ScoredMemo {
@@ -93,6 +95,8 @@ export function computeRelevanceScore(
     usageBoost: Math.min(0.3, usageCount * 0.1),
     projectBoost: computeProjectBoost(memo.projectDir, currentProjectDir),
     tagOverlap: computeTagOverlap(memo.tags, projectTagCloud),
+    // 🆕 ding boost: +0.25 for pinned memos, ensures they rank above unpinned.
+    dingBoost: memo.tags?.includes('ding') ? 0.25 : 0,
   };
 
   // Intent-adjusted weights. At default biases (ti=0.3, fi=0.6) the
@@ -110,7 +114,8 @@ export function computeRelevanceScore(
     factors.recency * (recencyWeight / total) +
     factors.usageBoost * (usageWeight / total) +
     factors.projectBoost * (projectWeight / total) +
-    factors.tagOverlap * (tagWeight / total)
+    factors.tagOverlap * (tagWeight / total) +
+    factors.dingBoost // 🆕 additive ding boost, not weighted — flat bonus
   );
 }
 

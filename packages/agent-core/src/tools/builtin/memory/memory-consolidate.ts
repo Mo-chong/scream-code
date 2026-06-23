@@ -56,6 +56,7 @@ const ConsolidationPlanSchema = z.object({
     resolvedFound: z.number(),
     staleFound: z.number(),
     memosAfterConsolidation: z.number(),
+    skippedProtected: z.number(),
   }),
 });
 
