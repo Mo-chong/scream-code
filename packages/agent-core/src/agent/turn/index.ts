@@ -118,7 +118,7 @@ export class TurnFlow {
 
   // ── Phase 9: Convergence gate: turn-level LSP/edit tracking ──
   private turnHasCalledAnyLsp = false;
-  private totalFilesModifiedThisTurn = 0;
+  private totalStepsWithEditsThisTurn = 0;
 
   // ── Quality escalation (P2) ───────────────────────────────────
   private variantRegistry = new VariantRegistry();
@@ -433,7 +433,7 @@ export class TurnFlow {
     this.verifyFailStep = -1;
     this.toolCountsBeforeVerifyRetry = {};
     this.turnHasCalledAnyLsp = false;
-    this.totalFilesModifiedThisTurn = 0;
+    this.totalStepsWithEditsThisTurn = 0;
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -738,7 +738,7 @@ export class TurnFlow {
 
               // 🆕 Phase 9: Turn-level LSP + edit tracking for convergence gate
               if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
-              if (this.editCalledSuccessThisStep) this.totalFilesModifiedThisTurn++;
+              if (this.editCalledSuccessThisStep) this.totalStepsWithEditsThisTurn++;
 
               this.resetInjectorStepState();
             },
@@ -824,9 +824,9 @@ export class TurnFlow {
                   );
                 }
                 // 🆕 Phase 9: 整回合无 LSP 但修改了大量文件
-                if (!this.turnHasCalledAnyLsp && this.totalFilesModifiedThisTurn >= 3) {
+                if (!this.turnHasCalledAnyLsp && this.totalStepsWithEditsThisTurn >= 3) {
                   reasons.push(
-                    'Edited ' + this.totalFilesModifiedThisTurn + '+ files this turn without any ' +
+                    'Edited ' + this.totalStepsWithEditsThisTurn + '+ files this turn without any ' +
                     'LSP.references call. Verify callers before reporting completion.',
                   );
                 }

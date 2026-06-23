@@ -253,7 +253,7 @@ export interface VariantMeta {
 }
 
 export const VARIANT_META: Record<string, VariantMeta> = {
-  // system_trigger / 紧急 → 永不跳过
+  // system_trigger / 紧急 → 永不跳过（死代码保留行，万一 inject() 前移逻辑需要；当前 system_trigger 在 inject() 顶部提前返回）
   system_trigger:              { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
   deviation_chain_intercept:   { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
 
@@ -278,13 +278,13 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   post_search:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
   post_write_large:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
   post_verify_pass:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
-  post_verify_fail:            { weight: 0.9, decayPerStep: 0.88, threshold: 0.30, minStepGap: 3 },
+  post_verify_fail:            { weight: 0.9, decayPerStep: 0.88, threshold: 0.40, minStepGap: 3 },
   post_memory:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
 
   // C组: step_after — 步级行为反馈
   step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
   step_after_search:           { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
-  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.40, minStepGap: 4 },
 };
 
 /**
