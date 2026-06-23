@@ -30,7 +30,7 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { VariantRegistry, detectWeightLevel, repeatDecay, type WeightLevel } from './variant-registry';
+import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, type WeightLevel } from './variant-registry';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
@@ -1306,6 +1306,19 @@ export class TurnFlow {
     if (variant) {
       const record = this.variantRegistry.get(variant);
       if (repeatDecay(record) === 'skip') return;
+    }
+
+    // 🆕 Phase 9: ResNet 残差注意力 — 注意力还够时跳过注入
+    if (variant) {
+      const meta = VARIANT_META[variant];
+      if (meta) {
+        const record = this.variantRegistry.get(variant);
+        if (!shouldInjectByResidual(record, this.currentStep, meta)) return;
+        // 残差刚过阈值用短文本
+        if (shouldUseShortText(record, this.currentStep, meta)) {
+          text = shortenText(text);
+        }
+      }
     }
 
     // 步级去重: 同一步同一 variant 只注入一次

@@ -34,10 +34,21 @@ inject(text, meta) →
   ├─ system_trigger kind → bypass budget, inject directly
   ├─ quality_escalate_ variant → bypass budget, inject directly
   ├─ repeatDecay(record) === 'skip' → silent discard (triggerCount ≥5)
+  ├─ ResNet: !shouldInjectByResidual(record, step, meta) → silent skip (attention still sufficient)
+  │     (variant must have a VariantMeta entry; unconfigured variants pass through)
+  ├─ ResNet: shouldUseShortText → shortenText(text) (mild attention decay, shorter reminder)
   ├─ deviationChainActive → bypassBudget() before check
   ├─ canInject(estimatedTokens, effectiveLevel) → false → silent discard
   └─ appendSystemReminder + budget.record() + variantRegistry.record()
 ```
+
+ResNet residual formula: `R = W × D^Δs` where:
+- W = static weight (0-1), higher = more important
+- D = decay per step (0.8-0.99), higher = slower decay
+- Δs = steps since last injection of this variant
+- R < threshold → inject. R >= threshold → skip.
+
+See §9.5 **ResNet injection scheduling** for the full variant configuration table.
 
 ---
 
@@ -442,6 +453,49 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 | `detectWeightLevel` | `(text) => WeightLevel` | Text pattern → weight: `<system-reminder`→S, MUST/NEVER/ALWAYS→A, Step→B, DO NOT/Never→C, else→D |
 | `escalateLevel` | `(level) => WeightLevel` | One-level up: C/D→B, B→A, A→S, S→S |
 | `repeatDecay` | `(record) => 'full' \| 'skip'` | triggerCount ≥5 && behaviorObserved !== true → skip |
+
+### 9.5 ResNet injection scheduling (Phase 9)
+
+**Model:** Residual attention = `W × D^Δs`. When the remaining attention drops below a threshold, the variant triggers. This replaces the old "always inject on trigger point" strategy with an attention-aware scheduler.
+
+**Integration point:** Inside `TurnFlow.inject()` (index.ts), after `repeatDecay` and before step dedup. Calls are zero-change for existing callsites — the check is transparent.
+
+#### Full configuration table
+
+| Variant | W | D | threshold | minStepGap | Notes |
+|---------|:-:|:-:|:---------:|:----------:|-------|
+| system_trigger | 1.0 | 0.99 | 0.1 | 0 | Never skipped |
+| deviation_chain_intercept | 1.0 | 0.99 | 0.1 | 0 | Never skipped |
+| prepare_edit | 0.8 | 0.85 | 0.35 | 4 | |
+| prepare_write | 0.8 | 0.85 | 0.35 | 4 | |
+| prepare_search | 0.7 | 0.85 | 0.40 | 3 | |
+| prepare_memory | 0.7 | 0.85 | 0.40 | 3 | |
+| prepare_bash_file | 0.5 | 0.82 | 0.40 | 3 | |
+| prepare_verify | 0.8 | 0.85 | 0.35 | 4 | |
+| post_edit | 0.6 | 0.80 | 0.40 | 4 | |
+| post_search | 0.6 | 0.80 | 0.40 | 4 | |
+| post_write_large | 0.5 | 0.80 | 0.40 | 4 | |
+| post_verify_pass | 0.5 | 0.80 | 0.40 | 4 | |
+| post_verify_fail | 0.9 | 0.88 | 0.30 | 3 | High weight = urgent |
+| post_memory | 0.6 | 0.80 | 0.40 | 4 | |
+| step_after_edit | 0.6 | 0.80 | 0.40 | 5 | |
+| step_after_search | 0.5 | 0.80 | 0.40 | 5 | |
+| step_after_verify_fail | 0.8 | 0.85 | 0.35 | 4 | |
+| intent_* (all 6) | 0.7-0.9 | 0.88-0.92 | 0.30 | 0 | Injected once at turn start |
+
+Unconfigured variants (e.g., `session_memory`, `dream_suggestion`) are passed through without residual check.
+
+#### Short-text adaptation
+
+When `shouldUseShortText()` returns true (residual > threshold × 0.5), the inject text is shortened by `shortenText()`:
+1. First MUST/NEVER/ALWAYS imperative line is used
+2. Fallback: first non-empty line of original text
+
+Example: `"NEVER leave callers unverified without update."` instead of the full multi-line reminder.
+
+#### Key design property
+
+**Old callsite zero-change.** Every existing `this.inject(text, meta)` call automatically receives attention-aware scheduling. The variant just needs an entry in `VARIANT_META`. If there is no entry, the variant passes through unchanged.
 
 ---
 
