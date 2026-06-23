@@ -2,7 +2,7 @@ import {
   APIContextOverflowError,
   grandTotal as ltodGrandTotal,
   type ContentPart,
-} from '@scream-cli/ltod';
+} from '@scream-code/ltod';
 
 import type { Agent } from '..';
 import {

@@ -1,4 +1,4 @@
-import type { ContentPart, Message, TextPart } from '@scream-cli/ltod';
+import type { ContentPart, Message, TextPart } from '@scream-code/ltod';
 
 import type { ContextMessage } from './types';
 

@@ -18,7 +18,7 @@
  * 因此即使初始为 B 级，后续根据行为观察结果可自动升级。
  */
 
-import type { ContentPart } from '@scream-cli/ltod';
+import type { ContentPart } from '@scream-code/ltod';
 import type { WeightLevel } from '../variant-registry';
 
 // ── 类型 ────────────────────────────────────────────────
