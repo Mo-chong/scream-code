@@ -806,6 +806,13 @@ export class TurnFlow {
                     'Resolve the underlying issue before ending the turn.',
                   );
                 }
+                // 🆕 Phase 8: 验证假通过 — verifyFailStep 未解除
+                if (this.verifyFailStep >= 0) {
+                  reasons.push(
+                    'The last verification pass may be a false pass — no substantive changes were made. ' +
+                    'Make an actual fix and re-verify.',
+                  );
+                }
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
