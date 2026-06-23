@@ -168,6 +168,47 @@ return (
 
 ---
 
+## MemoryEdit 工具
+
+`MemoryEditTool` 注册在 `tool/index.ts:634`，但**默认不在 agent.yaml 的工具列表中**。
+
+| 状态 | 说明 |
+|------|------|
+| 注册条件 | `this.agent.type === 'main' && this.agent.memoStore` |
+| 工具列表入口 | `agent.yaml` → `setActiveTools()` → `enabledTools` |
+| 修复方法 | `agent.yaml` 加一行 `- MemoryEdit`，然后 `pnpm build` 重新打包 |
+| 生效条件 | **必须重新构建 + 重启**（见下方构建链） |
+
+⚠️ **踩坑**：只 git commit 不 build 不生效。YAML 是编译时静态导入（`default.ts:1 import agentYaml from './default/agent.yaml'`），必须 `pnpm build` 重新打包。
+
+### 构建链
+
+```
+agent.yaml 修改
+  → 编译 agent-code（pnpm build）：将 agent.yaml 打包进 dist/index.mjs
+  → 编译 scream-code（pnpm build）：将 agent-core dist 打包进 dist/main.mjs
+  → 重启 scream：bin/scream.cmd → dist/main.mjs
+```
+
+📌 `scream-code/tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` 保证所有 `@scream-*` 包都打进一个 bundle。所以只重新 build `agent-core` 不够，必须重新 build `scream-code`。
+
+### 直接数据库操作
+
+当 MemoryEdit 不可用时，可以通过 Node.js 的 `DatabaseSync` 直连 SQLite：
+
+```bash
+node -e "
+const { DatabaseSync } = require('node:sqlite');
+const db = new DatabaseSync('~/.scream-code/memory/memos.sqlite');
+db.prepare('UPDATE memos SET tags = ? WHERE id = ?').run(newTags, id);
+db.close();
+"
+```
+
+⚠️ 数据库文件位置：`~/.scream-code/memory/memos.sqlite`（Windows: `C:/Users/xxx/.scream-code/memory/memos.sqlite`）
+
+---
+
 ## Agent 侧访问路径
 
 `agent.memoStore: MemoryMemoStore | undefined`（agent/index.ts:126）
