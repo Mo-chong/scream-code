@@ -20,6 +20,7 @@
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
 | **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + 向量三重检索，tags 存 JSON 不在 FTS5 索引中 |
+| **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 1737 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
@@ -65,6 +66,14 @@
 | 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
 | 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
 | 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
+| MCP 工具有几种/怎么配 | `SYSTEM/mcp-server.md` |
+| codegraph 索引了什么 | `SYSTEM/mcp-server.md` §codegraph |
+| 内置工具和 MCP 工具有权重差吗 | `SYSTEM/mcp-server.md` §工具类型与权重 |
+| 安装新 MCP server 怎么配置 | `SYSTEM/mcp-server.md` §配置格式 |
+| 作者 force-push 后怎么合并 | `SYSTEM/pitfalls.md` §Git 与仓库管理 |
+| Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
+| 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |
+| Cherry-pick 后构建/bundle 不工作 | `SYSTEM/pitfalls.md` §pnpm install 是 cherry-pick 后的必修课 |
 
 ### 决策文档 / ADR（ZHU/DECISIONS/）
 

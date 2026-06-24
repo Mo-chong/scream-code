@@ -11,7 +11,9 @@ Agent
 ├── context                    ← 对话上下文（context/index.ts）
 ├── config                     ← 配置
 ├── usage                      ← token 用量
-├── tools / ToolManager        ← 工具注册和执行
+├── tools / ToolManager        ← 工具注册和执行（3 类：builtin + user + MCP）
+├── mcp / McpConnectionManager ← MCP 服务器连接管理（mcp.json 三层配置）
+├── skills / SkillManager      ← skill 管理
 ├── skills / SkillManager      ← skill 管理
 ├── background / BackgroundManager  ← 后台任务
 ├── cron / CronManager         ← 定时任务

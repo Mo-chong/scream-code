@@ -12,6 +12,7 @@
 - [回合控制](#回合控制)
 - [注入系统](#注入系统)
 - [拦截系统](#拦截系统)
+- [Git 与仓库管理](#git-与仓库管理)
 - [设计误区](#设计误区)
 - [调试教训](#调试教训)
 
@@ -215,6 +216,102 @@ spawn typescript-language-server → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 **取消**：必须调一次 LSP.references（或 reviewer）才会释放。
 
 **教训**：偏差链不是 bug，是设计——强制在批量编辑之间插入验证步骤。
+
+---
+
+## Git 与仓库管理
+
+### 作者 force-push 重写历史 → 合并变无共同祖先（2026-06-24）
+
+**问题**：`git merge origin/main` 爆出上千个 add/add 冲突。
+
+**根因**：作者的 v0.6.9 是从全新的 `Initial commit` 开始的（4f67f50），和我们 fork 的旧历史线（起点 32b5233）完全没有共同祖先。`git merge-base` 返回 exit: 1。GitHub 显示的"forked from"标签是网站元数据，不影响实际 commit 历史。
+
+**解决**：不用 `git merge`，改用 cherry-pick：
+
+```bash
+# 从 v0.6.9 创建新分支
+git checkout -b update-v069 v0.6.9
+
+# 把我们的 commits cherry-pick 上去（从最旧到最新）
+git cherry-pick <oldest-commit>^..<newest-commit>
+
+# 遇到冲突时接受我们的版本
+git checkout --theirs <conflict-file>
+git add <conflict-file>
+git cherry-pick --continue
+```
+
+**教训**：
+1. `git merge-base` 是合并前必须跑的检查——确认两条分支有共同祖先再 merge
+2. 没有共同祖先时 `git merge --allow-unrelated-histories` 是最差选择，会爆全量 add/add 冲突
+3. Cherry-pick 是"历史不连通"场景下的替代方案
+
+### 被抹掉的文件要主动从旧历史恢复（2026-06-24）
+
+**问题**：Cherry-pick 完成后构建报错，`injector/*.ts`、`pnpm-workspace.yaml`、`node-sdk/tsconfig.dts.json` 在磁盘上找不到。
+
+**根因**：作者 force-push 后的新初始提交不包含这些文件。我们的 cherry-pick 从 Phase 5 开始，但 Phase 1-4 创建的文件被代码 import 了但不在新历史里。
+
+**检查**：
+```bash
+git ls-tree v0.6.9 packages/node-sdk/tsconfig.dts.json   # 在新历史中是否存在？
+git ls-tree main packages/node-sdk/tsconfig.dts.json      # 在我们的 main 中是否存在？
+```
+
+**解决**：从旧历史或 v0.6.9 恢复：
+```bash
+git show v0.6.9:pnpm-workspace.yaml > pnpm-workspace.yaml
+git show 32b5233:packages/node-sdk/tsconfig.dts.json > packages/node-sdk/tsconfig.dts.json
+```
+
+**教训**：
+1. Force-push 新初始提交 = 代码还在但部分配置文件会丢失
+2. 构建失败先看错误是不是"文件不存在"再改代码
+3. `git ls-tree <ref> <path>` 确认文件在哪个版本中存在
+
+### 包名变更导致 import 找不到（2026-06-24）
+
+**问题**：构建报 `Cannot find module '@scream-code/ltod'`——cherry-pick 过来的代码用的是旧包名 `@scream-cli/ltod`。
+
+**根因**：v0.6.9 把 `@scream-cli/*` 全部改成 `@scream-code/*`。cherry-pick 搬代码但不改包名。
+
+**检查**：
+```bash
+grep -rn "@scream-cli/" packages/ apps/
+```
+
+**解决**：全局搜索替换为 `@scream-code/`。
+
+**教训**：大版本改名后 cherry-pick，包名引用是最容易被忽略的遗漏项。
+
+### `pnpm install` 是 cherry-pick 后的必修课（2026-06-24）
+
+**问题**：一切构建通过后，`scream` 命令报错找不到入口。
+
+**根因**：Cherry-pick 改了配置文件，`node_modules` 的 workspace 符号链接没更新。
+
+**解决**：
+```bash
+pnpm install                     # 重建 workspace symlinks
+npm install -g ./apps/scream-code # 重装全局 CLI
+scream --version                 # 确认工作
+```
+
+**教训**：
+1. Force-push + cherry-pick 后 `node_modules` 是脏的——必须 `pnpm install`
+2. 全局安装入口指向旧包名也需要重装
+3. 验证顺序：git 状态 → pnpm install → pnpm build → scream --version
+
+### Edit 工具漏传 path 参数（2026-06-24）
+
+**问题**：调用 Edit 时报 `Invalid args for tool "Edit": must have required property 'path'`。
+
+**根因**：Edit API schema 中 `path` 是 required 参数，但调用时只传了 `old_string` 和 `new_string`，漏了 `path`。
+
+**教训**：
+1. Edit 的 3 个必填参数是 `path` + `old_string` + `new_string`，缺一不可
+2. 在工具调用模板中，`path` 应该永远放在第一个写，不容易忘
 
 ---
 
