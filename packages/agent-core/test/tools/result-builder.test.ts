@@ -47,7 +47,7 @@ describe('ToolResultBuilder', () => {
     expect(builder.write('Line 1\n')).toBe(7);
     expect(builder.write('This is a very long line that exceeds limit\n')).toBe(20);
     expect(builder.write('This would exceed char limit')).toBe(14);
-    expect(builder.write('ignored')).toBe(0);
+    expect(builder.write('ignored')).toBe(7);
 
     const result = builder.ok();
     expect(result.output).toContain('[...truncated]');
@@ -73,10 +73,12 @@ describe('ToolResultBuilder', () => {
     const builder = new ToolResultBuilder({ maxChars: 5 });
 
     expect(builder.write('Hello')).toBe(5);
-    expect(builder.write(' world')).toBe(0);
+    expect(builder.write(' world')).toBe(6);
 
     const result = builder.ok();
-    expect(result.output).toContain('Hello[...truncated]');
+    expect(result.output).toContain('Hello');
+    expect(result.output).toContain('[...truncated]');
+    expect(result.output).toContain(' world');
     expect(result.output).toContain('Output is truncated');
     expect(result.truncated).toBe(true);
   });
@@ -84,7 +86,7 @@ describe('ToolResultBuilder', () => {
   it('marks truncation when a multi-line write leaves unprocessed lines', () => {
     const builder = new ToolResultBuilder({ maxChars: 6 });
 
-    expect(builder.write('Hello\nworld')).toBe(6);
+    expect(builder.write('Hello\nworld')).toBe(11);
 
     const result = builder.ok();
     expect(result.output).toContain('Hello\n[...truncated]');
@@ -158,5 +160,79 @@ describe('ToolResultBuilder', () => {
 
     expect(result.output).toBe('ok\n');
     expect(result.message).toBe('Command executed successfully.');
+  });
+
+  describe('head + tail truncation', () => {
+    it('preserves head prefix and tail suffix when output exceeds maxChars', () => {
+      const builder = new ToolResultBuilder({ maxChars: 20, maxTailChars: 30 });
+      builder.write('HEAD-START\n');
+      builder.write('middle-fill-1\n');
+      builder.write('middle-fill-2\n');
+      builder.write('TAIL-END-LINE\n');
+
+      const result = builder.ok();
+      expect(result.output).toContain('HEAD-START');
+      expect(result.output).toContain('TAIL-END-LINE');
+      expect(result.output).toContain('[...truncated]');
+      expect(result.truncated).toBe(true);
+    });
+
+    it('keeps only the last maxTailChars chars in tail', () => {
+      const builder = new ToolResultBuilder({ maxChars: 10, maxTailChars: 15 });
+      builder.write('0123456789head');
+      builder.write('AAAABBBBCCCCDDDD');
+
+      const result = builder.ok();
+      expect(result.output).toContain('AAABBBBCCCCDDDD');
+      expect(result.output).not.toContain('AAAA');
+    });
+
+    it('handles a single chunk larger than maxTailChars', () => {
+      const builder = new ToolResultBuilder({ maxChars: 5, maxTailChars: 10 });
+      builder.write('HEAD!');
+      builder.write('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+
+      const result = builder.ok();
+      expect(result.output).toContain('QRSTUVWXYZ');
+      expect(result.output).not.toContain('ABCDEFGHIJKLMNOP');
+    });
+
+    it('does not append tail separator when head is not full', () => {
+      const builder = new ToolResultBuilder({ maxChars: 100 });
+      builder.write('short output\n');
+      const result = builder.ok();
+      expect(result.output).toBe('short output\n');
+      expect(result.truncated).toBe(false);
+    });
+
+    it('returns total chars written (head + tail) from write()', () => {
+      const builder = new ToolResultBuilder({ maxChars: 5, maxTailChars: 100 });
+      const headWritten = builder.write('Hello');
+      const tailWritten = builder.write(' world');
+
+      expect(headWritten).toBe(5);
+      expect(tailWritten).toBe(6);
+      expect(builder.nChars).toBe(11);
+    });
+
+    it('preserves tail content in toString() for command-not-found detection', () => {
+      const builder = new ToolResultBuilder({ maxChars: 10, maxTailChars: 100 });
+      builder.write('progress line\n');
+      builder.write('command not found: tsc\n');
+
+      const text = builder.toString();
+      expect(text).toContain('command not found');
+    });
+
+    it('drops all tail content when maxTailChars is 0', () => {
+      const builder = new ToolResultBuilder({ maxChars: 5, maxTailChars: 0 });
+      builder.write('HEAD!');
+      builder.write('this should be dropped');
+
+      const result = builder.ok();
+      expect(result.output).toContain('HEAD!');
+      expect(result.output).not.toContain('this should be dropped');
+      expect(result.truncated).toBe(true);
+    });
   });
 });
