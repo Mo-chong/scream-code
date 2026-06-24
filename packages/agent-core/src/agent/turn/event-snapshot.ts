@@ -28,6 +28,8 @@ interface SnapshotBufferEntry {
   stepCount: number;
   /** pushTurn 时的时间戳（≈回合结束时间） */
   timestamp: number;
+  /** 🆕 Phase15+: 预算摘要（用于写入日志文件） */
+  budgetSummary?: { used: number; skipped: number; residual: number; totalEvents: number };
 }
 
 interface IndexStats {
@@ -37,6 +39,13 @@ interface IndexStats {
     byKind: Record<string, number>;
     byVariant: Record<string, number>;
     lastUpdated: string;
+    /** 🆕 Phase15+: 每个 variant 的详细统计（仅 version ≥ 2） */
+    byVariantDetail?: Record<string, {
+      total: number;
+      delivered: number;
+      skipped: number;
+      byLevel: Partial<Record<'S' | 'A' | 'B' | 'C' | 'D', number>>;
+    }>;
   };
 }
 
@@ -62,9 +71,9 @@ export class EventSnapshotBuffer {
    * 回合结束时将本回合的拦截事件加入缓冲区。
    * 异步，不 await——不阻塞 AI 回合结束。
    */
-  pushTurn(turnId: number, events: InterceptionEvent[], stepCount: number): void {
+  pushTurn(turnId: number, events: InterceptionEvent[], stepCount: number, budgetSummary?: { used: number; skipped: number; residual: number; totalEvents: number }): void {
     if (events.length === 0) return;
-    this.pendingEntries.push({ turnId, events, stepCount, timestamp: Date.now() });
+    this.pendingEntries.push({ turnId, events, stepCount, timestamp: Date.now(), budgetSummary });
     if (this.shouldFlush()) this.scheduleFlush();
   }
 
@@ -156,6 +165,11 @@ export class EventSnapshotBuffer {
     for (const entry of entries) {
       lines.push(`## [${this.sessionId}] Turn #${entry.turnId} — ${formatTime(entry.timestamp)} | ${entry.stepCount} steps`);
       lines.push(...this.formatTurnEvents(entry.events));
+      // 🆕 Phase15+: 追加预算摘要
+      if (entry.budgetSummary) {
+        const bs = entry.budgetSummary;
+        lines.push(`- budget: ${bs.used} used, ${bs.skipped} skipped, ${bs.residual} residual (${bs.totalEvents} events total)`);
+      }
       lines.push('---');
       lines.push('');
     }
@@ -192,12 +206,32 @@ export class EventSnapshotBuffer {
       stats = { version: 1, globalStats: { totalEvents: 0, byKind: {}, byVariant: {}, lastUpdated: '' } };
     }
 
+    // 🆕 Phase15+: 首次写 v2 数据时提升版本号，初始化 byVariantDetail
+    if (stats.version < 2) {
+      stats.version = 2;
+      stats.globalStats.byVariantDetail = {};
+    }
+
     for (const entry of batch) {
       for (const event of entry.events) {
         stats.globalStats.totalEvents++;
         stats.globalStats.byKind[event.kind] = (stats.globalStats.byKind[event.kind] ?? 0) + 1;
         if (event.variant) {
           stats.globalStats.byVariant[event.variant] = (stats.globalStats.byVariant[event.variant] ?? 0) + 1;
+
+          // 累加 byVariantDetail
+          let detail = stats.globalStats.byVariantDetail![event.variant];
+          if (!detail) {
+            detail = { total: 0, delivered: 0, skipped: 0, byLevel: {} };
+            stats.globalStats.byVariantDetail![event.variant] = detail;
+          }
+          detail.total++;
+          if (event.kind === 'injection_delivered') detail.delivered++;
+          else if (event.kind === 'injection_skipped') detail.skipped++;
+          if (event.level) {
+            const lv = event.level as 'S' | 'A' | 'B' | 'C' | 'D';
+            detail.byLevel[lv] = (detail.byLevel[lv] ?? 0) + 1;
+          }
         }
       }
     }

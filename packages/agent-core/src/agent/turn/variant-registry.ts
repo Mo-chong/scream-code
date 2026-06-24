@@ -31,6 +31,8 @@ export interface VariantRecord {
 
 export class VariantRegistry {
   private records = new Map<string, VariantRecord>();
+  /** 🆕 Phase15+: 行为观察回调（用于 event log 记录 behavior_feedback） */
+  onBehaviorObserved?: (variant: string, observed: boolean) => void;
 
   /**
    * 记录一个注入变体。同变体在同回合只记录第一次，
@@ -93,6 +95,7 @@ export class VariantRegistry {
     const record = this.records.get(variant);
     if (record) {
       record.behaviorObserved = true;
+      this.onBehaviorObserved?.(variant, true);
     }
   }
 
@@ -103,6 +106,7 @@ export class VariantRegistry {
     const record = this.records.get(variant);
     if (record && record.behaviorObserved === null) {
       record.behaviorObserved = false;
+      this.onBehaviorObserved?.(variant, false);
     }
   }
 
@@ -250,6 +254,8 @@ export interface VariantMeta {
   threshold: number;
   /** 最小步间隔，防止高频重复 */
   minStepGap: number;
+  /** 🆕 Phase15: S→S 拦截阈值。0=从不拦截，N=连续 S→S N 次后进入偏差链 */
+  interceptThreshold?: number;
 }
 
 export const VARIANT_META: Record<string, VariantMeta> = {
@@ -282,9 +288,20 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   post_memory:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
 
   // C组: step_after — 步级行为反馈
-  step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
+  step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5, interceptThreshold: 3 },
   step_after_search:           { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
-  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.40, minStepGap: 4 },
+  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.40, minStepGap: 4, interceptThreshold: 3 },
+
+  // ── Phase 12: 反馈信号闭环 variants ────────────────────────────
+  // Rule 1 (阻断) 不走 inject() 路径，无需 VARIANT_META
+  guard_feedback_rule_2:      { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
+  guard_feedback_rule_3:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 2 },
+  feedback_positive:          { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
+
+  // ── Phase 13: 行为闭环与展示规范 ──────────────────────────────
+  guard_feedback_rule_4:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
+  scene_memory_recall:       { weight: 0.8, decayPerStep: 0.88, threshold: 0.30, minStepGap: 5, interceptThreshold: 3 },
+  step_code_ref_quality:     { weight: 0.5, decayPerStep: 0.85, threshold: 0.40, minStepGap: 6 },
 };
 
 /**

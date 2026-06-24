@@ -13,18 +13,22 @@ import { VARIANT_META } from './variant-registry';
 export interface InterceptionEvent {
   /** 全局序列号。单调递增。 */
   seq: number;
-  /** 事件种类：injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail | guard_observe */
+  /** 事件种类：injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail | guard_observe | behavior_feedback */
   kind: string;
   /** 相关 variant 名称（无 variant 的穿件传空字符串） */
   variant: string;
   /** 记录时的回合步号 */
   step: number;
-  /** 具体动作：skipped_residual | skipped_budget | injected | gate_held | gate_passed | detected */
+  /** 具体动作：skipped_residual | skipped_budget | injected | gate_held | gate_passed | detected | observed | not_observed */
   action: string;
   /** 人类可读的原因说明 */
   reason: string;
   /** 所属回合 ID */
   turnId: number;
+  /** 🆕 Phase15+: 注入时的权重等级（仅 delivered/skipped 事件有效） */
+  level?: string;
+  /** 🆕 Phase15+: 预算估值（仅 budget skip 事件有效） */
+  tokenEstimate?: number;
 }
 
 const MAX_EVENTS = 200;
@@ -98,6 +102,36 @@ export class TurnEventLog {
     this.lastSummarizedTurnId = -1;
     this.lastSummarizedSeq = 0;
     this.turnSampleCache.clear();
+  }
+
+  /** 获取所有事件（用于 INDEX.json v2 汇总）。 */
+  getAllEvents(): InterceptionEvent[] {
+    return this.events;
+  }
+
+  /**
+   * 获取指定回合的预算使用摘要。
+   * 从事件中聚合 injection_delivered 的 tokenEstimate (used)，
+   * injection_skipped/skipped_budget (skipped)，
+   * 和 injection_skipped/skipped_residual (residual)。
+   * 返回 null 表示该回合无事件。
+   */
+  getBudgetSummary(turnId: number): { used: number; skipped: number; residual: number; totalEvents: number } | null {
+    const turnEvents = this.getTurnEvents(turnId);
+    if (turnEvents.length === 0) return null;
+    let used = 0;
+    let skipped = 0;
+    let residual = 0;
+    for (const e of turnEvents) {
+      if (e.kind === 'injection_delivered' && e.action === 'injected') {
+        if (e.tokenEstimate) used += e.tokenEstimate;
+      } else if (e.kind === 'injection_skipped' && e.action === 'skipped_budget') {
+        skipped++;
+      } else if (e.kind === 'injection_skipped' && e.action === 'skipped_residual') {
+        residual++;
+      }
+    }
+    return { used, skipped, residual, totalEvents: turnEvents.length };
   }
 
   // ── W 驱动采样 ─────────────────────────────────────────

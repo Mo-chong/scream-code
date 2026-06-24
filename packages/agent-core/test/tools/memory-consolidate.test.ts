@@ -270,6 +270,7 @@ describe('MemoryConsolidateApplyTool', () => {
           resolvedFound: 0,
           staleFound: 0,
           memosAfterConsolidation: 0,
+          skippedProtected: 0,
         },
       },
       signal,

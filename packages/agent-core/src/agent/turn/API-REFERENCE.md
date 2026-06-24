@@ -24,6 +24,8 @@
 | IntentDetector | `detectors/intent.ts` | User prompt text | `IntentDetection \| null` |
 | QualityDetector | `detectors/quality.ts` | VariantRegistry + StepSignature | `QDetectionResult \| null` |
 | ConfabulationDetector | `detectors/confabulation.ts` | StepSignature + ContextSnapshot | `DetectionResult` |
+| SceneMemoryDetector | `detectors/scene-memory.ts` | User input + hasMemoryLookup | `SceneMemoryIssue` |
+| CodeRefDetector | `detectors/code-ref.ts` | Assistant text | `CodeRefIssue` |
 
 ### Unified inject route
 
@@ -33,6 +35,7 @@ All triggers and detectors call `inject(text, meta)` at `index.ts:1199`, which h
 inject(text, meta) →
   ├─ system_trigger kind → bypass budget, inject directly
   ├─ quality_escalate_ variant → bypass budget, inject directly
+  ├─ interception_log variant → bypass budget, inject directly (Phase15: meta-log)
   ├─ repeatDecay(record) === 'skip' → silent discard (triggerCount ≥5)
   ├─ ResNet: !shouldInjectByResidual(record, step, meta) → silent skip (attention still sufficient)
   │     (variant must have a VariantMeta entry; unconfigured variants pass through)
@@ -84,8 +87,10 @@ See §9.5 **ResNet injection scheduling** for the full variant configuration tab
 
 ```
 editWithoutLookupCount ≥ 3 → deviationChainActive = true
+verifyFailedThisStep → deviationChainActive = true
+behaviorViolations[variant] ≥ interceptThreshold → deviationChainActive = true  (Phase15)
 → shouldContinueAfterStop: inject deviation_chain_intercept (S)
-  "偏差链检测到：连续多次 Edit 未查 LSP.references"
+  "偏差链检测到：连续多次 Edit 未查 LSP.references" / "行为变体 X 连续 N 回合 S→S..."
   "MUST verify all claims with tool calls. NEVER fabricate."
 ```
 
@@ -355,6 +360,26 @@ function injectAntiConfabulation(
 
 Threshold: confidence < 2 → no inject. confidence 2 → gentle hint. confidence 3 → MUST/NEVER.
 
+### Code ref quality detector (`detectors/code-ref.ts`)
+
+纯函数检测 AI 输出中的代码块是否带路径/行号引用。
+
+| Signal | Condition | Action |
+|--------|-----------|--------|
+| Missing ref | code block without file path in previous line | inject step_code_ref_quality reminder |
+
+低权重（W=0.5）低频（gap=6），不打扰正常流程。
+
+### Scene memory detector (`detectors/scene-memory.ts`)
+
+纯函数检测用户输入中是否有"上次/以前"等回溯关键词，判断 AI 是否查了记忆。
+
+| Signal | Condition | Action |
+|--------|-----------|--------|
+| Recall missed | user says "上次/以前" + no MemoryLookup call | inject scene_memory_recall reminder |
+
+High-weight（W=0.8, T=0.30）确保 AI 迅速学会——用户提"上次"时不查记忆就提醒。
+
 ---
 
 ## 8. Budget system (cross-cutting)
@@ -387,6 +412,7 @@ Actual cap = `floor(configCap × stepNorm × degradationFactor)`
 |-----------|--------|
 | `meta.kind === 'system_trigger'` | Skip budget (convergence) |
 | `variant.startsWith('quality_escalate_')` | Skip budget (escalation is remedy for budget-limit) |
+| `variant === 'interception_log'` | Skip budget + skip registry (Phase15: meta-log bypasses entirely) |
 | `behaviorObserved === true` | Effective level = C (lowest budget cost) |
 | `deviationChainActive` | `bypassBudget()` called — single-use override |
 | `repeatDecay(record) === 'skip'` | Variant not injected (never hits budget) |
@@ -438,13 +464,17 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 | `record` | `(variant, level, step) => void` | Record variant. Re-inject: increment triggerCount, update stepInjected |
 | `get` | `(variant) => VariantRecord \| undefined` | Get record by name |
 | `getAll` | `() => VariantRecord[]` | All records |
-| `markBehaviorObserved` | `(variant) => void` | Mark variant as effective |
-| `markBehaviorNotObserved` | `(variant) => void` | Mark variant as ineffective |
+| `markBehaviorObserved` | `(variant) => void` | Mark variant as effective; fires `onBehaviorObserved` callback |
+| `markBehaviorNotObserved` | `(variant) => void` | Mark variant as ineffective; fires `onBehaviorObserved` callback |
 | `markEscalated` | `(variant, step) => void` | Mark escalated |
 | `updateLevel` | `(variant, newLevel, step) => void` | In-place level update |
 | `reset` | `() => void` | Clear all (turn start) |
 | `hasIntentVariants` | `() => boolean` | Quick intent check |
 | `size` | `getter: number` | Record count |
+
+### Callback
+
+- `onBehaviorObserved?: (variant: string, observed: boolean) => void` — fires on `markBehaviorObserved`/`markBehaviorNotObserved`. Used by TurnFlow to record `behavior_feedback` events.
 
 ### Pure functions
 
@@ -462,26 +492,32 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 
 #### Full configuration table
 
-| Variant | W | D | threshold | minStepGap | Notes |
-|---------|:-:|:-:|:---------:|:----------:|-------|
-| system_trigger | 1.0 | 0.99 | 0.1 | 0 | Never skipped |
-| deviation_chain_intercept | 1.0 | 0.99 | 0.1 | 0 | Never skipped |
-| prepare_edit | 0.8 | 0.85 | 0.35 | 4 | |
-| prepare_write | 0.8 | 0.85 | 0.35 | 4 | |
-| prepare_search | 0.7 | 0.85 | 0.40 | 3 | |
-| prepare_memory | 0.7 | 0.85 | 0.40 | 3 | |
-| prepare_bash_file | 0.5 | 0.82 | 0.40 | 3 | |
-| prepare_verify | 0.8 | 0.85 | 0.35 | 4 | |
-| post_edit | 0.6 | 0.80 | 0.40 | 4 | |
-| post_search | 0.6 | 0.80 | 0.40 | 4 | |
-| post_write_large | 0.5 | 0.80 | 0.40 | 4 | |
-| post_verify_pass | 0.5 | 0.80 | 0.40 | 4 | |
-| post_verify_fail | 0.9 | 0.88 | 0.30 | 3 | High weight = urgent |
-| post_memory | 0.6 | 0.80 | 0.40 | 4 | |
-| step_after_edit | 0.6 | 0.80 | 0.40 | 5 | |
-| step_after_search | 0.5 | 0.80 | 0.40 | 5 | |
-| step_after_verify_fail | 0.8 | 0.85 | 0.35 | 4 | |
-| intent_* (all 6) | 0.7-0.9 | 0.88-0.92 | 0.30 | 0 | Injected once at turn start |
+| Variant | W | D | threshold | minStepGap | interceptThreshold | Notes |
+|---------|:-:|:-:|:---------:|:----------:|:------------------:|-------|
+| system_trigger | 1.0 | 0.99 | 0.1 | 0 | — | Never skipped |
+| deviation_chain_intercept | 1.0 | 0.99 | 0.1 | 0 | — | Never skipped |
+| prepare_edit | 0.8 | 0.85 | 0.35 | 4 | — | |
+| prepare_write | 0.8 | 0.85 | 0.35 | 4 | — | |
+| prepare_search | 0.7 | 0.85 | 0.40 | 3 | — | |
+| prepare_memory | 0.7 | 0.85 | 0.40 | 3 | — | |
+| prepare_bash_file | 0.5 | 0.82 | 0.40 | 3 | — | |
+| prepare_verify | 0.8 | 0.85 | 0.35 | 4 | — | |
+| post_edit | 0.6 | 0.80 | 0.40 | 4 | — | |
+| post_search | 0.6 | 0.80 | 0.40 | 4 | — | |
+| post_write_large | 0.5 | 0.80 | 0.40 | 4 | — | |
+| post_verify_pass | 0.5 | 0.80 | 0.40 | 4 | — | |
+| post_verify_fail | 0.9 | 0.88 | 0.30 | 3 | — | High weight = urgent |
+| post_memory | 0.6 | 0.80 | 0.40 | 4 | — | |
+| step_after_edit | 0.6 | 0.80 | 0.40 | 5 | **3** | S→S ×3 → deviation chain |
+| step_after_search | 0.5 | 0.80 | 0.40 | 5 | — | |
+| step_after_verify_fail | 0.8 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
+| guard_feedback_rule_2 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
+| guard_feedback_rule_3 | **0.8** | 0.85 | 0.35 | 4 | **2** | S→S ×2 → deviation chain (higher W + lower threshold) |
+| guard_feedback_rule_4 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
+| scene_memory_recall | 0.8 | 0.88 | 0.30 | 5 | **3** | S→S ×3 → deviation chain |
+| intent_* (all 6) | 0.7-0.9 | 0.88-0.92 | 0.30 | 0 | — | Injected once at turn start |
+
+Unconfigured variants (e.g., `session_memory`, `dream_suggestion`) are passed through without residual check. Non-behavior variants (`feedback_positive`, `prepare_*`, `post_*`, `intent_*`) have no `interceptThreshold` (default 0 → never intercept).
 
 Unconfigured variants (e.g., `session_memory`, `dream_suggestion`) are passed through without residual check.
 
@@ -562,9 +598,12 @@ injectAntiConfabulation(confaResult, this.stepInjectedVariants,
 |:-----:|----------|
 | A (prepareToolExecution) | prepare_edit(A), prepare_write(A), prepare_search(A), prepare_memory(A), prepare_bash_file(C), prepare_verify(C) |
 | B (finalizeToolResult) | post_edit(A), post_search(B), post_write_large(B), post_verify_pass(B), post_verify_fail(A), post_memory(B) |
-| C (afterStep) | step_after_edit(A/B), step_after_search(B), step_after_verify_fail(A) |
+| C (afterStep) | step_after_edit(A/B), step_after_search(B), step_after_verify_fail(A), step_code_ref_quality(C) |
 | D (runOneTurn) | intent_fix_bug(B/A), intent_refactor(B/A), intent_add_feature(B/A), intent_review(B/A), intent_research(B/A), intent_document(B/A) |
-| Special | deviation_chain_intercept(S), quality_escalate_*(penetrate), system_trigger(penetrate) |
+| E (afterStep — guard feedback) | guard_feedback_rule_2(C), guard_feedback_rule_3(C), guard_feedback_rule_4(C), feedback_positive(D) |
+| F (afterStep — scene) | scene_memory_recall(C) |
+| G (Phase15 — behavior feedback) | behavior_feedback (meta-log only, not injected) |
+| Special | deviation_chain_intercept(S), quality_escalate_*(penetrate), system_trigger(penetrate), interception_log(penetrate) |
 
 ---
 
@@ -581,12 +620,14 @@ In-memory ring buffer (200 events max). Per-turn incremental summary injected in
 ```typescript
 interface InterceptionEvent {
   seq: number;                              // Monotonic sequence
-  kind: string;                             // injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail
+  kind: string;                             // injection_skipped | injection_delivered | convergence_gate | deviation_chain | confabulation | verify_fail | behavior_feedback
   variant: string;                          // Variant name (empty string for non-variant events)
   step: number;                             // Turn step number
-  action: string;                           // skipped_residual | skipped_budget | skipped_dedup | injected | gate_held | gate_passed | detected
+  action: string;                           // skipped_residual | skipped_budget | skipped_dedup | injected | gate_held | gate_passed | detected | observed | not_observed
   reason: string;                           // Human-readable description
   turnId: number;
+  level?: string;                           // Phase15: injected weight level (delivered/skipped events)
+  tokenEstimate?: number;                   // Phase15: budget estimate (budget skip events)
 }
 ```
 
