@@ -62,6 +62,8 @@ export function detectQualityIssue(
   for (const record of registry.getAll()) {
     // ── 行为已观察 → 跳过 ──
     if (record.behaviorObserved === true) continue;
+    // 🆕 修复: 元日志变体不是行为约束，不需要 quality 升级
+    if (record.variant === 'interception_log') continue;
 
     const age = currentStep - record.stepInjected;
 
