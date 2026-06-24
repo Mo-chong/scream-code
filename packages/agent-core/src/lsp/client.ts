@@ -64,7 +64,10 @@ export class LspClient {
     }
   >();
   private collectedDiagnostics = new Map<string, LspDiagnostic[]>();
+  private openedDocuments = new Set<string>();
+  private documentVersion = new Map<string, number>();
   private buffer = '';
+  private bufferBytes = 0;
   private contentLength = -1;
   private started = false;
 
@@ -72,6 +75,7 @@ export class LspClient {
     private readonly command: string[],
     private readonly workspaceRoot: string,
     private readonly jian: Jian,
+    private readonly initializationOptions?: Record<string, unknown>,
   ) {}
 
   async start(): Promise<void> {
@@ -111,7 +115,9 @@ export class LspClient {
     this.started = true;
 
     this.process.stdout.on('data', (chunk: Buffer) => {
-      this.buffer += chunk.toString('utf8');
+      const text = chunk.toString('utf8');
+      this.buffer += text;
+      this.bufferBytes += Buffer.byteLength(text, 'utf8');
       this.processMessages();
     });
 
@@ -126,9 +132,17 @@ export class LspClient {
       capabilities: {
         textDocument: {
           synchronization: { willSave: false, willSaveWaitUntil: false, didSave: false },
+          publishDiagnostics: {
+            relatedInformation: true,
+            versionSupport: false,
+            tagSupport: { valueSet: [1, 2] },
+            codeDescriptionSupport: true,
+            dataSupport: true,
+          },
           rename: { prepareSupport: false },
         },
       },
+      initializationOptions: this.initializationOptions,
     });
     this.notify('initialized', {});
   }
@@ -139,11 +153,26 @@ export class LspClient {
       reject(new Error('LSP client stopped'));
     }
     this.pending.clear();
+    this.collectedDiagnostics.clear();
+    this.openedDocuments.clear();
+    this.documentVersion.clear();
+    this.started = false;
+    this.buffer = '';
+    this.bufferBytes = 0;
+    this.contentLength = -1;
 
     if (this.process === undefined) return;
     try {
-      this.notify('shutdown', {});
+      await this.request('shutdown', {});
+    } catch {
+      // Server may have exited or be unresponsive; proceed to kill.
+    }
+    try {
       this.notify('exit', {});
+    } catch {
+      // Ignore notification failures.
+    }
+    try {
       await this.process.kill('SIGTERM');
     } catch {
       // Already exited or not killable.
@@ -152,13 +181,30 @@ export class LspClient {
   }
 
   didOpen(path: string, content: string, languageId: string): void {
+    const uri = pathToUri(path);
+    if (this.openedDocuments.has(uri)) {
+      this.didChange(path, content);
+      return;
+    }
+    this.openedDocuments.add(uri);
+    this.documentVersion.set(uri, 1);
     this.notify('textDocument/didOpen', {
       textDocument: {
-        uri: pathToUri(path),
+        uri,
         languageId,
         version: 1,
         text: content,
       },
+    });
+  }
+
+  didChange(path: string, content: string): void {
+    const uri = pathToUri(path);
+    const version = (this.documentVersion.get(uri) ?? 1) + 1;
+    this.documentVersion.set(uri, version);
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version },
+      contentChanges: [{ text: content }],
     });
   }
 
@@ -246,21 +292,24 @@ export class LspClient {
         if (headerEnd === -1) return;
         const header = this.buffer.slice(0, headerEnd);
         const match = /Content-Length:\s*(\d+)/i.exec(header);
+        const headerEndChar = headerEnd + 4;
+        const droppedHeader = this.buffer.slice(0, headerEndChar);
+        this.bufferBytes -= Buffer.byteLength(droppedHeader, 'utf8');
+        this.buffer = this.buffer.slice(headerEndChar);
         if (match === null) {
-          this.buffer = this.buffer.slice(headerEnd + 4);
           continue;
         }
         this.contentLength = Number(match[1]);
-        this.buffer = this.buffer.slice(headerEnd + 4);
       }
 
-      if (this.buffer.length < this.contentLength) return;
-      const raw = this.buffer.slice(0, this.contentLength);
-      this.buffer = this.buffer.slice(this.contentLength);
+      if (this.bufferBytes < this.contentLength) return;
+      const { text, consumedChars, consumedBytes } = sliceByBytes(this.buffer, this.contentLength);
+      this.buffer = this.buffer.slice(consumedChars);
+      this.bufferBytes -= consumedBytes;
       this.contentLength = -1;
 
       try {
-        const message = JSON.parse(raw) as JsonRpcMessage;
+        const message = JSON.parse(text) as JsonRpcMessage;
         this.handleMessage(message);
       } catch {
         // Ignore malformed messages.
@@ -325,6 +374,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function byteLengthOfCodePoint(codePoint: number): number {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
+/**
+ * Slice `targetBytes` worth of UTF-8 from the head of `text`.
+ *
+ * LSP `Content-Length` is a byte count, but JS strings are UTF-16 code units.
+ * Slicing by `string.length` misaligns messages containing multi-byte chars
+ * (Chinese diagnostics, emoji). This walks code points, summing UTF-8 bytes,
+ * and never splits a multi-byte character mid-sequence so `JSON.parse` won't
+ * choke on a half-character.
+ */
+function sliceByBytes(
+  text: string,
+  targetBytes: number,
+): { readonly text: string; readonly consumedChars: number; readonly consumedBytes: number } {
+  let chars = 0;
+  let bytes = 0;
+  while (chars < text.length && bytes < targetBytes) {
+    const codePoint = text.codePointAt(chars);
+    if (codePoint === undefined) break;
+    const charLen = codePoint > 0xffff ? 2 : 1;
+    const charBytes = byteLengthOfCodePoint(codePoint);
+    if (bytes + charBytes > targetBytes) break;
+    bytes += charBytes;
+    chars += charLen;
+  }
+  return { text: text.slice(0, chars), consumedChars: chars, consumedBytes: bytes };
 }
 
 export function formatLocation(location: LspLocation): string {

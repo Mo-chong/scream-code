@@ -515,11 +515,11 @@ Key files: `packages/agent-core/src/tools/builtin/lsp-tool.ts`,
 `packages/agent-core/src/lsp/client.ts`,
 `packages/agent-core/src/lsp/registry.ts`.
 
-### Tool Priority and BashTool Anti-Patterns
+### Tool Priority and BashTool Interception
 
-The agent MUST prefer specialized built-in tools over shell equivalents. `BashTool` rejects commands that duplicate built-in functionality: `cat`/`head`/`tail`/`less`/`more`, `grep`/`rg`/`ag`/`ack`, `find`/`fd`, `sed -i`/`perl -i`/`awk`, and `echo ... > file`. Use `Read`, `Grep`/`LSP`, `Glob`, `Edit`, and `Write` instead. Bash is reserved for builds/tests, package managers, git, dev servers, and executing compiled programs.
+The agent MUST prefer specialized built-in tools over shell equivalents. `BashTool` recoverably blocks commands that duplicate built-in functionality, returning a `Blocked: <message>\n\nOriginal command: <command>` error so the caller can retry with the suggested tool. Interception only fires when the suggested tool is enabled (via `availableTools`), so a disabled tool never produces a "use Read instead" dead end. Only the leading token is matched — `ls; cat foo` or `ls | grep foo` pass through, letting prompt guidance handle compound commands. Interception covers `cat`/`head`/`tail`/`less`/`more`, `grep`/`rg`/`ag`/`ack`, `sed -i`/`perl -i`/`awk -i inplace`, and `echo ... > file`. Use `Read`, `Grep`/`LSP`, `Edit`, and `Write` instead. Bash is reserved for builds/tests, package managers, git, dev servers, and executing compiled programs.
 
-Key files: `packages/agent-core/src/tools/builtin/shell/bash.ts`, `packages/agent-core/src/profile/default/system.md`.
+Key files: `packages/agent-core/src/tools/builtin/shell/bash.ts`, `packages/agent-core/src/agent/tool/index.ts`, `packages/agent-core/src/profile/default/system.md`.
 
 ### Subagent Standardization
 

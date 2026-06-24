@@ -8,9 +8,15 @@ import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { MEDIA_SNIFF_BYTES, detectFileType } from '../../support/file-type';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
+import {
+  findUniqueSuffixMatch,
+  suffixResolutionNotice,
+} from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { makeCarriageReturnsVisible, type LineEndingStyle, computeAnchor, toModelTextView } from './line-endings';
+import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import readDescriptionTemplate from './read.md';
 
 export const MAX_LINES: number = 1000;
@@ -141,6 +147,17 @@ function isFileNotFoundError(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
+// Prepend a notice line to a read result. The notice sits above the file
+// content and outside the <system>...</system> block, so ReadGroup's
+// `</system>\s*$` end-anchor regex still matches.
+function prependNotice(result: ExecutableToolResult, notice: string): ExecutableToolResult {
+  if (typeof result.output === 'string') {
+    const prefixed = result.output.length > 0 ? `${notice}\n${result.output}` : notice;
+    return { ...result, output: prefixed };
+  }
+  return { ...result, output: [{ type: 'text', text: notice }, ...result.output] };
+}
+
 function isTextDecodeError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const code = (error as { code?: unknown })['code'];
@@ -197,14 +214,61 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     };
   }
 
-  private async execution(args: ReadInput, safePath: string): Promise<ExecutableToolResult> {
+  // Attempt suffix-match recovery on ENOENT. Glob **/<basename> under the
+  // workspace root; on a unique hit, re-run the full read pipeline against
+  // the matched path with a notice prepended. Returns null to fall through
+  // to the normal does-not-exist error. Mirrors omp findUniqueSuffixMatch.
+  private async trySuffixMatchRead(
+    args: ReadInput,
+  ): Promise<ExecutableToolResult | null> {
+    const suffixMatch = await findUniqueSuffixMatch(
+      args.path,
+      this.workspace.workspaceDir,
+      this.jian,
+    );
+    if (suffixMatch === null) return null;
+    try {
+      const retryStat = await this.jian.stat(suffixMatch.absolutePath);
+      if (!isRegularFileMode(retryStat.stMode)) return null;
+    } catch {
+      return null;
+    }
+    const notice = suffixResolutionNotice(args.path, suffixMatch.displayPath);
+    const inner = await this.execution(args, suffixMatch.absolutePath, true);
+    return prependNotice(inner, notice);
+  }
+
+  private async fileNotFoundResult(displayPath: string): Promise<ExecutableToolResult> {
+    let tree: string;
+    try {
+      tree = await listDirectory(this.jian, this.workspace.workspaceDir);
+    } catch {
+      tree = '(listing unavailable)';
+    }
+    return {
+      isError: true,
+      output:
+        `"${displayPath}" does not exist.\n\n` +
+        `Top of ${this.workspace.workspaceDir}:\n${tree}`,
+    };
+  }
+
+  private async execution(
+    args: ReadInput,
+    safePath: string,
+    suffixResolved = false,
+  ): Promise<ExecutableToolResult> {
     try {
       let stat: StatResult;
       try {
         stat = await this.jian.stat(safePath);
       } catch (error) {
         if (isFileNotFoundError(error)) {
-          return { isError: true, output: `"${args.path}" does not exist.` };
+          if (!suffixResolved) {
+            const resolved = await this.trySuffixMatchRead(args);
+            if (resolved !== null) return resolved;
+          }
+          return await this.fileNotFoundResult(args.path);
         }
         throw error;
       }
@@ -420,9 +484,19 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   }
 
   private finishReadResult(input: FinishReadResultInput): ExecutableToolResult {
-    return {
-      output: this.finishOutput(input.renderedLines, this.finishMessage(input)),
-    };
+    const message = this.finishMessage(input);
+    // Scan the returned window (not the whole file) for merge conflict
+    // markers so the agent is warned before editing a conflicted file. Strip
+    // the `NNN\t` line-number prefix renderLine adds before scanning. The
+    // notice is appended to the system message (inside <system>…</system>)
+    // so the ReadGroup parser's `</system>\s*$` regex still matches.
+    const rawLines = input.renderedLines.map((l) => {
+      const tabIdx = l.indexOf('\t');
+      return tabIdx === -1 ? l : l.slice(tabIdx + 1);
+    });
+    const notice = formatConflictNotice(scanConflictLines(rawLines, input.startLine));
+    const fullMessage = notice.length > 0 ? `${message} ${notice}` : message;
+    return { output: this.finishOutput(input.renderedLines, fullMessage) };
   }
 
   private finishOutput(renderedLines: readonly string[], message: string): string {

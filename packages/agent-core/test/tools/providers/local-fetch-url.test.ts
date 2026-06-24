@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { FetchCache } from '../../../src/tools/providers/fetch-cache';
 import { LocalFetchURLProvider } from '../../../src/tools/providers/local-fetch-url';
 
+const fakeDnsLookup = vi.fn().mockResolvedValue(['93.184.216.34']);
+
 function htmlResponse(body: string, contentType: string): Response {
   return new Response(body, {
     status: 200,
@@ -22,7 +24,7 @@ describe('LocalFetchURLProvider content kind', () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValue(htmlResponse('plain body', 'text/plain; charset=utf-8'));
-    const provider = new LocalFetchURLProvider({ fetchImpl });
+    const provider = new LocalFetchURLProvider({ fetchImpl, dnsLookup: fakeDnsLookup });
 
     const result = await provider.fetch('https://example.com/file.txt');
 
@@ -33,7 +35,7 @@ describe('LocalFetchURLProvider content kind', () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValue(htmlResponse('# Title\n\nbody', 'text/markdown'));
-    const provider = new LocalFetchURLProvider({ fetchImpl });
+    const provider = new LocalFetchURLProvider({ fetchImpl, dnsLookup: fakeDnsLookup });
 
     const result = await provider.fetch('https://example.com/readme.md');
 
@@ -48,7 +50,7 @@ describe('LocalFetchURLProvider content kind', () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValue(htmlResponse(html, 'text/html; charset=utf-8'));
-    const provider = new LocalFetchURLProvider({ fetchImpl });
+    const provider = new LocalFetchURLProvider({ fetchImpl, dnsLookup: fakeDnsLookup });
 
     const result = await provider.fetch('https://example.com/page');
 
@@ -61,7 +63,7 @@ describe('LocalFetchURLProvider content kind', () => {
       .fn<typeof fetch>()
       .mockResolvedValue(htmlResponse('fresh', 'text/plain; charset=utf-8'));
     const cache = new FetchCache();
-    const provider = new LocalFetchURLProvider({ fetchImpl, cache });
+    const provider = new LocalFetchURLProvider({ fetchImpl, cache, dnsLookup: fakeDnsLookup });
 
     const first = await provider.fetch('https://example.com/file.txt');
     const second = await provider.fetch('https://example.com/file.txt');
@@ -77,7 +79,7 @@ describe('LocalFetchURLProvider content kind', () => {
       .mockResolvedValueOnce(htmlResponse('a', 'text/plain; charset=utf-8'))
       .mockResolvedValueOnce(htmlResponse('b', 'text/plain; charset=utf-8'));
     const cache = new FetchCache();
-    const provider = new LocalFetchURLProvider({ fetchImpl, cache });
+    const provider = new LocalFetchURLProvider({ fetchImpl, cache, dnsLookup: fakeDnsLookup });
 
     await provider.fetch('https://example.com/a');
     await provider.fetch('https://example.com/b');

@@ -63,7 +63,7 @@ export async function resolveGithubSource(
   let headProbe: Response;
   try {
     headProbe = await fetch(
-      `https://codeload.github.com/${owner}/${repo}/zip/HEAD`,
+      `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/HEAD`,
       { method: 'HEAD', signal: headController.signal },
     );
   } finally {
@@ -78,7 +78,7 @@ export async function resolveGithubSource(
     );
   }
   return {
-    tarballUrl: `https://codeload.github.com/${owner}/${repo}/zip/HEAD`,
+    tarballUrl: `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/HEAD`,
     displayVersion: 'HEAD',
     ref: { kind: 'branch', value: 'HEAD' },
   };
@@ -100,7 +100,7 @@ async function tryResolveLatestReleaseTag(
   owner: string,
   repo: string,
 ): Promise<string | undefined> {
-  const url = `https://github.com/${owner}/${repo}/releases/latest`;
+  const url = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/latest`;
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() =>{  controller.abort(); }, 30_000);
   let resp: Response;
@@ -137,7 +137,7 @@ async function tryResolveLatestReleaseTag(
 }
 
 function codeloadUrl(owner: string, repo: string, ref: GithubRef): string {
-  const base = `https://codeload.github.com/${owner}/${repo}/zip`;
+  const base = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip`;
   const encoded = encodeCodeloadRefPath(ref.value);
   if (ref.kind === 'sha') return `${base}/${encoded}`;
   // For a ref we confirmed is a tag (came from /releases/tag/...), use the

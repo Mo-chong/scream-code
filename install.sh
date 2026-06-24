@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Scream Code 一键安装 (TypeScript 版)
-# 前置: Node.js >= 22.0.0, Git
+# 前置: Node.js >= 22.19.0, Git
 # 国内用户建议科学上网，如遇网络错误请多尝试几次
 
 set -euo pipefail
@@ -38,8 +38,13 @@ for dir in \
     "/usr/local/bin" \
     "/opt/homebrew/bin"; do
     if [ -f "$dir/scream" ]; then
-        rm -f "$dir/scream"
-        info "已删除旧命令: $dir/scream"
+        # 只删除本安装创建的 scream（脚本内容含 "scream-code" 标记）
+        if grep -q "scream-code" "$dir/scream" 2>/dev/null; then
+            rm -f "$dir/scream"
+            info "已删除旧命令: $dir/scream"
+        else
+            warn "跳过非本安装的 $dir/scream（所有权不明）"
+        fi
     fi
 done
 
@@ -55,11 +60,32 @@ fi
 if command -v uv >/dev/null 2>&1; then
     uv tool uninstall scream 2>/dev/null || true
 fi
-# 清理 uv 可能残留的 trampoline 脚本
-rm -f "$HOME/.local/bin/scream" 2>/dev/null || true
 
-# ── 彻底删除旧 scream-code 目录（Python .venv / node_modules 等） ──
+# ── 备份用户数据，升级后恢复 ──
+# scream-code 把项目源码和用户数据(config.toml/logs/sessions/memory 等)都放在
+# INSTALL_DIR 下。升级时不能直接 rm -rf 整个目录，否则会抹掉用户配置和记忆。
+# 做法: 把已知的用户数据文件/目录移到临时备份目录, clone 完成后再移回。
+USER_DATA_PATTERNS=(
+    "config.toml"
+    "tui.toml"
+    "logs"
+    "updates"
+    "user-history"
+    "sessions"
+    "memory"
+    "dream-lock.json"
+    "AGENTS.md"
+    ".scream-code"
+)
+BACKUP_DIR=""
 if [ -d "$INSTALL_DIR" ]; then
+    BACKUP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/scream-backup.XXXXXX")
+    info "备份用户数据到: $BACKUP_DIR"
+    for pattern in "${USER_DATA_PATTERNS[@]}"; do
+        if [ -e "$INSTALL_DIR/$pattern" ]; then
+            mv "$INSTALL_DIR/$pattern" "$BACKUP_DIR/" 2>/dev/null || true
+        fi
+    done
     info "删除旧安装目录: $INSTALL_DIR"
     rm -rf "$INSTALL_DIR"
 fi
@@ -84,7 +110,7 @@ find_node() {
             if [[ "$ver_output" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
                 major="${BASH_REMATCH[1]}"
                 minor="${BASH_REMATCH[2]}"
-                if [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 0 ]]; }; then
+                if [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 19 ]]; }; then
                     echo "$cmd"
                     return 0
                 fi
@@ -94,9 +120,9 @@ find_node() {
     return 1
 }
 
-info "检测 Node.js >= 22.0.0..."
+info "检测 Node.js >= 22.19.0..."
 NODE_CMD=$(find_node) || {
-    error "未找到 Node.js 22.0.0 或更高版本"
+    error "未找到 Node.js 22.19.0 或更高版本"
     echo ""
     echo "安装方式："
     echo "  macOS:    brew install node"
@@ -147,6 +173,15 @@ git clone --depth 1 "https://github.com/$REPO.git" "$INSTALL_DIR" || {
     exit 1
 }
 cd "$INSTALL_DIR"
+
+# ── 恢复用户数据（升级前备份的） ──
+if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+    info "恢复用户数据..."
+    for item in "$BACKUP_DIR"/*; do
+        [ -e "$item" ] && mv "$item" "$INSTALL_DIR/" 2>/dev/null || true
+    done
+    rmdir "$BACKUP_DIR" 2>/dev/null || true
+fi
 
 # ── 5. 安装依赖并构建 ──────────────────────────────────────────────────────
 info "安装依赖并构建..."

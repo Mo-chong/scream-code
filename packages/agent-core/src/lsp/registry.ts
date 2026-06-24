@@ -1,6 +1,8 @@
 import { access } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { dirname, join, sep } from 'pathe';
+import { join } from 'pathe';
+import { createRequire } from 'node:module';
 import type { Jian } from '@scream-code/jian';
 
 import { LspClient } from './client';
@@ -8,6 +10,8 @@ import { LspClient } from './client';
 export interface LspCommand {
   readonly command: string[];
   readonly languageId: string;
+  /** Optional factory for initializationOptions passed to the server. */
+  readonly initOptions?: (workspaceRoot: string) => Record<string, unknown> | undefined;
 }
 
 /** Resolve npm binary commands to `node <entry>` on Windows (bypass .cmd wrappers). */
@@ -35,39 +39,82 @@ async function _resolveCmd(desc: LspCommand): Promise<string[]> {
 }
 
 const LANGUAGE_SERVERS: Readonly<Record<string, LspCommand>> = {
-  '.ts': { command: ['typescript-language-server', '--stdio'], languageId: 'typescript' },
-  '.tsx': { command: ['typescript-language-server', '--stdio'], languageId: 'typescriptreact' },
-  '.js': { command: ['typescript-language-server', '--stdio'], languageId: 'javascript' },
-  '.jsx': { command: ['typescript-language-server', '--stdio'], languageId: 'javascriptreact' },
+  '.ts': { command: ['typescript-language-server', '--stdio'], languageId: 'typescript', initOptions: typescriptInitOptions },
+  '.tsx': { command: ['typescript-language-server', '--stdio'], languageId: 'typescriptreact', initOptions: typescriptInitOptions },
+  '.js': { command: ['typescript-language-server', '--stdio'], languageId: 'javascript', initOptions: typescriptInitOptions },
+  '.jsx': { command: ['typescript-language-server', '--stdio'], languageId: 'javascriptreact', initOptions: typescriptInitOptions },
   '.py': { command: ['pyright-langserver', '--stdio'], languageId: 'python' },
   '.rs': { command: ['rust-analyzer'], languageId: 'rust' },
   '.go': { command: ['gopls'], languageId: 'go' },
 };
 
+/**
+ * Resolve a `tsserver` lib directory for `typescript-language-server`.
+ */
+function resolveTsserverPath(workspaceRoot: string): string | undefined {
+  const workspaceCandidate = join(workspaceRoot, 'node_modules', 'typescript', 'lib');
+  if (existsSync(join(workspaceCandidate, 'tsserver.js'))) return workspaceCandidate;
+  try {
+    const bundled = createRequire(import.meta.url).resolve('typescript/lib/tsserver.js');
+    return bundled.slice(0, -'/tsserver.js'.length);
+  } catch {
+    return undefined;
+  }
+}
+
+function typescriptInitOptions(workspaceRoot: string): Record<string, unknown> | undefined {
+  const tsserverPath = resolveTsserverPath(workspaceRoot);
+  if (tsserverPath === undefined) return undefined;
+  return { tsserver: { path: tsserverPath } };
+}
+
 export class LspRegistry {
-  private readonly clients = new Map<string, LspClient>();
+  private readonly clients = new Map<string, Promise<LspClient>>();
 
   constructor(private readonly jian: Jian) {}
 
   /**
-   * Get or create an LSP client for the given file path.
-   * Automatically resolves the TS project root (first ancestor dir with tsconfig.json).
+   * Get or create an LSP client for the given file path and workspace root.
+   * Returns undefined if the file type is not supported.
+   *
+   * Caches the in-flight `Promise<LspClient>` so concurrent callers share
+   * the same startup and never receive a client whose `initialize` has not
+   * completed.
    */
-  async getClient(path: string, _workspaceRoot: string): Promise<LspClient | undefined> {
+  async getClient(path: string, workspaceRoot: string): Promise<LspClient | undefined> {
     const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
     const config = LANGUAGE_SERVERS[ext];
     if (config === undefined) return undefined;
 
     const resolvedCmd = await _resolveCmd(config);
-    const projectRoot = await resolveProjectRoot(path);
-    const key = `${projectRoot}\0${resolvedCmd.join(' ')}`;
-    let client = this.clients.get(key);
-    if (client === undefined) {
-      client = new LspClient(resolvedCmd, projectRoot, this.jian);
-      await client.start();
-      this.clients.set(key, client);
+    const key = `${workspaceRoot}\0${resolvedCmd.join(' ')}`;
+    let clientPromise = this.clients.get(key);
+    if (clientPromise === undefined) {
+      clientPromise = this.createAndStartClient(resolvedCmd, workspaceRoot, config);
+      this.clients.set(key, clientPromise);
     }
-    return client;
+    return clientPromise;
+  }
+
+  private async createAndStartClient(
+    command: string[],
+    workspaceRoot: string,
+    config: LspCommand,
+  ): Promise<LspClient> {
+    const client = new LspClient(
+      command,
+      workspaceRoot,
+      this.jian,
+      config.initOptions?.(workspaceRoot),
+    );
+    try {
+      await client.start();
+      return client;
+    } catch (error) {
+      const key = `${workspaceRoot}\0${command.join(' ')}`;
+      this.clients.delete(key);
+      throw error;
+    }
   }
 
   languageIdForPath(path: string): string | undefined {
@@ -75,32 +122,17 @@ export class LspRegistry {
     return LANGUAGE_SERVERS[ext]?.languageId;
   }
 
-  async stopAll(): Promise<void> {
-    await Promise.all([...this.clients.values()].map((client) => client.stop()));
-    this.clients.clear();
+  /** Returns the server command for the path's extension, or undefined when unsupported. */
+  commandForPath(path: string): string[] | undefined {
+    const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+    return LANGUAGE_SERVERS[ext]?.command;
   }
-}
 
-/**
- * Walk up from `filePath` to find the nearest ancestor directory containing a
- * `tsconfig.json` (or `jsconfig.json`). Falls back to `dirname(filePath)`.
- * This prevents TypeScript LSP from scanning huge unscoped directories.
- */
-async function resolveProjectRoot(filePath: string): Promise<string> {
-  let dir = dirname(filePath);
-  const root = /^[A-Za-z]:[\\/]$/.test(dir) ? dir : sep;
-  while (dir.length >= root.length) {
-    try {
-      await access(join(dir, 'tsconfig.json'));
-      return dir;
-    } catch {
-      try {
-        await access(join(dir, 'jsconfig.json'));
-        return dir;
-      } catch {
-        dir = dirname(dir);
-      }
-    }
+  async stopAll(): Promise<void> {
+    const promises = [...this.clients.values()];
+    this.clients.clear();
+    await Promise.allSettled(
+      promises.map((promise) => promise.then((client) => client.stop())),
+    );
   }
-  return dirname(filePath);
 }

@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/agent-core",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "description": "The unified agent engine for Scream",
   "license": "MIT",
@@ -63,6 +63,7 @@
     "smol-toml": "^1.6.1",
     "tar": "^7.5.13",
     "yauzl": "^3.3.0",
+    "yazl": "^3.3.1",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -74,7 +75,6 @@
     "@types/retry": "0.12.0",
     "@types/tar": "^7.0.87",
     "@types/yauzl": "^2.10.3",
-    "@types/yazl": "^2.4.6",
-    "yazl": "^3.3.1"
+    "@types/yazl": "^2.4.6"
   }
 }

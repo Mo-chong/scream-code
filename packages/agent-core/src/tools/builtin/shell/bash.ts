@@ -157,87 +157,82 @@ function rejectDangerousCommand(
   };
 }
 // Anti-patterns: shell commands that should be replaced by built-in tools.
-// These are not dangerous, but they bypass anchors, path policies, and
-// verification tracking. We reject them with a helpful hint.
-interface BashAntiPattern {
-  readonly name: string;
+// Bash interceptor rules — recoverable redirection to built-in tools.
+//
+// Aligned with omp's `bash-interceptor.ts` + `DEFAULT_BASH_INTERCEPTOR_RULES`:
+//   - Only the leading token is matched (`^\s*(cmd)\s+`), so `ls; cat foo` or
+//     `ls | grep foo` pass through. omp deliberately keeps the match narrow
+//     and lets prompt guidance handle compound commands; we do the same.
+//   - A rule only fires when its suggested tool is in `availableTools`, so a
+//     disabled tool never produces a "use Read instead" dead end.
+//   - The returned message keeps the original command, so the caller can
+//     recover (retry with the suggested tool) instead of being stuck.
+interface BashInterceptorRule {
   readonly pattern: RegExp;
-  readonly hint: string;
+  readonly tool: string;
+  readonly message: string;
 }
 
-const ANTI_PATTERNS: readonly BashAntiPattern[] = [
-  // We flag file-reading and code-search commands when they are at the start
-  // of a command or after `;` / `&&` / `||` / `$()`. We deliberately do NOT
-  // flag them after `|`, because in that position they are filtering the
-  // output of another shell command (e.g. `ls 2>/dev/null | grep foo`) rather
-  // than reading or searching files directly.
+const BASH_INTERCEPTOR_RULES: readonly BashInterceptorRule[] = [
   {
-    name: 'read file via shell',
-    pattern: /(^|[;&]|\$\()\s*(cat|head|tail|less|more)\s+\S/i,
-    hint: 'Use the Read tool to read files instead of shell file-reading commands.',
+    pattern: /^\s*(cat|head|tail|less|more)\s+/i,
+    tool: 'Read',
+    message: 'Use the Read tool instead of cat/head/tail. It provides better context and handles binary files.',
   },
   {
-    name: 'search code via shell',
-    pattern: /(^|[;&]|\$\()\s*(grep|rg|ag|ack)\s+\S/i,
-    hint: 'Use the Grep or LSP tool to search code instead of shell search commands.',
+    pattern: /^\s*(grep|rg|ripgrep|ag|ack)\s+/i,
+    tool: 'Grep',
+    message: 'Use the Grep tool instead of grep/rg. It respects .gitignore and provides structured output.',
   },
   {
-    name: 'find files via shell',
-    pattern: /(^|[;&]|\$\()\s*(find|fd)\s+\S/i,
-    hint: 'Use the Glob tool to find files instead of shell file-finding commands.',
+    pattern: /^\s*sed\s+(-i|--in-place)/i,
+    tool: 'Edit',
+    message: 'Use the Edit tool instead of sed -i. It provides diff preview and fuzzy matching.',
   },
   {
-    name: 'edit files via sed/perl/awk',
-    pattern: /(^|[;&]|\$\()\s*(sed\s+(-i|--in-place)|perl\s+.*-i|awk\s+.*>>?)/i,
-    hint: 'Use the Edit tool to modify files instead of sed/perl/awk.',
+    pattern: /^\s*perl\s+.*-[pn]?i/i,
+    tool: 'Edit',
+    message: 'Use the Edit tool instead of perl -i. It provides diff preview and fuzzy matching.',
   },
   {
-    name: 'create file via echo redirection',
-    pattern: /(^|[;&])\s*echo\s+['"][^'"]*['"]\s*>>?\s*\S/i,
-    hint: 'Use the Write tool to create files instead of echo redirection.',
+    pattern: /^\s*awk\s+.*-i\s+inplace/i,
+    tool: 'Edit',
+    message: 'Use the Edit tool instead of awk -i inplace. It provides diff preview and fuzzy matching.',
+  },
+  {
+    // `>` must sit outside quoted regions (so `echo "a -> b"` passes) and be
+    // followed by a plausible filename — including `$VAR` targets; `>|`
+    // (clobber) counts as a redirect; `>&2`/`2>&1` fd duplication is not matched.
+    pattern: /^\s*(echo|printf|cat\s*<<)\s+(?:[^"'>]|"[^"]*"|'[^']*')*(?<!\|)>{1,2}\|?\s*[$\w./~"'-]/i,
+    tool: 'Write',
+    message: 'Use the Write tool instead of echo/cat redirection. It handles encoding and provides confirmation.',
   },
 ];
 
-function detectAntiPattern(command: string): ExecutableToolResult | null {
-  for (const antiPattern of ANTI_PATTERNS) {
-    if (antiPattern.pattern.test(command)) {
+function checkBashInterception(command: string, availableTools: Set<string>): ExecutableToolResult | null {
+  for (const rule of BASH_INTERCEPTOR_RULES) {
+    if (!availableTools.has(rule.tool)) continue;
+    if (rule.pattern.test(command)) {
       return {
         isError: true,
-        output: `Tool-priority violation: ${antiPattern.hint} (detected pattern: ${antiPattern.name})`,
+        output: `Blocked: ${rule.message}\n\nOriginal command: ${command}`,
       };
     }
   }
   return null;
 }
 
-function looksLikeCommandNotFound(command: string, output: string): boolean {
+function looksLikeCommandNotFound(_command: string, output: string): boolean {
   const lowerOutput = output.toLowerCase();
-  const lowerCommand = command.toLowerCase();
   return (
     lowerOutput.includes('command not found') ||
     lowerOutput.includes('not recognized as an internal or external command') ||
     lowerOutput.includes('was not found') ||
-    lowerOutput.includes('no such file or directory') ||
-    lowerOutput.includes('cannot find') ||
-    lowerCommand.startsWith('tsc ') ||
-    lowerCommand.includes(' tsc ')
+    lowerOutput.includes('cannot find')
   );
 }
 
-function commandNotFoundHint(command: string): string {
-  const lower = command.toLowerCase();
-  if (lower.includes('tsc') || lower.includes('typescript')) {
-    return 'Hint: TypeScript compiler not found. Use `npx -p typescript tsc --noEmit` (or a project script such as `pnpm typecheck`) instead of calling `tsc` directly.';
-  }
-  if (lower.includes('pnpm ')) {
-    return 'Hint: Ensure pnpm is installed and you are in the project root. If the binary is missing, try `npm install` or use `corepack pnpm ...`.';
-  }
-  if (lower.includes('cargo ')) {
-    return 'Hint: Ensure Rust/Cargo is installed and you are in a crate workspace.';
-  }
-  if (lower.includes('pytest ') || lower.includes('python ')) {
-    return 'Hint: Ensure Python and the required packages are installed in the active environment.';
-  }
+function commandNotFoundHint(): string {
   return 'Hint: The command binary was not found. Check that the required toolchain is installed and use the project-specific script when available.';
 }
 
@@ -357,16 +352,20 @@ export class BashTool implements BuiltinTool<BashInput> {
 
   private readonly allowBackground: boolean;
 
+  private readonly availableTools: Set<string>;
+
   constructor(
     private readonly jian: Jian,
     private readonly cwd: string,
     private readonly backgroundManager?: BackgroundProcessManager,
     options?: {
       allowBackground?: boolean | undefined;
+      availableTools?: Set<string> | undefined;
     },
   ) {
     this.isWindowsBash = this.jian.osEnv.osKind === 'Windows';
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
+    this.availableTools = options?.availableTools ?? new Set();
     const rendered = renderBashDescription(this.jian.osEnv.shellName);
     this.description = this.allowBackground ? rendered : withoutBackgroundDescription(rendered);
   }
@@ -430,8 +429,8 @@ export class BashTool implements BuiltinTool<BashInput> {
     const validationError = validateCommand(args.command, this.isWindowsBash);
     if (validationError !== null) return validationError;
 
-    const antiPattern = detectAntiPattern(args.command);
-    if (antiPattern !== null) return antiPattern;
+    const interception = checkBashInterception(args.command, this.availableTools);
+    if (interception !== null) return interception;
 
     if (args.run_in_background) {
       if (!this.allowBackground) {
@@ -550,7 +549,7 @@ export class BashTool implements BuiltinTool<BashInput> {
         return builder.ok('Command executed successfully.');
       }
       const outputText = builder.toString();
-      const hint = looksLikeCommandNotFound(command, outputText) ? `\\n${commandNotFoundHint(command)}` : '';
+      const hint = looksLikeCommandNotFound(command, outputText) ? `\\n${commandNotFoundHint()}` : '';
       return builder.error(`Command failed with exit code: ${String(exitCode)}.${hint}`, {
         brief: `Failed with exit code: ${String(exitCode)}`,
       });

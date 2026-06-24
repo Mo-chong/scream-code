@@ -112,7 +112,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         jian: this.jian,
         workspace: this.workspace,
         operation: 'search',
-        policy: { guardMode: 'strict', checkSensitive: false },
+        policy: { guardMode: 'absolute-outside-allowed', checkSensitive: false },
       });
     }
     const searchRoots = [path ?? this.workspace.workspaceDir];

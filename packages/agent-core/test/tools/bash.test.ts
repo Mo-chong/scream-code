@@ -898,26 +898,30 @@ describe('BashTool prompt / runtime consistency', () => {
 });
 
 
-describe('BashTool anti-pattern rejection', () => {
+describe('BashTool recoverable interception', () => {
+  const allTools = new Set(['Read', 'Grep', 'Edit', 'Write']);
+
   it.each([
-    { command: 'cat src/main.ts', name: 'read file via shell' },
-    { command: 'head -n 20 README.md', name: 'read file via shell' },
-    { command: 'tail -f logs/app.log', name: 'read file via shell' },
-    { command: 'grep -r foo src/', name: 'search code via shell' },
-    { command: 'rg className packages/', name: 'search code via shell' },
-    { command: 'find . -name "*.test.ts"', name: 'find files via shell' },
-    { command: "sed -i 's/old/new/g' file.txt", name: 'edit files via sed/perl/awk' },
-    { command: "echo 'hello' > file.txt", name: 'create file via echo redirection' },
-    { command: "echo 'hello' >> file.txt", name: 'create file via echo redirection' },
-    { command: 'git status && cat package.json', name: 'read file via shell' },
+    { command: 'cat src/main.ts', tool: 'Read' },
+    { command: 'head -n 20 README.md', tool: 'Read' },
+    { command: 'tail -f logs/app.log', tool: 'Read' },
+    { command: 'grep -r foo src/', tool: 'Grep' },
+    { command: 'rg className packages/', tool: 'Grep' },
+    { command: "sed -i 's/old/new/g' file.txt", tool: 'Edit' },
+    { command: "echo 'hello' > file.txt", tool: 'Write' },
+    { command: "echo 'hello' >> file.txt", tool: 'Write' },
   ])(
-    'rejects "$command" because of $name',
-    async ({ command, name }) => {
-      const tool = new BashTool(createFakeJian({ osEnv: posixEnv }), '/workspace');
-      const result = await executeTool(tool, context({ command }));
+    'recoverably blocks "$command" suggesting $tool',
+    async ({ command, tool }) => {
+      const tool1 = new BashTool(createFakeJian({ osEnv: posixEnv }), '/workspace', undefined, {
+        allowBackground: false,
+        availableTools: allTools,
+      });
+      const result = await executeTool(tool1, context({ command }));
       expect(result).toMatchObject({ isError: true });
-      expect(result.output).toContain('Tool-priority violation');
-      expect(result.output).toContain(name);
+      expect(result.output).toContain('Blocked:');
+      expect(result.output).toContain(`Use the ${tool} tool`);
+      expect(result.output).toContain(`Original command: ${command}`);
     },
   );
 
@@ -928,6 +932,11 @@ describe('BashTool anti-pattern rejection', () => {
     'docker build -t app .',
     "git log --oneline | grep 'fix'",
     'echo "cat src/main.ts"',
+    'find . -name "*.test.ts"',
+    'fd "\\.ts$" src/',
+    'ls; cat foo',
+    'git status && cat package.json',
+    'ls | grep foo',
   ])(
     'allows acceptable command: %s', async (command) => {
       const execWithEnv = vi.fn().mockResolvedValue(
@@ -936,10 +945,168 @@ describe('BashTool anti-pattern rejection', () => {
       const tool = new BashTool(
         createFakeJian({ execWithEnv, osEnv: posixEnv }),
         '/workspace',
+        undefined,
+        { allowBackground: false, availableTools: allTools },
       );
       const result = await executeTool(tool, context({ command }));
       expect(result).toMatchObject({ isError: false });
       expect(execWithEnv).toHaveBeenCalled();
     },
   );
+
+  it('does not block cat when Read tool is not available', async () => {
+    const execWithEnv = vi.fn().mockResolvedValue(
+      processWithOutput({ stdout: 'ok', exitCode: 0 }),
+    );
+    const tool = new BashTool(
+      createFakeJian({ execWithEnv, osEnv: posixEnv }),
+      '/workspace',
+      undefined,
+      { allowBackground: false, availableTools: new Set(['Grep', 'Edit', 'Write']) },
+    );
+    const result = await executeTool(tool, context({ command: 'cat src/main.ts' }));
+    expect(result).toMatchObject({ isError: false });
+    expect(execWithEnv).toHaveBeenCalled();
+  });
+
+  it('does not block grep when Grep tool is not available', async () => {
+    const execWithEnv = vi.fn().mockResolvedValue(
+      processWithOutput({ stdout: 'ok', exitCode: 0 }),
+    );
+    const tool = new BashTool(
+      createFakeJian({ execWithEnv, osEnv: posixEnv }),
+      '/workspace',
+      undefined,
+      { allowBackground: false, availableTools: new Set(['Read', 'Edit', 'Write']) },
+    );
+    const result = await executeTool(tool, context({ command: 'grep -r foo src/' }));
+    expect(result).toMatchObject({ isError: false });
+    expect(execWithEnv).toHaveBeenCalled();
+  });
+});
+
+describe('BashTool command-not-found hint', () => {
+  it('does not add binary-not-found hint for path-does-not-exist errors', async () => {
+    const tool = new BashTool(
+      createFakeJian({
+        execWithEnv: vi.fn().mockResolvedValue(
+          processWithOutput({
+            stderr: 'ls: /nonexistent/path: No such file or directory\n',
+            exitCode: 1,
+          }),
+        ),
+        osEnv: posixEnv,
+      }),
+      '/workspace',
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ command: 'ls /nonexistent/path', timeout: 60 }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('No such file or directory');
+    expect(result.output).not.toContain('command binary was not found');
+  });
+
+  it('still adds binary-not-found hint for real command-not-found errors', async () => {
+    const tool = new BashTool(
+      createFakeJian({
+        execWithEnv: vi.fn().mockResolvedValue(
+          processWithOutput({
+            stderr: 'nonexistentcmd: command not found\n',
+            exitCode: 127,
+          }),
+        ),
+        osEnv: posixEnv,
+      }),
+      '/workspace',
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ command: 'nonexistentcmd', timeout: 60 }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('command not found');
+    expect(result.output).toContain('command binary was not found');
+  });
+
+  it('does not add toolchain-specific hint for tsc command-not-found', async () => {
+    const tool = new BashTool(
+      createFakeJian({
+        execWithEnv: vi.fn().mockResolvedValue(
+          processWithOutput({
+            stderr: 'tsc: command not found\n',
+            exitCode: 127,
+          }),
+        ),
+        osEnv: posixEnv,
+      }),
+      '/workspace',
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ command: 'tsc --noEmit', timeout: 60 }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('command not found');
+    expect(result.output).toContain('command binary was not found');
+    expect(result.output).not.toContain('TypeScript compiler not found');
+    expect(result.output).not.toContain('npx -p typescript');
+  });
+
+  it('does not add hint when tsc exits non-zero without command-not-found output', async () => {
+    const tool = new BashTool(
+      createFakeJian({
+        execWithEnv: vi.fn().mockResolvedValue(
+          processWithOutput({
+            stderr: 'error TS5053: Option not supported\n',
+            exitCode: 1,
+          }),
+        ),
+        osEnv: posixEnv,
+      }),
+      '/workspace',
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ command: 'tsc --noEmit', timeout: 60 }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('Command failed with exit code: 1');
+    expect(result.output).not.toContain('command binary was not found');
+    expect(result.output).not.toContain('TypeScript compiler not found');
+  });
+
+  it('does not add toolchain-specific hint for pnpm command-not-found', async () => {
+    const tool = new BashTool(
+      createFakeJian({
+        execWithEnv: vi.fn().mockResolvedValue(
+          processWithOutput({
+            stderr: 'pnpm: command not found\n',
+            exitCode: 127,
+          }),
+        ),
+        osEnv: posixEnv,
+      }),
+      '/workspace',
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ command: 'pnpm install', timeout: 60 }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('command not found');
+    expect(result.output).toContain('command binary was not found');
+    expect(result.output).not.toContain('Ensure pnpm is installed');
+  });
 });
