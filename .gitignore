@@ -14,3 +14,6 @@ coverage/
 plugins/cdn/
 superpowers
 dream-lock.json
+.env
+.env.local
+.env.*.local

@@ -14,6 +14,7 @@ export type ResolvedSource =
 export type InstallSource = ResolvedSource;
 
 const SHA_RE = /^[0-9a-f]{7,40}$/;
+const GITHUB_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 export function resolveInstallSource(source: string): ResolvedSource {
   const trimmed = source.trim();
@@ -44,6 +45,7 @@ function parseGithubUrl(raw: string): ResolvedSource | undefined {
   const owner = segments[0];
   const repoRaw = segments[1];
   if (owner === undefined || repoRaw === undefined) return undefined;
+  if (!GITHUB_NAME_RE.test(owner) || !GITHUB_NAME_RE.test(repoRaw)) return undefined;
 
   const repo = repoRaw.endsWith('.git') ? repoRaw.slice(0, -4) : repoRaw;
   const rest = segments.slice(2);

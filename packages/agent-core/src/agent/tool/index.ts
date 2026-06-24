@@ -609,6 +609,7 @@ export class ToolManager {
         new b.GlobTool(jian, workspace),
         new b.BashTool(jian, cwd, background, {
           allowBackground,
+          availableTools: this.enabledTools,
         }),
         (modelCapabilities.image_in || modelCapabilities.video_in) &&
           new b.ReadMediaFileTool(jian, workspace, modelCapabilities, videoUploader),

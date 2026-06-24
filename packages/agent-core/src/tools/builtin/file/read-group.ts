@@ -12,6 +12,7 @@ import type {
 import { renderPrompt } from '../../../utils/render-prompt';
 import { literalRulePattern } from '../../support/rule-match';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { partitionExistingPaths } from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { ReadTool } from './read';
 import readGroupDescriptionTemplate from './read-group.md';
@@ -51,7 +52,7 @@ export type ReadGroupInput = z.Infer<typeof ReadGroupInputSchema>;
 
 const READ_GROUP_DESCRIPTION = renderPrompt(readGroupDescriptionTemplate, {});
 
-type ReadGroupItem =
+type ResolvedItem =
   | { path: string; exec: RunnableToolExecution }
   | { path: string; error: string };
 
@@ -68,26 +69,38 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
   resolveExecution(args: ReadGroupInput): ToolExecution {
     const paths = args.paths.slice(0, MAX_READ_GROUP_FILES);
     const readTool = new ReadTool(this.jian, this.workspace);
-    const executions: ReadGroupItem[] = [];
+
+    // path-access rejection (sensitive / relative-outside) is detected here
+    // synchronously — it throws PathSecurityError which we turn into an
+    // error item. ENOENT is NOT detected here; it surfaces at execute time
+    // via jian.stat, so multi-path partitioning runs in execution().
+    const items: ResolvedItem[] = [];
     for (const path of paths) {
-      const exec = readTool.resolveExecution({
-        path,
-        line_offset: args.line_offset,
-        n_lines: args.n_lines,
-      });
-      if ('isError' in exec && exec.isError === true) {
-        executions.push({ path, error: toolOutputText(exec.output) });
-      } else {
-        executions.push({ path, exec });
+      try {
+        const exec = readTool.resolveExecution({
+          path,
+          line_offset: args.line_offset,
+          n_lines: args.n_lines,
+        });
+        if ('isError' in exec && exec.isError === true) {
+          items.push({ path, error: toolOutputText(exec.output) });
+        } else {
+          items.push({ path, exec });
+        }
+      } catch (error) {
+        items.push({
+          path,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
-    const accesses = executions
+    const accesses = items
       .filter((e): e is { path: string; exec: RunnableToolExecution } => 'exec' in e)
       .flatMap((e) => e.exec.accesses ?? ToolAccesses.none());
     const sortedPaths = [...paths].toSorted();
     const approvalRule = literalRulePattern(this.name, sortedPaths.join('\n'));
-    const deniedCount = executions.filter((e) => 'error' in e).length;
+    const deniedCount = items.filter((e) => 'error' in e).length;
 
     return {
       accesses,
@@ -98,20 +111,61 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
       display: { kind: 'file_io', operation: 'read', path: paths.join(', ') },
       approvalRule,
       matchesRule: (ruleArgs) => ruleArgs === approvalRule,
-      execute: (ctx: ExecutableToolContext) => this.execution(executions, ctx),
+      execute: (ctx: ExecutableToolContext) => this.execution(args, items, ctx),
     };
   }
 
   private async execution(
-    executions: ReadGroupItem[],
+    args: ReadGroupInput,
+    items: ResolvedItem[],
     ctx: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
+    const paths = items.map((i) => i.path);
+
+    // Multi-path: batch-stat probe and skip missing entries (aligned with
+    // omp partitionExistingPaths). Single-path keeps strict ENOENT semantics
+    // so the Read tool's own suffix-match recovery can fire.
+    let missingPaths: string[] = [];
+    if (paths.length > 1) {
+      const probePaths = items
+        .filter((i) => 'exec' in i)
+        .map((i) => i.path);
+      if (probePaths.length > 0) {
+        try {
+          const partition = await partitionExistingPaths(probePaths, this.jian, this.workspace);
+          missingPaths = partition.missing;
+          if (partition.valid.length === 0 && items.every((i) => 'exec' in i)) {
+            // All probed paths missing — report once instead of N identical errors.
+            return {
+              isError: true,
+              output: `Paths not found: ${missingPaths.join(', ')}`,
+            };
+          }
+        } catch {
+          // Partition hit a non-ENOENT error (EACCES/EIO on stat). Fall
+          // back to letting each Read surface its own error individually
+          // so one bad path doesn't suppress the readable ones.
+          missingPaths = [];
+        }
+      }
+    }
+
+    const missingSet = new Set(missingPaths);
     const results = await Promise.all(
-      executions.map(async (item) => {
+      items.map(async (item) => {
         if ('error' in item) {
           return {
             path: item.path,
             result: { isError: true, output: item.error } satisfies ExecutableToolResult,
+          };
+        }
+        if (missingSet.has(item.path)) {
+          return {
+            path: item.path,
+            result: {
+              isError: true,
+              output: `"${item.path}" does not exist.`,
+            } satisfies ExecutableToolResult,
           };
         }
         try {
@@ -129,6 +183,10 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
       }),
     );
 
+    // Preserve original input order in the output.
+    const orderIndex = new Map(paths.map((p, i) => [p, i]));
+    results.sort((a, b) => (orderIndex.get(a.path) ?? 0) - (orderIndex.get(b.path) ?? 0));
+
     const parts: string[] = [];
     let hasError = false;
     for (const { path, result } of results) {
@@ -140,6 +198,10 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
       } else {
         parts.push(toolOutputText(result.output));
       }
+    }
+
+    if (missingPaths.length > 0) {
+      parts.push('', `Skipped missing paths: ${missingPaths.join(', ')}`);
     }
 
     return {

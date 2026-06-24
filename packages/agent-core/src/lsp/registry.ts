@@ -60,13 +60,17 @@ function typescriptInitOptions(workspaceRoot: string): Record<string, unknown> |
 }
 
 export class LspRegistry {
-  private readonly clients = new Map<string, LspClient>();
+  private readonly clients = new Map<string, Promise<LspClient>>();
 
   constructor(private readonly jian: Jian) {}
 
   /**
    * Get or create an LSP client for the given file path and workspace root.
    * Returns undefined if the file type is not supported.
+   *
+   * Caches the in-flight `Promise<LspClient>` rather than the client instance
+   * so concurrent callers share the same startup and never receive a client
+   * whose `initialize` has not completed.
    */
   async getClient(path: string, workspaceRoot: string): Promise<LspClient | undefined> {
     const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
@@ -74,26 +78,35 @@ export class LspRegistry {
     if (config === undefined) return undefined;
 
     const key = `${workspaceRoot}\0${config.command.join(' ')}`;
-    let client = this.clients.get(key);
-    if (client === undefined) {
-      client = new LspClient(
-        config.command,
-        workspaceRoot,
-        this.jian,
-        config.initOptions?.(workspaceRoot),
-      );
-      this.clients.set(key, client);
-      try {
-        await client.start();
-      } catch (error) {
-        // Uncache the failed client so subsequent calls don't reuse a
-        // half-started client (process undefined, started flag stuck) and
-        // block for the diagnostics poll timeout on every Edit/Write.
-        this.clients.delete(key);
-        throw error;
-      }
+    let clientPromise = this.clients.get(key);
+    if (clientPromise === undefined) {
+      clientPromise = this.createAndStartClient(config, workspaceRoot, key);
+      this.clients.set(key, clientPromise);
     }
-    return client;
+    return clientPromise;
+  }
+
+  private async createAndStartClient(
+    config: LspCommand,
+    workspaceRoot: string,
+    key: string,
+  ): Promise<LspClient> {
+    const client = new LspClient(
+      config.command,
+      workspaceRoot,
+      this.jian,
+      config.initOptions?.(workspaceRoot),
+    );
+    try {
+      await client.start();
+      return client;
+    } catch (error) {
+      // Uncache the failed promise so subsequent calls don't reuse a
+      // half-started client (process undefined, started flag stuck) and
+      // block for the diagnostics poll timeout on every Edit/Write.
+      this.clients.delete(key);
+      throw error;
+    }
   }
 
   languageIdForPath(path: string): string | undefined {
@@ -108,7 +121,10 @@ export class LspRegistry {
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all([...this.clients.values()].map((client) => client.stop()));
+    const promises = [...this.clients.values()];
     this.clients.clear();
+    await Promise.allSettled(
+      promises.map((promise) => promise.then((client) => client.stop())),
+    );
   }
 }

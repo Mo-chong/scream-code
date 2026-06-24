@@ -273,6 +273,8 @@ describe('ReadTool', () => {
         stat: vi.fn<Jian['stat']>().mockRejectedValue(statError),
         readBytes,
         readLines,
+        glob: async function* () {},
+        iterdir: async function* () {},
       }),
       {
         workspaceDir: '/workspace',
@@ -282,10 +284,8 @@ describe('ReadTool', () => {
 
     const result = await executeTool(tool, context({ path: '/workspace/missing.txt' }));
 
-    expect(result).toEqual({
-      isError: true,
-      output: '"/workspace/missing.txt" does not exist.',
-    });
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('"/workspace/missing.txt" does not exist.');
     expect(readBytes).not.toHaveBeenCalled();
     expect(readLines).not.toHaveBeenCalled();
   });
@@ -836,5 +836,94 @@ describe('ReadTool description and schema parity', () => {
 
     expect(tool.description).toMatch(/UTF-?8/i);
     expect(tool.description).toMatch(/binary/i);
+  });
+});
+
+describe('ReadTool suffix-match recovery', () => {
+  const enoentError = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
+  function fakeJianWithGlob(globPaths: string[], enoentPaths: string[] = []) {
+    const content = 'recovered content';
+    const bytes = Buffer.from(content, 'utf8');
+    const enoentSet = new Set(enoentPaths);
+    return createFakeJian({
+      stat: vi.fn<Jian['stat']>().mockImplementation(async (p) => {
+        if (enoentSet.has(p)) throw enoentError;
+        return REGULAR_FILE_STAT;
+      }),
+      readBytes: vi.fn<Jian['readBytes']>().mockImplementation(async (_p, n) =>
+        n === undefined ? bytes : bytes.subarray(0, n),
+      ),
+      readLines: vi.fn<Jian['readLines']>().mockImplementation(readLinesFromContent(content)),
+      glob: async function* glob(): AsyncGenerator<string> {
+        for (const p of globPaths) yield p;
+      },
+      iterdir: async function* iterdir(): AsyncGenerator<string> {},
+    });
+  }
+
+  it('resolves missing file via unique suffix match', async () => {
+    const tool = new ReadTool(
+      fakeJianWithGlob(['/workspace/src/utils/foo.ts'], ['/workspace/src/tils/foo.ts']),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/workspace/src/tils/foo.ts' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('recovered content');
+    expect(result.output).toContain(
+      "[Path '/workspace/src/tils/foo.ts' not found; resolved to '/workspace/src/utils/foo.ts' via suffix match]",
+    );
+  });
+
+  it('does not resolve when multiple suffix matches exist', async () => {
+    const tool = new ReadTool(
+      fakeJianWithGlob(
+        ['/workspace/a/foo.ts', '/workspace/b/foo.ts'],
+        ['/workspace/foo.ts'],
+      ),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ path: '/workspace/foo.ts' }));
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('does not exist');
+    expect(result.output).not.toContain('resolved to');
+  });
+
+  it('does not resolve when no suffix match exists', async () => {
+    const tool = new ReadTool(
+      fakeJianWithGlob([], ['/workspace/missing.ts']),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ path: '/workspace/missing.ts' }));
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('does not exist');
+    expect(result.output).not.toContain('resolved to');
+  });
+
+  it('falls back when suffix-matched path also fails stat', async () => {
+    const tool = new ReadTool(
+      createFakeJian({
+        stat: vi.fn<Jian['stat']>().mockRejectedValue(enoentError),
+        glob: async function* glob(): AsyncGenerator<string> {
+          yield '/workspace/src/utils/foo.ts';
+        },
+        iterdir: async function* iterdir(): AsyncGenerator<string> {},
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ path: '/workspace/src/tils/foo.ts' }));
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('does not exist');
   });
 });
