@@ -138,11 +138,17 @@ export class TurnFlow {
   /** Only code-file edits (.ts/.js/.py/.rs/.go) — docs (.md/.json/.yaml) excluded. */
   private totalCodeFileEditsThisTurn = 0;
 
-  // ── Phase 16: Code exploration tool priority ─────────────────
+  // ── Phase 16-17: Code exploration tool priority — 4D smart enforcement ─
   /** Has any mcp__codegraph__codegraph_* been called this turn (resets per turn). */
   private hasCalledCodegraphThisTurn = false;
-  /** Consecutive Read/Grep/LSP steps without codegraph this turn — ≥3 triggers reminder. */
-  private knowledgeStepsWithoutCodegraph = 0;
+  /**
+   * Exploratory Read/Grep steps this turn without codegraph (excludes verification reads).
+   * Verification reads: Edit/Write-刚改过的文件；Grep(具体路径)。
+   * ≥3 → injection; ≥5 → hard block via syntheticResult.
+   */
+  private exploratoryStepsWithoutCodegraph = 0;
+  /** Paths edited/written this turn — Read of these = verification (not exploratory). */
+  private recentlyModifiedPathsThisTurn: Set<string> = new Set();
 
   // ── Guard 规则引擎 (Phase 11) ────────────────────────────────
   private lastBashExitCode: number | null = null;
@@ -512,7 +518,8 @@ export class TurnFlow {
     this.totalStepsWithEditsThisTurn = 0;
     this.totalCodeFileEditsThisTurn = 0;
     this.hasCalledCodegraphThisTurn = false;
-    this.knowledgeStepsWithoutCodegraph = 0;
+    this.exploratoryStepsWithoutCodegraph = 0;
+    this.recentlyModifiedPathsThisTurn = new Set();
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -981,16 +988,32 @@ export class TurnFlow {
                   );
                 }
               }
-              // 🆕 Phase 16: Read/Grep ≥3 次仍未用过 codegraph → 提醒走高效路径
-              if (
-                (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') &&
-                !this.hasCalledCodegraphThisTurn &&
-                this.knowledgeStepsWithoutCodegraph >= 3
-              ) {
-                this.inject(
-                  '你已经连续多次用 Read/Grep 探索代码。下次可以考虑先用 mcp__codegraph__codegraph_explore — 一次调用返回相关符号源码+调用路径，比多轮 Read/Grep 更高效。',
-                  { kind: 'injection', variant: 'step_code_explore' },
-                );
+              // 🆕 Phase 17: 4D 智能拦截 — 探索 vs 验证 / 可用性 / 渐进 escal / 疲劳重置
+              if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') {
+                const codegraphAvailable = this.agent.tools.data().some(t => t.name.startsWith('mcp__codegraph__codegraph'));
+                if (codegraphAvailable && !this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
+                  const n = this.exploratoryStepsWithoutCodegraph;
+                  if (n >= 5) {
+                    return {
+                      syntheticResult: {
+                        isError: true,
+                        output: `已连续 ${n} 次使用 Read/Grep 探索代码而未调用 codegraph。请先用 mcp__codegraph__codegraph_explore 获取相关符号源码+调用路径。确认 Read/Grep 是验证行为而非探索后，可先调一次 codegraph 再继续。`,
+                        stopTurn: false,
+                      },
+                    };
+                  }
+                  if (n >= 4) {
+                    this.inject(
+                      `已连续 ${n} 次 Read/Grep 探索代码未调 codegraph。下一步再不调用 codegraph 将被阻断。mcp__codegraph__codegraph_explore 一次返回完整上下文。`,
+                      { kind: 'injection', variant: 'step_code_explore' },
+                    );
+                  } else if (n >= 3) {
+                    this.inject(
+                      '已连续多次用 Read/Grep 探索代码。建议先用 mcp__codegraph__codegraph_explore — 一次调用返回相关符号源码+调用路径，比多轮 Read/Grep 更高效。',
+                      { kind: 'injection', variant: 'step_code_explore' },
+                    );
+                  }
+                }
               }
 
               return undefined;
@@ -1145,14 +1168,17 @@ export class TurnFlow {
                 if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
                   this.hasCurrentCodeToolsThisStep = true;
                   this.hasKnowledgeToolsThisStep = true;
-                  if (!this.hasCalledCodegraphThisTurn) this.knowledgeStepsWithoutCodegraph++;
+                  // D1 (Phase 17): Only count exploratory reads — reads of recently-modified files are verification
+                  if (!this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
+                    this.exploratoryStepsWithoutCodegraph++;
+                  }
                 }
                 if (ctx.toolCall.name === 'MemoryLookup') {
                   this.lastStepCalledMemoryLookup = true;
                 }
                 if (ctx.toolCall.name.startsWith('mcp__codegraph__codegraph')) {
                   this.hasCalledCodegraphThisTurn = true;
-                  this.knowledgeStepsWithoutCodegraph = 0;
+                  this.exploratoryStepsWithoutCodegraph = 0;
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
@@ -1163,9 +1189,13 @@ export class TurnFlow {
                     this.totalCodeFileEditsThisTurn++;
                   }
                   this.hasWriteToolsThisStep = true;
+                  // D1 (Phase 17): Track modified paths so subsequent reads count as verification
+                  if (editPath) this.recentlyModifiedPathsThisTurn.add(editPath);
                 }
                 if (ctx.toolCall.name === 'Write') {
                   this.hasWriteToolsThisStep = true;
+                  const writePath = (ctx.args as { path?: string }).path ?? '';
+                  if (writePath) this.recentlyModifiedPathsThisTurn.add(writePath);
                 }
               }
               // Track LSP.references specifically for C1 upgrade detection
@@ -1956,6 +1986,41 @@ export class TurnFlow {
       /\bdu\s+/,
     ];
     return exploratoryPatterns.some((pattern) => pattern.test(normalized));
+  }
+
+  // ── Phase 17: 维度1 — 探索 vs 验证区分 ────────────────────────────
+  /**
+   * 区分探索型 Read/Grep 与验证型 Read/Grep。
+   *
+   * Read 刚改过的文件、Grep 具体路径 = 验证（不计数）。
+   * Grep 无路径/通配、Read 未知路径 = 探索（计入阈值）。
+   *
+   * toolCallContext 参数复用了 prepareToolExecution/finalizeToolResult 的 ctx 类型，
+   * 包含了 toolCall.name 和 args。
+   */
+  private isExploratoryReadGrep(ctx: { toolCall: { name: string }; args: unknown }): boolean {
+    if (ctx.toolCall.name === 'Grep') {
+      const args = ctx.args as { path?: string; pattern?: string };
+      // Grep 有具体路径 → 验证/定位，不计数
+      if (args.path && !/[*?[{]/.test(args.path)) return false;
+      // Grep 无路径或通配 → 探索
+      return true;
+    }
+    // Read / ReadGroup / ReadMediaFile
+    if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
+      const args = ctx.args as { path?: string };
+      if (!args.path) return false; // no path can't be classified
+      const readPath = args.path;
+      // 读刚改过的文件 → 验证
+      for (const modifiedPath of this.recentlyModifiedPathsThisTurn) {
+        if (readPath === modifiedPath || readPath.endsWith('/' + modifiedPath) || modifiedPath.endsWith('/' + readPath)) {
+          return false;
+        }
+      }
+      // 其他 → 探索（查看未知代码路径）
+      return true;
+    }
+    return false;
   }
 
 

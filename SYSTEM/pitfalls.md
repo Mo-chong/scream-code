@@ -670,7 +670,13 @@ Step 3：验证修复（30s）
 3. 每次修复完先确认 bundle 有没有新代码再试，避免"修了 = 等于没修"的无效循环
 4. 错误码是线索不是判决——ENOENT 后面接 EINVAL 说明路径方向对但 spawn 方式错
 
-### LSP 故障 #2：bundle 环境中 npm root -g 和 npx.cmd 双重 fallback 失败（2026-06-25）
+### MemoryEdit ID 前缀
+
+使用 `MemoryEdit` 工具时，`id` 参数必须带 `memo-` 前缀。
+`MemoryLookup` 返回的 ID 是短格式（如 `mqqhr7ek-pq7iel`），但数据库实际存的 ID 是 `memo-mqqhr7ek-pq7iel`。
+传给 `MemoryEdit` 时要用完整 ID，否则报 "not found"。
+
+## LSP 故障 #2：bundle 环境中 npm root -g 和 npx.cmd 双重 fallback 失败（2026-06-25）
 
 **问题**：scream（bundle 运行）中 LSP.references 报 `"not found in PATH and npx fallback failed: spawn EINVAL"`。
 
