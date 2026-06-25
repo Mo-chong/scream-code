@@ -192,6 +192,65 @@ npx vitest run packages/memory/test/tier-yongjiu.test.ts  # 功能测试
 
 **教训**：标签的语言对搜索无影响，选语义清晰、不易冲突的即可。
 
+### 标签质量四层优化踩坑记录（2026-06-25）
+
+#### 坑 1：`normalizeTags` 硬编码 `max=5` 吞了动态预算的上限
+
+**问题**：动态预算公式算出来最高 8 个，但存储时只有 5 个。
+
+**根因**：`tags.ts` 的 `normalizeTags()` 写死的 `max = 5`。调用方传 `MAX_TAGS_ABSOLUTE = 8` 也传不进去——因为参数默认值在调用方没传时才生效。
+
+```typescript
+// 旧
+export function normalizeTags(tags: unknown, max = 5): string[] {
+
+// 新
+export function normalizeTags(tags: unknown, max = TAG_CONFIG.MAX_TAGS_DEFAULT): string[] {
+```
+
+**修复**：`normalizeTags` 默认值改为 `TAG_CONFIG.MAX_TAGS_DEFAULT`（5），调用方 `processTags()` 传 `TAG_CONFIG.MAX_TAGS_ABSOLUTE`（8）。
+
+**教训**：常量和参数默认值必须来自同一个配置源。藏在函数签名里的魔数是所有预算系统的头号敌人。
+
+#### 坑 2：Dream 合并路径跳过了 `processTags`
+
+**问题**：`consolidator.ts:189-193` 的 Dream 合并直接 `normalizeTags(flatTags)`，不走黑名单和同义合并。
+
+**根因**：旧代码在 `processTags()` 统一路由实现之前写的，直接调用低阶函数 `normalizeTags()`。
+
+```typescript
+// 旧（无黑名单+无同义合并）
+const mergedTags = normalizeTags(group.memos.flatMap((m) => m.tags ?? []));
+
+// 新（走 processTags 完整链路）
+const mergedTags = await processTags(
+  group.memos.flatMap((m) => m.tags ?? []),
+  { existingTags: allRelatedTags },
+);
+```
+
+**教训**：统一路由引入后，必须 grep 所有直接调用低阶函数的地方逐一改为高阶调用。只改路由不改调用方等于没有改。
+
+#### 坑 3：`extractor.ts` 同步 `generateTags()` 无法调用 async 后备
+
+**问题**：`generateTags()` 是同步函数，但 `processTags()` 内部的异步后备（`await generateTags(context.fullText)`）需要调用方也是 async。
+
+**根因**：旧代码 `extractor.ts` 的 `extractMemoryMemos()` 是同步调用，无法 await。
+
+**修复**：`extractMemoryMemos()` → `async`，调用方 `compact()` 也同步改为 async。
+
+**教训**：同步→async 的传播链：`compact() → extractMemoryMemos() → processTags() → generateTags()`。改最底层的 `processTags()` 为 async 后，必须把调用栈一直改到顶层函数签名。漏一层就编译不通过——编译会帮你发现，但前提是你先 build。
+
+#### 坑 4：apps/scream-code 是 bundle 模式，子包 dist/ 不算数
+
+**问题**：编译子包 `packages/memory/dist/` 和 `packages/agent-core/dist/` 都通过了，但运行时标签处理仍然是旧代码。
+
+**根因**：`scream-code/tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` 把所有 `@scream-*` 包都打包进 scream-code 的 bundle。memory 的 dist 是中间产物，最终用的是 scream-code bundle 里的源代码快照。
+
+**修复**：只 build scream-code 即可（`node ../../node_modules/tsdown/dist/run.mjs`），不需要单独 build memory 和 agent-core。
+
+**教训**：bundle 模式下，依赖包的 dist 只是编译检查凭证，不是运行时加载的文件。最终 bundle 一步到位。
+
 ---
 
 ## 回合控制

@@ -331,7 +331,7 @@ describe('migrateLegacyStores', () => {
 });
 
 describe('parseMemoryMemos', () => {
-  it('parses valid memory-memo blocks', () => {
+  it('parses valid memory-memo blocks', async () => {
     const text = `
 ## Current Focus
 Working on auth module
@@ -357,45 +357,47 @@ Working on auth module
 \`\`\`
 `;
 
-    const memos = parseMemoryMemos(text);
+    const memos = await parseMemoryMemos(text);
     expect(memos.length).toBe(2);
     expect(memos[0]!.userNeed).toContain('OAuth');
     expect(memos[0]!.outcome).toBe('完成');
     expect(memos[1]!.outcome).toBe('部分完成');
   });
 
-  it('returns empty for {"none": true}', () => {
+  it('returns empty for {"none": true}', async () => {
     const text = '```memory-memo\n{"none": true}\n```';
-    expect(parseMemoryMemos(text).length).toBe(0);
+    expect((await parseMemoryMemos(text)).length).toBe(0);
   });
 
-  it('skips malformed JSON blocks', () => {
+  it('skips malformed JSON blocks', async () => {
     const text = '```memory-memo\n{not valid json}\n```';
-    expect(parseMemoryMemos(text).length).toBe(0);
+    expect((await parseMemoryMemos(text)).length).toBe(0);
   });
 
-  it('skips blocks without userNeed', () => {
+  it('skips blocks without userNeed', async () => {
     const text = '```memory-memo\n{"approach": "something"}\n```';
-    expect(parseMemoryMemos(text).length).toBe(0);
+    expect((await parseMemoryMemos(text)).length).toBe(0);
   });
 
-  it('parses blocks with all new fields', () => {
+  it('parses blocks with all new fields', async () => {
     const text = '```memory-memo\n{"userNeed": "test", "approach": "x", "outcome": "完成", "whatFailed": "试了A不行", "whatWorked": "方案B成功"}\n```';
-    const memos = parseMemoryMemos(text);
+    const memos = await parseMemoryMemos(text);
     expect(memos[0]!.whatFailed).toBe('试了A不行');
     expect(memos[0]!.whatWorked).toBe('方案B成功');
   });
 
-  it('parses tags from memory-memo blocks', () => {
+  it('parses tags from memory-memo blocks', async () => {
     const text = '```memory-memo\n{"userNeed": "fix auth", "approach": "x", "outcome": "完成", "tags": ["React", "auth"]}\n```';
-    const memos = parseMemoryMemos(text);
+    const memos = await parseMemoryMemos(text);
     expect(memos[0]!.tags).toEqual(['react', 'auth']);
   });
 
-  it('falls back to empty tags when tags field is missing', () => {
+  it('falls back to generated tags when tags field is missing', async () => {
     const text = '```memory-memo\n{"userNeed": "test", "approach": "x", "outcome": "完成"}\n```';
-    const memos = parseMemoryMemos(text);
-    expect(memos[0]!.tags).toBeUndefined();
+    const memos = await parseMemoryMemos(text);
+    // processTags generates fallback tags from userNeed + approach
+    expect(Array.isArray(memos[0]!.tags)).toBe(true);
+    expect(memos[0]!.tags!.length).toBeGreaterThanOrEqual(1);
   });
 });
 

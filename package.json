@@ -28,8 +28,10 @@
     "@changesets/changelog-github": "0.7.0",
     "@changesets/cli": "2.30.0",
     "@microsoft/api-extractor": "7.58.7",
+    "@photostructure/sqlite-vec": "^1.1.1",
     "@types/node": "^22.15.3",
     "@vitest/coverage-v8": "4.1.4",
+    "fastembed": "^2.1.0",
     "lint-staged": "16.4.0",
     "oxlint": "1.59.0",
     "oxlint-tsgolint": "0.20.0",
@@ -57,5 +59,5 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b"
 }

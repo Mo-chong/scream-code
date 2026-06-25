@@ -1,10 +1,10 @@
 import { type MemoryMemo, createMemoryMemo } from './models.js';
-import { normalizeTags } from './tags.js';
+import { processTags } from './tags.js';
 
 /**
  * Parse memory-memo blocks from LLM compaction output.
  */
-export function parseMemoryMemos(text: string): MemoryMemo[] {
+export async function parseMemoryMemos(text: string): Promise<MemoryMemo[]> {
   const memos: MemoryMemo[] = [];
 
   // Match ```memory-memo ... ``` blocks (tolerate optional whitespace/newlines after header)
@@ -24,8 +24,9 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
         continue;
       }
 
-      const rawTags = parsed['tags'];
-      const tags = Array.isArray(rawTags) ? normalizeTags(rawTags) : undefined;
+      const tags = await processTags(parsed['tags'], {
+        fullText: `${userNeed} ${parsed['approach'] ?? ''}`,
+      });
 
       memos.push(
         createMemoryMemo({
@@ -81,7 +82,7 @@ export function buildExitExtractionPrompt(
 \`\`\`
 
 注意：
-- tags 是 3-5 个语义标签，概括任务领域/技术栈/动作类型，例如 ["react", "auth", "部署"]
+- tags 是 3-5 个语义标签，概括任务领域/技术栈/动作类型/具体技术名，例如 ["react", "auth", "部署"]、["mcp", "pathext", "windows spawn"]、["memory", "sqlite-vec", "fts5"]
 - whatFailed 记录重要的错误尝试，帮助未来避免重蹈覆辙
 - whatWorked 记录最终成功的关键动作，帮助未来复用经验
 - 跳过未完成的工作，除非其中包含有价值的踩坑经验

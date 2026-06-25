@@ -550,7 +550,7 @@ export class Agent {
         ? response.message.content
         : response.message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
 
-      const memos = parseMemoryMemos(summary);
+      const memos = await parseMemoryMemos(summary);
       if (memos.length === 0) return;
 
       const store = this.memoStore;

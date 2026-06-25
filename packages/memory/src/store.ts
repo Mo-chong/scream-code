@@ -8,6 +8,7 @@ import * as sqliteVec from '@photostructure/sqlite-vec';
 import type { MemoryMemo, MemoryMemoListResult } from './models.js';
 import { toSummary } from './models.js';
 import { buildEmbeddingText, type EmbeddingEngine } from './embeddings.js';
+import { computeTagSetQuality, TAG_CONFIG } from './tags.js';
 
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
@@ -48,6 +49,14 @@ export class MemoryMemoStore {
   private lastAutoDemoteAt = 0;
   private static readonly AUTO_DEMOTE_INTERVAL_MS = 5 * 60 * 1000; // 5 min throttle
   private readonly log: MemoryMemoStoreLogger;
+
+  /**
+   * Phase 4: Deviation chain counter. Tracks consecutive low-quality tag
+   * sets being written. When the limit is exceeded, new writes are still
+   * accepted but the condition is exposed via isBadTaggingStreak() so
+   * upstream callers can inject prompt-level intervention.
+   */
+  private consecutiveBadTagSets = 0;
 
   constructor(projectDir: string, log?: MemoryMemoStoreLogger) {
     this.projectDir = projectDir;
@@ -639,6 +648,14 @@ export class MemoryMemoStore {
       );
       this.db.exec('COMMIT');
       this.scheduleEmbedding(entry);
+
+      // Phase 4: deviation chain — track consecutive low-quality tag sets
+      const quality = computeTagSetQuality(entry.tags ?? []);
+      if (quality.score < 0.5) {
+        this.consecutiveBadTagSets++;
+      } else {
+        this.consecutiveBadTagSets = 0;
+      }
     } catch {
       this.db.exec('ROLLBACK');
       throw new Error('Failed to append memo');
@@ -769,6 +786,15 @@ export class MemoryMemoStore {
   /** Access the embedding engine (may be undefined if not configured). */
   getEmbeddingEngine(): EmbeddingEngine | undefined {
     return this.embeddingEngine;
+  }
+
+  /**
+   * Phase 4: Check whether the store is in a bad tagging streak
+   * (consecutive low-quality tag sets). Callers can use this to
+   * inject prompt-level intervention.
+   */
+  isBadTaggingStreak(): boolean {
+    return this.consecutiveBadTagSets >= TAG_CONFIG.BAD_TAG_CONSECUTIVE_LIMIT;
   }
 
   // ── vec0 CRUD ────────────────────────────────────────────

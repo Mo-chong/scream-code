@@ -15,9 +15,7 @@ overrides:
   ssh2@1.17.0>nan: '-'
 
 patchedDependencies:
-  '@earendil-works/pi-tui@0.78.1':
-    hash: 924a8368ce296130462c57c878eb0d99414eba81ef190df7de40a0d10163c106
-    path: patches/@earendil-works__pi-tui@0.78.1.patch
+  '@earendil-works/pi-tui@0.78.1': 924a8368ce296130462c57c878eb0d99414eba81ef190df7de40a0d10163c106
 
 importers:
 
@@ -35,12 +33,18 @@ importers:
       '@microsoft/api-extractor':
         specifier: 7.58.7
         version: 7.58.7(@types/node@22.19.19)
+      '@photostructure/sqlite-vec':
+        specifier: ^1.1.1
+        version: 1.1.1
       '@types/node':
         specifier: ^22.15.3
         version: 22.19.19
       '@vitest/coverage-v8':
         specifier: 4.1.4
         version: 4.1.4(vitest@4.1.4)
+      fastembed:
+        specifier: ^2.1.0
+        version: 2.1.0
       lint-staged:
         specifier: 16.4.0
         version: 16.4.0
@@ -1200,6 +1204,12 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [darwin]
+
+  '@rolldown/binding-freebsd-x64@1.0.3':
+    resolution: {integrity: sha512-yB1IlAsSNHncV6SCTL27/MVGR5htvQsoGxIv5KMGXALp+Ll1wYsn+x98M9MW7qa+NdSbvrrY7ANI4wLJ0n1e6g==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [freebsd]
 
   '@rolldown/binding-linux-arm-gnueabihf@1.0.3':
     resolution: {integrity: sha512-Yi30IVAAfLUCy2MseFjbB1jAMDl1VMCAas5StnYp8da9+CKvMd2H2cbEjWcw5NPaPqzvYkVIaF1nNUG+b7u/sw==}
@@ -4466,6 +4476,9 @@ snapshots:
   '@rolldown/binding-darwin-x64@1.0.3':
     optional: true
 
+  '@rolldown/binding-freebsd-x64@1.0.3':
+    optional: true
+
   '@rolldown/binding-linux-arm-gnueabihf@1.0.3':
     optional: true
 
@@ -6348,6 +6361,7 @@ snapshots:
       '@rolldown/binding-android-arm64': 1.0.3
       '@rolldown/binding-darwin-arm64': 1.0.3
       '@rolldown/binding-darwin-x64': 1.0.3
+      '@rolldown/binding-freebsd-x64': 1.0.3
       '@rolldown/binding-linux-arm-gnueabihf': 1.0.3
       '@rolldown/binding-linux-arm64-gnu': 1.0.3
       '@rolldown/binding-linux-arm64-musl': 1.0.3

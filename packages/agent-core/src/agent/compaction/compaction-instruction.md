@@ -34,7 +34,8 @@ For each completed task loop found, output a structured experience record **at t
 Guidelines:
 - Record important failed attempts in "whatFailed" to help avoid repeating mistakes.
 - Record key successful actions in "whatWorked" to help reuse effective approaches.
-- Include 3-5 semantic "tags" summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).
+- Include 3-5 semantic "tags" summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"] or ["mcp", "pathext", "windows spawn"] or ["memory", "sqlite-vec", "fts5"]).
+- After writing tags, review them. Are they specific technical terms? Would someone who encounters the same problem search for them? Avoid generic tags like "bug", "fix", "问题", "解决".
 - Skip in-progress work unless it contains a valuable error+fix experience.
 - Merge closely related sub-tasks into a single record.
 - Use the exact field names and JSON format shown above.

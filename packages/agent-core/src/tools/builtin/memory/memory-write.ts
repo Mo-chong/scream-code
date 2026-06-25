@@ -1,4 +1,4 @@
-import { createMemoryMemo, generateTags, normalizeTags } from '@scream-code/memory';
+import { createMemoryMemo, processTags } from '@scream-code/memory';
 import { dirname, basename } from 'pathe';
 import { z } from 'zod';
 
@@ -31,7 +31,7 @@ export const MemoryWriteInputSchema = z.object({
   tags: z
     .array(z.string())
     .optional()
-    .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).'),
+    .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]). Use specific technical terms (e.g. "pathext", "sqlite-vec", "fts5") rather than generic categories.'),
 });
 
 export type MemoryWriteInput = z.infer<typeof MemoryWriteInputSchema>;
@@ -70,10 +70,11 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
 
         const whatFailed = args.whatFailed?.trim();
         const whatWorked = args.whatWorked?.trim();
-        const tags = normalizeTags(
+        const tags = await processTags(
           args.tags !== undefined && args.tags.length > 0
             ? args.tags
-            : generateTags(`${args.userNeed} ${args.approach}`),
+            : undefined,
+          { fullText: `${args.userNeed} ${args.approach}` },
         );
 
         const memo = createMemoryMemo({

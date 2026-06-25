@@ -19,7 +19,7 @@
 
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
-| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中 |
+| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）** |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 1737 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
@@ -72,6 +72,12 @@
 | MCP 连接失败（PATHEXT 被删） | `SYSTEM/pitfalls.md` §MCP 连接失败 |
 | yongjiu 不生效（构建链陷阱） | `SYSTEM/pitfalls.md` §yongjiu 标签不生效 |
 | 双构建链陷阱的验证方法 | `SYSTEM/pitfalls.md` §双构建链陷阱的验证方法 |
+| 标签质量优化原理/配置 | `SYSTEM/memory-store.md` §六点五、标签质量四层优化 |
+| 标签黑名单词有哪些 | `SYSTEM/memory-store.md` §TAG_CONFIG |
+| 动态预算公式 | `SYSTEM/memory-store.md` §动态预算公式 |
+| normalizeTags 为什么用 MAX_TAGS_ABSOLUTE | `SYSTEM/pitfalls.md` §坑 1：normalizeTags 硬编码 |
+| Dream 合并标签为什么不继承黑名单 | `SYSTEM/pitfalls.md` §坑 2：Dream 合并跳过 processTags |
+| 标签质量统计在哪 | `SYSTEM/memory-store.md` §六点五 → tag-stats.ts |
 | MCP 工具有几种/怎么配 | `SYSTEM/mcp-server.md` |
 | codegraph 索引了什么 | `SYSTEM/mcp-server.md` §codegraph |
 | 内置工具和 MCP 工具有权重差吗 | `SYSTEM/mcp-server.md` §工具类型与权重 |

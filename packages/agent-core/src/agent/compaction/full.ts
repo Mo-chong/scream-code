@@ -493,7 +493,7 @@ export class FullCompaction {
       summaryLen: summary.length,
     });
 
-    const memos = parseMemoryMemos(summary);
+    const memos = await parseMemoryMemos(summary);
     this.agent.log.info('Memory memo parse result', {
       memoCount: memos.length,
     });

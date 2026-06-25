@@ -2,7 +2,7 @@ import type { MemoryMemo, MemoryMemoSummary } from './models.js';
 import { createMemoryMemo, toSummary } from './models.js';
 import type { MemoryMemoStore } from './store.js';
 import { STOP_WORDS, computeKeywordSimilarity } from './scoring.js';
-import { normalizeTags } from './tags.js';
+import { normalizeTags, processTags, TAG_CONFIG } from './tags.js';
 
 export interface DuplicateGroup {
   /** Memos identified as duplicates/similar. */
@@ -186,8 +186,10 @@ export async function applyConsolidation(
     const newest = group.memos.reduce((a, b) =>
       a.recordedAt > b.recordedAt ? a : b,
     );
-    const mergedTags = normalizeTags(
-      group.memos.flatMap((m) => m.tags ?? []),
+    const flatTags = group.memos.flatMap((m) => m.tags ?? []);
+    const mergedTags = await processTags(
+      flatTags.length > 0 ? flatTags : undefined,
+      { existingTags: flatTags.length > 0 ? [...new Set(flatTags)] : undefined },
     );
     const merged = createMemoryMemo({
       sourceSessionId: newest.sourceSessionId,
@@ -467,4 +469,37 @@ function findStale(
       !isOutcomeCompleted(m.outcome) &&
       !m.outcome.includes('blocked'),
   );
+}
+
+/**
+ * Phase 5: Find memos whose tags have become "stale" (low freshness)
+ * based on the ResNet decay formula. Returns stale tag entries that
+ * Dream consolidation can suggest refreshing.
+ */
+export function findStaleTags(
+  memos: MemoryMemoSummary[],
+  options?: { threshold?: number; decay?: number },
+): Array<{
+  memoId: string;
+  oldTags: string[];
+  daysSince: number;
+  freshness: number;
+}> {
+  const threshold = options?.threshold ?? TAG_CONFIG.TAG_FRESHNESS_THRESHOLD;
+  const decay = options?.decay ?? TAG_CONFIG.TAG_FRESHNESS_DECAY;
+  const stale: Array<{
+    memoId: string;
+    oldTags: string[];
+    daysSince: number;
+    freshness: number;
+  }> = [];
+  for (const memo of memos) {
+    if (!memo.tags?.length) continue;
+    const daysSince = (Date.now() - memo.recordedAt) / 86400000;
+    const freshness = Math.pow(decay, daysSince);
+    if (freshness < threshold) {
+      stale.push({ memoId: memo.id, oldTags: memo.tags, daysSince, freshness });
+    }
+  }
+  return stale;
 }
