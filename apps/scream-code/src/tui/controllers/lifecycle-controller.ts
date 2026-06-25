@@ -99,11 +99,15 @@ export class LifecycleController {
     };
     process.stdout.on('error', terminalErrorHandler);
     process.stderr.on('error', terminalErrorHandler);
+    process.stdin.on('error', terminalErrorHandler);
     this.signalCleanupHandlers.push(() => {
       process.stdout.off('error', terminalErrorHandler);
     });
     this.signalCleanupHandlers.push(() => {
       process.stderr.off('error', terminalErrorHandler);
+    });
+    this.signalCleanupHandlers.push(() => {
+      process.stdin.off('error', terminalErrorHandler);
     });
   }
 
