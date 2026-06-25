@@ -32,6 +32,7 @@ describe('MemoryMemoStore', () => {
   });
 
   afterEach(async () => {
+    store.close();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -292,6 +293,7 @@ describe('migrateLegacyStores', () => {
     expect(memos[0]!.userNeed).toBe('Legacy need');
 
     await expect(stat(legacyPath)).rejects.toThrow();
+    globalStore.close();
   });
 
   it('skips entries whose ids already exist in the global store', async () => {
@@ -324,6 +326,7 @@ describe('migrateLegacyStores', () => {
       memos.push(memo);
     }
     expect(memos.length).toBe(1);
+    globalStore.close();
   });
 });
 

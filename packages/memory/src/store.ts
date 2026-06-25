@@ -3,6 +3,8 @@ import { mkdir, readdir, rename, rmdir, stat, unlink, writeFile } from 'node:fs/
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'pathe';
 
+import * as sqliteVec from '@photostructure/sqlite-vec';
+
 import type { MemoryMemo, MemoryMemoListResult } from './models.js';
 import { toSummary } from './models.js';
 import { buildEmbeddingText, type EmbeddingEngine } from './embeddings.js';
@@ -10,6 +12,17 @@ import { buildEmbeddingText, type EmbeddingEngine } from './embeddings.js';
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
 const SQLITE_MIGRATION_MARKER = '.migrated-to-sqlite';
+const VEC0_MIGRATION_MARKER = '.migrated-vec0';
+
+// --- vec0 / hot-cold tier constants ---
+const VEC0_DIMS = 384;
+const HOT_MAX_SIZE = 100;
+const DEMOTE_RESNET_THRESHOLD = 0.3;
+const DEMOTE_DAYS_NO_HIT = 30;
+const PROMOTE_HIT_COUNT = 2;
+const PROMOTE_RESERVE_SPACE = 10;
+const DEMOTE_BATCH_SIZE = 5;
+
 
 export interface MemoryMemoStoreLogger {
   debug?: (message: string, ...args: unknown[]) => void;
@@ -32,6 +45,8 @@ export class MemoryMemoStore {
   private embeddingDegraded = false;
   private embeddingConsecutiveFailures = 0;
   private lastEmbeddingError: Error | undefined;
+  private lastAutoDemoteAt = 0;
+  private static readonly AUTO_DEMOTE_INTERVAL_MS = 5 * 60 * 1000; // 5 min throttle
   private readonly log: MemoryMemoStoreLogger;
 
   constructor(projectDir: string, log?: MemoryMemoStoreLogger) {
@@ -63,12 +78,14 @@ export class MemoryMemoStore {
   private async _doInit(): Promise<void> {
     if (this.initialized) return;
     await this.ensureDir();
-    this.db = new DatabaseSync(this.dbPath);
+    this.db = new DatabaseSync(this.dbPath, { allowExtension: true });
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec('PRAGMA busy_timeout = 5000;');
+    sqliteVec.load(this.db);
     this.createSchema();
     await this.migrateFromJsonl();
+    await this.migrateVec0();
     this.initialized = true;
   }
 
@@ -280,6 +297,7 @@ export class MemoryMemoStore {
     }
 
     await writeFile(markerPath, `${migratedCount}\n`, 'utf8').catch(() => {});
+    target.close();
   }
 
   /** @internal */
@@ -358,6 +376,42 @@ export class MemoryMemoStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at ON memory_embeddings(created_at DESC);
+
+      -- vec0 virtual table: all memos have a vector index here
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_memos USING vec0(
+        memo_embedding float[${VEC0_DIMS}],
+        project_dir TEXT partition key,
+        extraction_source TEXT,
+        recorded_at INTEGER,
+        +memo_id TEXT,
+        +score_tier TEXT,
+        +user_need TEXT,
+        +approach TEXT,
+        +outcome TEXT
+      );
+
+      -- memos_archive: cold tier for infrequently used memos
+      CREATE TABLE IF NOT EXISTS memos_archive (
+        id TEXT PRIMARY KEY,
+        source_session_id TEXT NOT NULL,
+        source_session_title TEXT,
+        user_need TEXT NOT NULL,
+        approach TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        what_failed TEXT NOT NULL DEFAULT 'none',
+        what_worked TEXT NOT NULL DEFAULT 'none',
+        extraction_source TEXT NOT NULL CHECK(extraction_source IN ('compaction', 'exit', 'manual')),
+        recorded_at INTEGER NOT NULL,
+        project_dir TEXT NOT NULL DEFAULT '',
+        tags TEXT NOT NULL DEFAULT '[]',
+        archived_at INTEGER NOT NULL,
+        hit_count INTEGER NOT NULL DEFAULT 0,
+        last_hit_at INTEGER NOT NULL DEFAULT 0,
+        embedding_json TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_archived_at ON memos_archive(archived_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_archive_project_dir ON memos_archive(project_dir);
     `);
     this.migrateSchema();
   }
@@ -432,6 +486,71 @@ export class MemoryMemoStore {
     // Keep the legacy file as a backup; remove the old in-memory index.
     await rename(this.jsonlPath, `${this.jsonlPath}.bak`).catch(() => {});
     await unlink(join(this.projectDir, 'memory', 'index.json')).catch(() => {});
+  }
+
+  /**
+   * One-time migration: copy memory_embeddings → vec_memos for pre-existing
+   * embeddings that were written before vec0 existed.
+   */
+  private async migrateVec0(): Promise<void> {
+    if (this.db === undefined) return;
+    const markerPath = join(this.projectDir, 'memory', VEC0_MIGRATION_MARKER);
+    try {
+      await stat(markerPath);
+      return;
+    } catch {
+      // continue with migration
+    }
+
+    // Skip if vec0 already has entries (fresh DB).
+    const row = this.db.prepare('SELECT COUNT(*) as count FROM vec_memos').get() as { count: number } | undefined;
+    if ((row?.count ?? 0) > 0) {
+      await writeFile(markerPath, '', 'utf8').catch(() => {});
+      return;
+    }
+
+    // Iterate memory_embeddings and write each into vec0.
+    const embRows = this.db.prepare(`
+      SELECT e.memory_id, e.embedding_json, m.id, m.user_need, m.approach, m.outcome,
+             m.extraction_source, m.recorded_at, m.project_dir, m.tags
+      FROM memory_embeddings e
+      JOIN memos m ON m.id = e.memory_id
+    `).all() as Array<Record<string, unknown>>;
+
+    if (embRows.length === 0) {
+      await writeFile(markerPath, '', 'utf8').catch(() => {});
+      return;
+    }
+
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      for (const row of embRows) {
+        const memoId = String(row['memory_id']);
+        const embedArr = JSON.parse(String(row['embedding_json'])) as number[];
+        const vec = new Float32Array(embedArr);
+        const memo: MemoryMemo = {
+          id: memoId,
+          sourceSessionId: '',
+          sourceSessionTitle: undefined,
+          userNeed: String(row['user_need'] ?? ''),
+          approach: String(row['approach'] ?? ''),
+          outcome: String(row['outcome'] ?? ''),
+          whatFailed: 'none',
+          whatWorked: 'none',
+          extractionSource: (row['extraction_source'] as 'compaction' | 'exit' | 'manual') ?? 'compaction',
+          recordedAt: Number(row['recorded_at'] ?? Date.now()),
+          projectDir: String(row['project_dir'] ?? ''),
+          tags: parseTags(row['tags']),
+        };
+        this.upsertVec0(memoId, vec, memo, 'HOT');
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      this.log.error?.('vec0 migration failed', { error });
+    }
+
+    await writeFile(markerPath, '', 'utf8').catch(() => {});
   }
 
   private insertMany(memos: readonly MemoryMemo[]): void {
@@ -624,6 +743,7 @@ export class MemoryMemoStore {
     try {
       deleteFts.run(row.rowid);
       deleteMemo.run(id);
+      this.deleteVec0(id);
       this.db.exec('COMMIT');
       return true;
     } catch {
@@ -649,6 +769,335 @@ export class MemoryMemoStore {
   /** Access the embedding engine (may be undefined if not configured). */
   getEmbeddingEngine(): EmbeddingEngine | undefined {
     return this.embeddingEngine;
+  }
+
+  // ── vec0 CRUD ────────────────────────────────────────────
+
+  /** Check whether vec0 has any entries. */
+  hasVec0(): boolean {
+    if (this.db === undefined) return false;
+    try {
+      const row = this.db.prepare(
+        "SELECT COUNT(*) as count FROM vec_memos WHERE memo_embedding IS NOT NULL LIMIT 1",
+      ).get() as { count: number } | undefined;
+      return (row?.count ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Upsert a memo's embedding into vec0.
+   * vec0 does not support ON CONFLICT — delete then insert.
+   */
+  private upsertVec0(
+    memoId: string,
+    embedding: Float32Array,
+    memo: MemoryMemo,
+    scoreTier: 'HOT' | 'ARCHIVED' = 'HOT',
+  ): void {
+    if (this.db === undefined) return;
+    this.deleteVec0(memoId);
+    this.db
+      .prepare(
+        `INSERT INTO vec_memos(memo_embedding, project_dir, extraction_source, recorded_at, memo_id, score_tier, user_need, approach, outcome)
+         VALUES (vec_f32(?), ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        new Uint8Array(embedding.buffer),
+        memo.projectDir ?? '',
+        memo.extractionSource,
+        // node:sqlite binds JS number as FLOAT; vec0 metadata INTEGER column
+        // requires actual integer binding.
+        BigInt(memo.recordedAt),
+        memoId,
+        scoreTier,
+        memo.userNeed,
+        memo.approach,
+        memo.outcome,
+      );
+  }
+
+  /** Delete a memo's row from vec0. */
+  private deleteVec0(memoId: string): void {
+    if (this.db === undefined) return;
+    this.db.prepare('DELETE FROM vec_memos WHERE memo_id = ?').run(memoId);
+  }
+
+  /** Update score_tier in vec0 (DELETE + re-INSERT using stored embedding). */
+  private updateVec0Tier(memoId: string, tier: 'HOT' | 'ARCHIVED'): void {
+    if (this.db === undefined) return;
+    const embRow = this.db
+      .prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?')
+      .get(memoId) as { embedding_json: string } | undefined;
+    if (embRow === undefined) return;
+    const memo = this.db
+      .prepare('SELECT * FROM memos WHERE id = ?')
+      .get(memoId) as Record<string, unknown> | undefined;
+    if (memo === undefined) return;
+    const vec = new Float32Array(JSON.parse(embRow.embedding_json) as number[]);
+    this.upsertVec0(memoId, vec, rowToMemo(memo), tier);
+  }
+
+  /**
+   * Search vec0 by vector similarity. Distance → similarity: 1 / (1 + distance).
+   * Returns results sorted by distance (ascending).
+   */
+  searchByVectorVec0(
+    queryEmbedding: Float32Array,
+    options?: {
+      k?: number;
+      projectDir?: string;
+      scoreTier?: 'HOT' | 'ARCHIVED';
+      distanceCutoff?: number;
+    },
+  ): Array<{ memo_id: string; similarity: number }> {
+    if (this.db === undefined) return [];
+    const k = options?.k ?? 20;
+    const distanceCutoff = options?.distanceCutoff ?? 2.0;
+
+    let sql = `
+      SELECT memo_id, distance
+      FROM vec_memos
+      WHERE memo_embedding MATCH ?
+        AND k = ?
+        AND distance < ?
+    `;
+
+    if (options?.projectDir !== undefined) {
+      sql += ' AND project_dir = ?';
+    }
+    if (options?.scoreTier !== undefined) {
+      sql += ' AND +score_tier = ?';
+    }
+
+    try {
+      const stmt = this.db.prepare(sql);
+      const bindings: unknown[] = [new Uint8Array(queryEmbedding.buffer), k, distanceCutoff];
+      if (options?.projectDir !== undefined) {
+        bindings.push(options.projectDir);
+      }
+      if (options?.scoreTier !== undefined) {
+        bindings.push(options.scoreTier);
+      }
+      const rows = stmt.all(...(bindings as any[])) as Array<{
+        memo_id: string;
+        distance: number;
+      }>;
+      return rows.map((r) => ({
+        memo_id: r.memo_id,
+        similarity: 1 / (1 + r.distance),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  // ── Hot / Cold tier (memos_archive) ─────────────────────
+
+  private async appendToArchive(entry: MemoryMemo & { archivedAt: number; hitCount: number; lastHitAt: number; embeddingJson?: string }): Promise<void> {
+    if (this.db === undefined) return;
+    this.db
+      .prepare(
+        `INSERT INTO memos_archive (
+          id, source_session_id, source_session_title, user_need, approach,
+          outcome, what_failed, what_worked, extraction_source, recorded_at,
+          project_dir, tags, archived_at, hit_count, last_hit_at, embedding_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        entry.id,
+        entry.sourceSessionId,
+        entry.sourceSessionTitle ?? null,
+        entry.userNeed,
+        entry.approach,
+        entry.outcome,
+        entry.whatFailed,
+        entry.whatWorked,
+        entry.extractionSource,
+        entry.recordedAt,
+        entry.projectDir ?? '',
+        JSON.stringify(entry.tags ?? []),
+        entry.archivedAt,
+        entry.hitCount,
+        entry.lastHitAt,
+        entry.embeddingJson ?? null,
+      );
+  }
+
+  private async getArchived(id: string): Promise<(MemoryMemo & { archivedAt: number; hitCount: number; lastHitAt: number; embeddingJson?: string }) | undefined> {
+    if (this.db === undefined) return undefined;
+    const row = this.db.prepare('SELECT * FROM memos_archive WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (row === undefined) return undefined;
+    const ej = row['embedding_json'];
+    return {
+      ...rowToMemo(row),
+      archivedAt: Number(row['archived_at']),
+      hitCount: Number(row['hit_count']),
+      lastHitAt: Number(row['last_hit_at']),
+      embeddingJson: typeof ej === 'string' && ej.length > 0 ? ej : undefined,
+    };
+  }
+
+  private async deleteFromArchive(id: string): Promise<void> {
+    if (this.db === undefined) return;
+    this.db.prepare('DELETE FROM memos_archive WHERE id = ?').run(id);
+  }
+
+  private async updateArchiveHitCount(id: string, count: number, lastHitAt: number): Promise<void> {
+    if (this.db === undefined) return;
+    this.db.prepare('UPDATE memos_archive SET hit_count = ?, last_hit_at = ? WHERE id = ?').run(count, lastHitAt, id);
+  }
+
+  private async hotMemoCount(): Promise<number> {
+    if (this.db === undefined) return 0;
+    const row = this.db.prepare('SELECT COUNT(*) as count FROM memos').get() as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  private async getAllHotMemos(): Promise<MemoryMemo[]> {
+    if (this.db === undefined) return [];
+    const rows = this.db.prepare('SELECT * FROM memos').all() as Array<Record<string, unknown>>;
+    return rows.map(rowToMemo);
+  }
+
+  // ── promote / demote ─────────────────────────────────
+
+  /** Promote: move a memo from archive back to hot tier. */
+  async promote(id: string): Promise<boolean> {
+    await this.init();
+    if (this.db === undefined) return false;
+    const archived = await this.getArchived(id);
+    if (archived === undefined) return false;
+    const memo: MemoryMemo = {
+      id: archived.id,
+      sourceSessionId: archived.sourceSessionId,
+      sourceSessionTitle: archived.sourceSessionTitle,
+      userNeed: archived.userNeed,
+      approach: archived.approach,
+      outcome: archived.outcome,
+      whatFailed: archived.whatFailed,
+      whatWorked: archived.whatWorked,
+      extractionSource: archived.extractionSource,
+      recordedAt: archived.recordedAt,
+      projectDir: archived.projectDir,
+      tags: archived.tags,
+    };
+    await this.appendInternal(memo);
+    await this.deleteFromArchive(id);
+
+    // Restore embedding to memory_embeddings if archived had one.
+    // ON DELETE CASCADE on memory_embeddings.memory_id → memos.id wiped
+    // the row when demote() called deleteInternal(), so updateVec0Tier
+    // would find no embedding. We saved it in memos_archive.embedding_json.
+    if (archived.embeddingJson !== undefined) {
+      this.db!
+        .prepare(
+          'INSERT OR REPLACE INTO memory_embeddings (memory_id, embedding_json, model, created_at) VALUES (?, ?, ?, ?)',
+        )
+        .run(id, archived.embeddingJson, 'bge-small-zh-v1.5', Date.now());
+    }
+    this.updateVec0Tier(id, 'HOT');
+    return true;
+  }
+
+  /** Demote: move a memo from hot tier to archive. */
+  async demote(id: string): Promise<boolean> {
+    await this.init();
+    if (this.db === undefined) return false;
+    const memo = await this.get(id);
+    if (memo === undefined || (Array.isArray(memo.tags) && memo.tags.includes('baohu'))) return false;
+
+    // Save embedding before deleteInternal removes the memo (and its vec0 entry).
+    // Reading memory_embeddings here (not vec0) because vec0 stores only auxiliary
+    // columns — the full float32 array lives in memory_embeddings.embedding_json.
+    const embRow = this.db
+      .prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?')
+      .get(id) as { embedding_json: string } | undefined;
+
+    const embeddingJson = embRow?.embedding_json;
+    const archiveEntry = {
+      ...memo,
+      archivedAt: Date.now(),
+      hitCount: 0,
+      lastHitAt: 0,
+      embeddingJson,
+    };
+    await this.appendToArchive(archiveEntry);
+    await this.deleteInternal(id); // Also deletes vec0 entry via deleteVec0
+
+    // Re-insert vec0 with ARCHIVED tier so cold-layer vec0 search still works.
+    // Cannot use updateVec0Tier() here because the memo was just removed from
+    // the memos table — updateVec0Tier does SELECT * FROM memos and would return
+    // undefined. We saved the embedding above before the delete.
+    if (embeddingJson !== undefined) {
+      const vec = new Float32Array(JSON.parse(embeddingJson) as number[]);
+      this.upsertVec0(id, vec, memo, 'ARCHIVED');
+    }
+
+    return true;
+  }
+
+  /** Auto-demote: scan hot tier, demote cold entries. */
+  async autoDemoteIfNeeded(): Promise<number> {
+    await this.init();
+    if (this.db === undefined) return 0;
+    let demoted = 0;
+
+    const hotMemos = await this.getAllHotMemos();
+
+    for (const memo of hotMemos) {
+      if (Array.isArray(memo.tags) && memo.tags.includes('baohu')) continue;
+
+      const tags = new Set(memo.tags ?? []);
+      const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 0.88 : 0.85;
+      const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
+      const resNetFactor = Math.pow(D, daysSince);
+
+      if (resNetFactor < DEMOTE_RESNET_THRESHOLD || daysSince >= DEMOTE_DAYS_NO_HIT) {
+        await this.demote(memo.id);
+        demoted++;
+        if (demoted >= DEMOTE_BATCH_SIZE) break;
+      }
+    }
+
+    // Cap hot tier size — evict lowest recorded_at first
+    const currentCount = await this.hotMemoCount();
+    if (currentCount > HOT_MAX_SIZE) {
+      const remaining = hotMemos
+        .filter((m) => !(Array.isArray(m.tags) && m.tags.includes('baohu')))
+        .sort((a, b) => a.recordedAt - b.recordedAt) // oldest first
+        .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
+      for (const memo of remaining) {
+        if (demoted >= DEMOTE_BATCH_SIZE) break;
+        await this.demote(memo.id);
+        demoted++;
+      }
+    }
+
+    return demoted;
+  }
+
+  /** Auto-promote: when a vec0 search hits archived memos, bump hit count and promote if ready. */
+  async autoPromoteHits(memoIds: string[]): Promise<number> {
+    await this.init();
+    if (this.db === undefined) return 0;
+    let promoted = 0;
+
+    for (const id of memoIds) {
+      const archived = await this.getArchived(id);
+      if (archived === undefined) continue;
+      const newCount = archived.hitCount + 1;
+      await this.updateArchiveHitCount(id, newCount, Date.now());
+
+      const hotCount = await this.hotMemoCount();
+      if (newCount >= PROMOTE_HIT_COUNT || hotCount < HOT_MAX_SIZE) {
+        await this.promote(id);
+        promoted++;
+      }
+    }
+
+    return promoted;
   }
 
   /**
@@ -841,6 +1290,26 @@ export class MemoryMemoStore {
       } catch (error) {
         this.db.exec('ROLLBACK');
         this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
+      }
+
+      // ── vec0 write ──
+      // Write newly generated embeddings into vec0. Runs outside the embedding
+      // INSERT transaction so a vec0 failure does not corrupt the batch.
+      for (let i = 0; i < pending.length; i++) {
+        const memo = this.db
+          .prepare('SELECT * FROM memos WHERE id = ?')
+          .get(pending[i]!.id) as Record<string, unknown> | undefined;
+        if (memo !== undefined) {
+          this.upsertVec0(pending[i]!.id, vectors[i]!, rowToMemo(memo), 'HOT');
+        }
+      }
+
+      // Periodic auto-demote: cool hot tier after embeddings settle.
+      // Throttled to avoid running on every single write.
+      if (this.lastAutoDemoteAt + MemoryMemoStore.AUTO_DEMOTE_INTERVAL_MS < Date.now()) {
+        void this.autoDemoteIfNeeded().catch(() => {}).then(() => {
+          this.lastAutoDemoteAt = Date.now();
+        });
       }
     } catch (error) {
       this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));

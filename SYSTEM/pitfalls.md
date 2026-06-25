@@ -207,15 +207,17 @@ spawn typescript-language-server → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 **教训**：异步操作类的资源管理必须检查关闭路径的兜底 flush。reviewer 可以查到这个漏。
 
-### 偏差链连续 Edit 拦截（已知行为）
+### 偏差链连续 Edit 拦截（2026-06-24 修复：只对代码文件触发）
 
-**问题/发现**：连续 3 次 Edit 没有 LSP.references → 偏差链触发 → 收敛门拦住。
+**问题/发现**：连续 3 次 Edit（代码文件如 .ts/.py/.rs）没有 LSP.references → 偏差链触发 → 收敛门拦住。
 
-**机制**：`turn/index.ts` 的 `afterStep` 中 `editWithoutLookupCount++`，每步结束时检查。>= 3 → `deviationChainActive = true`。
+**修复**：`editOnCodeFileThisStep` 区分代码文件（.ts/.tsx/.js/.jsx/.py/.rs/.go）和非代码文件（.md/.json/.yaml/.toml 等）。编辑 .md / .json / .yaml 不再触发 LSP.references 要求。
+
+**机制**：`turn/index.ts` 的 `injectStepAfterVariants()` 中 `editOnCodeFileThisStep && !hasCalledLspReferencesThisStep`，每步结束时检查。`editWithoutLookupCount >= 3` → `deviationChainActive = true`。
 
 **取消**：必须调一次 LSP.references（或 reviewer）才会释放。
 
-**教训**：偏差链不是 bug，是设计——强制在批量编辑之间插入验证步骤。
+**教训**：偏差链不是 bug，是设计——强制在批量代码编辑之间插入验证步骤。但文档编辑不在此列。
 
 ---
 

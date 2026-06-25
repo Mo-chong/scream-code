@@ -79,9 +79,10 @@ See §9.5 **ResNet injection scheduling** for the full variant configuration tab
 
 | Variant | Weight | Condition | Inject text |
 |---------|:------:|-----------|-------------|
-| `step_after_edit` | A | `editWithoutLookupCount ≥ 2` | `"MUST check callers. Missing LSP.references before edit."` |
-| `step_after_edit` | B | `editWithoutLookupCount === 1` | `"Edit done → consider verifying before continuing."` |
-| — reset | — | Edit + LSP.references both called | `editWithoutLookupCount = 0` |
+| `step_after_edit` | A | `editOnCodeFileThisStep && editWithoutLookupCount ≥ 2` | `"MUST check callers. Missing LSP.references before edit."` |
+| `step_after_edit` | B | `editOnCodeFileThisStep && editWithoutLookupCount === 1` | `"Edit done → consider verifying before continuing."` |
+| — reset | — | Edit on code file + LSP.references both called | `editWithoutLookupCount = 0` |
+| — no-op | — | Edit on non-code file (.md/.json/.yaml etc) | skip (not a function/API change) |
 
 ### Deviation chain (toxicity intercept)
 

@@ -19,7 +19,7 @@
 
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
-| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + 向量三重检索，tags 存 JSON 不在 FTS5 索引中 |
+| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 1737 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
@@ -76,6 +76,11 @@
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
 | 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |
 | Cherry-pick 后构建/bundle 不工作 | `SYSTEM/pitfalls.md` §pnpm install 是 cherry-pick 后的必修课 |
+| vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
+| 热冷升降触发条件 | store.ts §promote/demote/autoDemote/autoPromote |
+| ResNet 衰减因子 | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |
+| sqlite-vec 初始化 | store.ts §_doInit + `@photostructure/sqlite-vec` |
+| 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
 
 ### 决策文档 / ADR（ZHU/DECISIONS/）
 
@@ -86,6 +91,7 @@
 | `DECISIONS/INDEX.md` | DECISIONS/ 目录的全量分类索引 |
 | `DECISIONS/行为矫正系统-完整实战方案.md` | 融合方案总设计 |
 | `DECISIONS/Guard规则引擎-实战执行方案.md` | Guard 执行细节 |
+| `DECISIONS/分析-长期记忆系统外挂方案-开源调查与适配分析.md` 🆕 | 12 方案全面分析，结论：无需外挂，缺沉淀策略 |
 | `DECISIONS/扩展方向-架构进化路线-行为学习与闭环.md` | 未来方向：P0反馈/P1学习/P2沙盒 |
 
 ---
@@ -106,8 +112,10 @@
       memory-write.ts             → MemoryWrite 工具
       memory-edit.ts              → MemoryEdit 工具
   packages/memory/src/
-    store.ts                      → MemoryMemoStore（SQLite + FTS5 + 向量）
+    store.ts                      → MemoryMemoStore（SQLite + FTS5 + vec0 向量 + 热冷升降，~1485 行）
     models.ts                     → MemoryMemo 数据模型
+    scoring.ts                    → 混合评分(60% keyword + 40% vector) × ResNet 因子
+    consolidator.ts               → Dream 去重合并 + demote 归档
   
 CLI/TUI 源码:
   apps/scream-code/src/
@@ -128,6 +136,9 @@ CLI/TUI 源码:
 |------|----------|------|
 | FTS5 不索引 tags 列 | store.ts:339 vs 344-351 | 不能 `search("tags:xxx")`，必须二次过滤 |
 | memoStore 可能为 undefined | agent/index.ts:126 | sub agent 没有，必须加 guard |
+| vec0 INSERT 不支持 ON CONFLICT/UPSERT | store.ts:793-840 | 必须 DELETE 再 INSERT |
+| vec0 `+` 前缀：仅 DDL/SELECT 合法 | store.ts:380-391 + 845-892 | INSERT/DELETE 必须去掉 `+` |
+| Float32Array→Uint8Array(buffer) 传 vec0 | store.ts:795-796 | vec_f32() 内部转换，node:sqlite number→FLOAT 需 BigInt() |
 | system_trigger 穿透预算 | turn/index.ts:1356-1359 | 收敛门注入不受 budget 限制 |
 | sendNormalUserInput ≠ inject | context/index.ts:75-80 vs 83-91 | 前者是普通用户消息，后者是 <system-reminder> |
 | inject('injection') 受 5 重限制 | turn/index.ts:1368-1419 | 重复衰减→残差→去重→预算→注册 |

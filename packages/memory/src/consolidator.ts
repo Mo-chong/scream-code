@@ -111,7 +111,7 @@ export async function applyConsolidation(
   let deleted = 0;
   let created = 0;
 
-  // ── 1. 归档 resolved/stale 的经验（先 append，防崩溃丢数据）──
+  // ── 1. 归档 resolved/stale 的经验（append + demote 代替 delete）──
   if (plan.resolved.length > 0) {
     const worked = plan.resolved
       .filter((m) => m.whatWorked)
@@ -161,6 +161,26 @@ export async function applyConsolidation(
     }
   }
 
+  // ── 2. Demote resolved/stale instead of deleting (hot→cold move) ──
+  for (const memo of plan.resolved) {
+    if (store.demote !== undefined) {
+      await store.demote(memo.id);
+      deleted++;
+    } else {
+      await store.delete(memo.id);
+      deleted++;
+    }
+  }
+  for (const memo of plan.stale) {
+    if (store.demote !== undefined) {
+      await store.demote(memo.id);
+      deleted++;
+    } else {
+      await store.delete(memo.id);
+      deleted++;
+    }
+  }
+
   // ── 2. 合并 duplicates：先建 merged 再删 originals（防崩溃）──
   for (const group of plan.duplicateGroups) {
     const newest = group.memos.reduce((a, b) =>
@@ -185,20 +205,12 @@ export async function applyConsolidation(
     created++;
   }
 
-  // ── 3. 删除 originals（merged 已安全落盘，崩溃可恢复）──
+  // ── 3. 删除 originals of duplicates（merged 已安全落盘，崩溃可恢复）──
   for (const group of plan.duplicateGroups) {
     for (const memo of group.memos) {
       await store.delete(memo.id);
       deleted++;
     }
-  }
-  for (const memo of plan.resolved) {
-    await store.delete(memo.id);
-    deleted++;
-  }
-  for (const memo of plan.stale) {
-    await store.delete(memo.id);
-    deleted++;
   }
 
   return { deleted, created };

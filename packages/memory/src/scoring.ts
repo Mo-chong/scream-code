@@ -28,6 +28,9 @@ export interface RankMemosOptions {
   /** Optional vector similarity scores keyed by memo id. When provided, keyword
    * and vector scores are blended (60% keyword, 40% vector). */
   vectorScores?: Map<string, number>;
+  /** Optional ResNet factor override keyed by memo id (0-1). When absent, no
+   * ResNet attenuation is applied. */
+  resNetFactors?: Map<string, number>;
 }
 
 export interface QueryIntent {
@@ -127,7 +130,7 @@ export function rankMemos(
   query: string,
   options: RankMemosOptions = {},
 ): ScoredMemo[] {
-  const { minScore = 0.3, maxResults = 3, currentProjectDir, projectTagCloud, vectorScores } =
+  const { minScore = 0.3, maxResults = 3, currentProjectDir, projectTagCloud, vectorScores, resNetFactors } =
     options;
   const intent = detectQueryIntent(query);
   const hasVectorScores = vectorScores !== undefined && vectorScores.size > 0;
@@ -139,9 +142,12 @@ export function rankMemos(
       );
       const vectorScore = vectorScores?.get(memo.id) ?? 0;
       // Blend: 60% keyword + 40% vector when both are available.
-      const score = hasVectorScores
+      const blended = hasVectorScores
         ? keywordScore * 0.6 + vectorScore * 0.4
         : keywordScore;
+      // ResNet attenuation: when ResNet factor is provided, multiply it in.
+      const resNetFactor = resNetFactors?.get(memo.id) ?? 1;
+      const score = blended * resNetFactor;
       return { memo, score };
     })
     .filter((s) => s.score >= minScore)

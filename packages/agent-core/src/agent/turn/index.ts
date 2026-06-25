@@ -111,9 +111,13 @@ export class TurnFlow {
   private searchHadResultsThisStep = false;
   private verifyFailedThisStep = false;
   private editCalledSuccessThisStep = false;
+  /** Did the Edit touch a code file (as opposed to docs/markdown)? Only this triggers the "MUST check LSP.references" rule. */
+  private editOnCodeFileThisStep = false;
   private editWithoutLookupCount = 0;
   private stepToolCounts: Record<string, number> = {};
   private static readonly BASH_FILE_OPS_RE = /\b(cat|head|tail|less|more)\s+/i;
+  /** Only these file extensions trigger the "must check LSP.references" rule. */
+  private static readonly CODE_FILE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go']);
 
   // ── Toxicity early interception fields ───────────────────────
   private deviationChainActive = false;
@@ -1125,6 +1129,9 @@ export class TurnFlow {
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
+                  const editPath = (ctx.args as { path?: string }).path ?? '';
+                  const ext = editPath.slice(editPath.lastIndexOf('.')).toLowerCase();
+                  if (TurnFlow.CODE_FILE_EXTS.has(ext)) this.editOnCodeFileThisStep = true;
                   this.hasWriteToolsThisStep = true;
                 }
                 if (ctx.toolCall.name === 'Write') {
@@ -1464,14 +1471,14 @@ export class TurnFlow {
 
   /** C组: 步级反馈注入 — 基于当前步工具调用模式注入对应提醒 */
   private injectStepAfterVariants(): void {
-    if (this.editCalledSuccessThisStep && !this.hasCalledLspReferencesThisStep) {
+    if (this.editOnCodeFileThisStep && !this.hasCalledLspReferencesThisStep) {
       this.editWithoutLookupCount++;
       if (this.editWithoutLookupCount >= 2) {
         this.inject('MUST check callers. Missing LSP.references before edit.', { kind: 'injection', variant: 'step_after_edit' });
       } else {
         this.inject('Edit done → consider verifying before continuing.', { kind: 'injection', variant: 'step_after_edit' });
       }
-    } else if (this.editCalledSuccessThisStep) {
+    } else if (this.editOnCodeFileThisStep) {
       this.editWithoutLookupCount = 0;
     }
     if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
@@ -1827,6 +1834,7 @@ export class TurnFlow {
     this.searchHadResultsThisStep = false;
     this.verifyFailedThisStep = false;
     this.editCalledSuccessThisStep = false;
+    this.editOnCodeFileThisStep = false;
     this.hasKnowledgeToolsThisStep = false;
     this.hasWriteToolsThisStep = false;
     this.lastStepCalledMemoryLookup = false;

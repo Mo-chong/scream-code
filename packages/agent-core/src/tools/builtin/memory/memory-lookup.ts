@@ -121,11 +121,59 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
 
         const all = candidates.map(toSummary);
 
-        // Try vector search as a supplementary signal. Only runs if embeddings
-        // exist and the engine loaded successfully.
+        // Try vec0 vector search as a supplementary signal.
         let vectorScores: Map<string, number> | undefined;
+        let archivedHitIds: string[] | undefined;
         const engine = store.getEmbeddingEngine();
-        if (engine?.available && store.hasEmbeddings()) {
+
+        // Use vec0 if available, otherwise fall back to the legacy JS loop.
+        const useVec0 = store.hasVec0();
+        if (useVec0 && engine?.available) {
+          try {
+            const cachedVec = getCachedQueryEmbedding(query);
+            let queryVec: Float32Array | undefined = cachedVec;
+            if (queryVec === undefined) {
+              const queryVecs = await engine.embedBatch([query]);
+              if (queryVecs !== null && queryVecs.length > 0) {
+                queryVec = queryVecs[0]!;
+                setCachedQueryEmbedding(query, queryVec);
+              }
+            }
+            if (queryVec !== undefined) {
+              // Search hot tier first
+              const hotResults = store.searchByVectorVec0(queryVec, {
+                k: candidateLimit,
+                projectDir,
+                scoreTier: 'HOT',
+                distanceCutoff: 1.5,
+              });
+              if (hotResults.length > 0) {
+                vectorScores = new Map(hotResults.map((r) => [r.memo_id, r.similarity]));
+              }
+              // If not enough hot results, search cold tier too
+              if ((vectorScores?.size ?? 0) < 3) {
+                const coldResults = store.searchByVectorVec0(queryVec, {
+                  k: 10,
+                  projectDir,
+                  scoreTier: 'ARCHIVED',
+                  distanceCutoff: 1.5,
+                });
+                if (coldResults.length > 0) {
+                  archivedHitIds = coldResults.map((r) => r.memo_id);
+                  if (vectorScores === undefined) vectorScores = new Map();
+                  for (const r of coldResults) {
+                    if (!vectorScores.has(r.memo_id)) {
+                      vectorScores.set(r.memo_id, r.similarity);
+                    }
+                  }
+                }
+              }
+            }
+          } catch {
+            // vec0 search best-effort
+          }
+        } else if (engine?.available && store.hasEmbeddings()) {
+          // Legacy JS vector search fallback
           try {
             const cachedVec = getCachedQueryEmbedding(query);
             let queryVec: Float32Array | undefined = cachedVec;
@@ -149,8 +197,19 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
               }
             }
           } catch {
-            // Vector search is best-effort — gracefully fall back to keyword only.
+            // Vector search is best-effort
           }
+        }
+
+        // Compute ResNet decay factors for each candidate memo.
+        // ResNet = D^daysSince — starts at 1.0 for fresh memos, decays based on tag-specific D.
+        const resNetFactors = new Map<string, number>();
+        for (const memo of all) {
+          const tags = new Set(memo.tags ?? []);
+          const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 0.88 : 0.85;
+          const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
+          const resNetFactor = Math.pow(D, daysSince);
+          resNetFactors.set(memo.id, resNetFactor);
         }
 
         if (all.length === 0) {
@@ -168,7 +227,18 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
           currentProjectDir,
           projectTagCloud,
           vectorScores,
+          resNetFactors,
         });
+
+        // Auto-promote archived memos that were relevant
+        if (archivedHitIds !== undefined && archivedHitIds.length > 0 && store.autoPromoteHits) {
+          const promotedIds = archivedHitIds.filter((id) =>
+            ranked.some((r) => r.memo.id === id),
+          );
+          if (promotedIds.length > 0) {
+            store.autoPromoteHits(promotedIds).catch(() => {});
+          }
+        }
 
         if (ranked.length === 0) {
           return {
