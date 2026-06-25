@@ -89,14 +89,18 @@ export class LspClient {
       this.process = await this.jian.exec(...this.command);
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        // Command not found in PATH — retry via npx (same dir as node.exe)
+        // Command not found in PATH — retry via npx
         try {
           const nodeBin = dirname(process.execPath);
-          this.process = await this.jian.exec(
-            join(nodeBin, 'npx.cmd'),
-            '-y',
-            ...this.command,
-          );
+          const npxPath = join(nodeBin, 'npx.cmd');
+          if (process.platform === 'win32') {
+            // .cmd files cannot be spawned directly on Windows; wrap via cmd.exe
+            this.process = await this.jian.exec(
+              'cmd.exe', '/d', '/s', '/c', npxPath, '-y', ...this.command,
+            );
+          } else {
+            this.process = await this.jian.exec(npxPath, '-y', ...this.command);
+          }
         } catch (npxError) {
           const msg = npxError instanceof Error ? npxError.message : String(npxError);
           throw new Error(

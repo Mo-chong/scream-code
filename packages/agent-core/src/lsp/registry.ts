@@ -24,11 +24,26 @@ async function _resolveCmd(desc: LspCommand): Promise<string[]> {
 
   if (process.platform === 'win32' && desc.languageId.startsWith('typescript')) {
     // On Windows, npm-installed .cmd wrappers can't be spawned directly.
-    // Resolve to `node <lib/cli.mjs>` via the global npm root.
+    // Try multiple strategies to find the actual JS entry point:
+    // 1. npm root -g (global install)
+    // 2. npm next to node.exe (node's own npm)
+    // 3. Bundled require resolution
+    for (const npmCmd of ['npm', 'npm.cmd']) {
+      try {
+        const npmRoot = execSync(npmCmd + ' root -g', { encoding: 'utf8' }).trim();
+        const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
+        await access(entry); // confirm it exists
+        const resolved: string[] = [process.execPath, entry, '--stdio'];
+        _cmdCache.set(key, resolved);
+        return resolved;
+      } catch { /* try next strategy */ }
+    }
+    // Fallback: try npm next to node.exe
     try {
-      const npmRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+      const nodeBin = dirname(process.execPath);
+      const npmRoot = execSync(join(nodeBin, 'npm.cmd') + ' root -g', { encoding: 'utf8' }).trim();
       const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
-      await access(entry); // confirm it exists
+      await access(entry);
       const resolved: string[] = [process.execPath, entry, '--stdio'];
       _cmdCache.set(key, resolved);
       return resolved;

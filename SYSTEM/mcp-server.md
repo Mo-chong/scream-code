@@ -135,6 +135,18 @@ get loopTools(): readonly ExecutableTool[] {
 
 重启 Scream Code 后自动生效（`McpConnectionManager.connectAll()`）。
 
+#### 工具选择优先级
+
+`codegraph_explore` 被系统指定为代码探索的 **首选工具**，优先级高于 LSP 和 Read/Grep：
+
+```
+mcp__codegraph__codegraph_explore (PRIMARY)
+  → LSP.references / LSP.definition (fallback)
+  → Read / Grep / Glob (last resort)
+```
+
+参见 `SYSTEM/turn-control.md §工具优先级` 和 `AGENTS.md §工具选择优先级`。
+
 ---
 
 ## 注意事项

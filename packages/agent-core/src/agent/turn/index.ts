@@ -135,6 +135,14 @@ export class TurnFlow {
   // ── Phase 9: Convergence gate: turn-level LSP/edit tracking ──
   private turnHasCalledAnyLsp = false;
   private totalStepsWithEditsThisTurn = 0;
+  /** Only code-file edits (.ts/.js/.py/.rs/.go) — docs (.md/.json/.yaml) excluded. */
+  private totalCodeFileEditsThisTurn = 0;
+
+  // ── Phase 16: Code exploration tool priority ─────────────────
+  /** Has any mcp__codegraph__codegraph_* been called this turn (resets per turn). */
+  private hasCalledCodegraphThisTurn = false;
+  /** Consecutive Read/Grep/LSP steps without codegraph this turn — ≥3 triggers reminder. */
+  private knowledgeStepsWithoutCodegraph = 0;
 
   // ── Guard 规则引擎 (Phase 11) ────────────────────────────────
   private lastBashExitCode: number | null = null;
@@ -502,6 +510,9 @@ export class TurnFlow {
     this.toolCountsBeforeVerifyRetry = {};
     this.turnHasCalledAnyLsp = false;
     this.totalStepsWithEditsThisTurn = 0;
+    this.totalCodeFileEditsThisTurn = 0;
+    this.hasCalledCodegraphThisTurn = false;
+    this.knowledgeStepsWithoutCodegraph = 0;
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -970,6 +981,17 @@ export class TurnFlow {
                   );
                 }
               }
+              // 🆕 Phase 16: Read/Grep ≥3 次仍未用过 codegraph → 提醒走高效路径
+              if (
+                (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') &&
+                !this.hasCalledCodegraphThisTurn &&
+                this.knowledgeStepsWithoutCodegraph >= 3
+              ) {
+                this.inject(
+                  '你已经连续多次用 Read/Grep 探索代码。下次可以考虑先用 mcp__codegraph__codegraph_explore — 一次调用返回相关符号源码+调用路径，比多轮 Read/Grep 更高效。',
+                  { kind: 'injection', variant: 'step_code_explore' },
+                );
+              }
 
               return undefined;
             },
@@ -1123,15 +1145,23 @@ export class TurnFlow {
                 if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
                   this.hasCurrentCodeToolsThisStep = true;
                   this.hasKnowledgeToolsThisStep = true;
+                  if (!this.hasCalledCodegraphThisTurn) this.knowledgeStepsWithoutCodegraph++;
                 }
                 if (ctx.toolCall.name === 'MemoryLookup') {
                   this.lastStepCalledMemoryLookup = true;
+                }
+                if (ctx.toolCall.name.startsWith('mcp__codegraph__codegraph')) {
+                  this.hasCalledCodegraphThisTurn = true;
+                  this.knowledgeStepsWithoutCodegraph = 0;
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
                   const editPath = (ctx.args as { path?: string }).path ?? '';
                   const ext = editPath.slice(editPath.lastIndexOf('.')).toLowerCase();
-                  if (TurnFlow.CODE_FILE_EXTS.has(ext)) this.editOnCodeFileThisStep = true;
+                  if (TurnFlow.CODE_FILE_EXTS.has(ext)) {
+                    this.editOnCodeFileThisStep = true;
+                    this.totalCodeFileEditsThisTurn++;
+                  }
                   this.hasWriteToolsThisStep = true;
                 }
                 if (ctx.toolCall.name === 'Write') {
@@ -1769,8 +1799,8 @@ export class TurnFlow {
       },
       {
         priority: 4,
-        check: () => !this.turnHasCalledAnyLsp && this.totalStepsWithEditsThisTurn >= 3
-          ? 'Edited ' + this.totalStepsWithEditsThisTurn + '+ files this turn without any LSP.references call. Verify callers before reporting completion.'
+        check: () => !this.turnHasCalledAnyLsp && this.totalCodeFileEditsThisTurn >= 3
+          ? 'Edited ' + this.totalCodeFileEditsThisTurn + '+ code files this turn without any LSP.references call. Verify callers before reporting completion.'
           : null,
       },
     ];

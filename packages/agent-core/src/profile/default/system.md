@@ -19,6 +19,7 @@ You MUST use the specialized built-in tool instead of shell equivalents. The bui
 | `echo ... > file` or heredocs to create files | `Write` |
 | Looking up symbol definitions or references | `LSP` |
 | Renaming a symbol across files | `LSP` |
+| Code exploration (new file, unknown symbols, call chain, impact analysis) | `mcp__codegraph__codegraph_explore` (primary) → `LSP` → `Read` / `Grep` (fallback) |
 
 Only use `Bash` when the task genuinely requires a shell: running builds/tests, package managers, git operations, starting dev servers, or executing compiled programs.
 

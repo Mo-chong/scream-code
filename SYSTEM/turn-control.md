@@ -85,7 +85,7 @@ runOneTurn()
 - **反事实阻断**（confabulationBlocked）
 - 偏差链未修复
 - 验证假通过
-- 无 LSP 但改了 3+ 文件
+- 无 LSP 但改了 3+ 文件（仅限代码文件，文档不触发）
 
 ---
 
@@ -95,3 +95,30 @@ runOneTurn()
 - system_trigger 和 quality_escalate_ 穿透预算
 - 偏差链激活时 bypassBudget()
 - 预算不足 → eventLog.record('skipped_budget')
+
+---
+
+## 工具优先级（Phase16：代码探索三阶路由）
+
+```
+代码探索和修改前，按此顺序：
+
+1. mcp__codegraph__codegraph_explore  — 新文件/未知符号/调用链（PRIMARY）
+2. LSP.references / LSP.definition     — 已知符号精确定位
+3. Read / Grep / Glob                  — 以上不够时 fallback
+```
+
+**代码级提醒**（turn/index.ts:983-991）：
+- 当前回合连续 Read/Grep ≥3 次且从未调 codegraph → 注入 `step_code_explore` 提醒
+- 调过一次 codegraph `mcp__codegraph__codegraph_*` → 计数清零
+- codegraph MCP 不可用时（断开等），从不触发提醒
+- 提醒只是建议，不阻断执行
+
+**收敛门条件更新**（line 1787）：
+- `totalCodeFileEditsThisTurn >= 3` 才触发（原 `totalStepsWithEditsThisTurn` 含文档）
+- 文档 .md 编辑不再触发"无 LSP"收敛门
+
+**LSP 双层 fallback 修复**（registry.ts + client.ts）：
+- `_resolveCmd()` 3 重 fallback：npm → npm.cmd → nodeBin/npm.cmd
+- `npx fallback` Windows 上改为 cmd.exe 包装 spawn
+- 解决 bundle 环境 PATH 极简下 LSP 不可用的问题

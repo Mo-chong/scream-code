@@ -22,7 +22,7 @@
 | **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）** |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
-| **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 1737 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
+| **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
 | **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出 |
@@ -78,6 +78,9 @@
 | normalizeTags 为什么用 MAX_TAGS_ABSOLUTE | `SYSTEM/pitfalls.md` §坑 1：normalizeTags 硬编码 |
 | Dream 合并标签为什么不继承黑名单 | `SYSTEM/pitfalls.md` §坑 2：Dream 合并跳过 processTags |
 | 标签质量统计在哪 | `SYSTEM/memory-store.md` §六点五 → tag-stats.ts |
+| 代码探索用什么工具优先 | `SYSTEM/turn-control.md` §工具优先级 |
+| LSP 报 spawn EINVAL / npx fallback 失败 | `SYSTEM/pitfalls.md` §LSP 故障 #2：bundle 环境双重 fallback 失败 |
+| bundle 环境 PATH 极简，外部命令找不到 | `SYSTEM/pitfalls.md` §LSP 故障 #2 → bundle env 的 PATH 构成 |
 | MCP 工具有几种/怎么配 | `SYSTEM/mcp-server.md` |
 | codegraph 索引了什么 | `SYSTEM/mcp-server.md` §codegraph |
 | 内置工具和 MCP 工具有权重差吗 | `SYSTEM/mcp-server.md` §工具类型与权重 |

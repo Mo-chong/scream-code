@@ -669,3 +669,67 @@ Step 3：验证修复（30s）
 2. diagnostics vs references 功能差异是 LSP 调试的关键排除点
 3. 每次修复完先确认 bundle 有没有新代码再试，避免"修了 = 等于没修"的无效循环
 4. 错误码是线索不是判决——ENOENT 后面接 EINVAL 说明路径方向对但 spawn 方式错
+
+### LSP 故障 #2：bundle 环境中 npm root -g 和 npx.cmd 双重 fallback 失败（2026-06-25）
+
+**问题**：scream（bundle 运行）中 LSP.references 报 `"not found in PATH and npx fallback failed: spawn EINVAL"`。
+
+**连锁故障链路**：
+
+```
+LSPTool → registry.getClient() → _resolveCmd()
+  → execSync('npm root -g')     ← ❌ npm 在 bundle 环境中不在 PATH
+  → fallthrough 返回原始命令     ← [typescript-language-server, --stdio]
+  → client.ts jian.exec()       ← spawn ENOENT（不在 PATH）
+  → npx fallback: spawn('npx.cmd', ...)  ← spawn EINVAL（.cmd 不能直接 spawn）
+```
+
+**根因**：两次 fallback 都卡在同一个 Windows 限定上——bundle 打包后 `PATH` 环境变量只有 Windows 系统目录和 scream 所在目录，`npm` 和 `typescript-language-server` 都不在 PATH 中。
+
+**修复两处**：
+
+| 文件 | 旧 | 新 |
+|------|----|----|
+| `registry.ts` | 只试 `execSync('npm root -g')` | 3 重 fallback：`npm` → `npm.cmd` → `nodeBin/npm.cmd` |
+| `client.ts` | 直接 `spawn(npxPath, '-y', ...)` | Windows 上包装为 `cmd.exe /d /s /c npx.cmd -y ...` |
+
+**bundle env 的 PATH 构成**：
+```
+bundle 运行时的 process.env.PATH 通常只包含:
+  C:\Windows\system32
+  C:\Windows
+  D:\reasonix\  (scream 所在目录)
+  
+不含:
+  C:\Program Files\nodejs\           ← npm/node
+  %APPDATA%\npm\                     ← 全局 node_modules .bin
+  C:\Users\Administrator\.cargo\bin  ← rust-analyzer
+```
+
+这意味着 bundle 中 spawn 外部命令（typescript-language-server、npx、npm）全部依赖 registry.ts 的 `_resolveCmd()` 解析到 `node <entry>`，或者 client.ts 的 npx fallback——两者之前都有 Windows .cmd 缺陷。
+
+**教训**：
+1. bundle 环境的 PATH 极简——不要假设任何外部命令在 PATH 中
+2. `_resolveCmd()` 的 `npm root -g` 本身依赖 `npm` 在 PATH 中——bundle 中这也不成立，必须用 `nodeBin/npm.cmd` 绕过
+3. npx fallback 的 `.cmd` 不能直接 spawn——这是 Windows 上所有 `.cmd` 文件的通用限制，不限于 npx
+4. LSP.references 报 `spawn EINVAL` 基本就是 spawn 了 `.cmd` 文件——排查方向固定
+
+**新增 checklist 条目**：
+
+```
+症状：LSP 报 "spawn EINVAL" + "npx fallback failed"
+
+Step 1：看错误类型（30s）
+  "not found in PATH" → registry.ts 的 resolve 失败
+  "spawn EINVAL"     → .cmd 文件被直接 spawn
+  两者都有            → resolve 和 npx fallback 都废了
+
+Step 2：检查 bundle 中的 resolve 代码（2min）
+  grep "npm root -g" dist/app-*.mjs       → 旧代码只有一种尝试？
+  grep "npm.cmd.*root" dist/app-*.mjs     → 新代码有多种 fallback？
+  grep "cmd.exe.*npx" dist/app-*.mjs      → npx fallback 用了 cmd.exe 包装？
+
+Step 3：直接手动运行 resolve 路径（3min）
+  node -e "console.log(require('child_process').execSync('npm root -g').toString())"
+  → 在 bundle 环境（/d/reasonix/）跑一遍看是否成功
+```
