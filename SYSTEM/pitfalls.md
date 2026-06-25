@@ -63,13 +63,106 @@ pnpm build (scream-code)  # 打包进最终 bundle ← 这步必须做
 
 ### FTS5 不索引 tags 列
 
-**问题**：想搜索 `behavior-rule` 标签的记忆，直接 `search("behavior-rule")` 没结果。
+**问题**：想搜索 `chundu` 标签的记忆，直接 `search("chundu")` 没结果。
 
 **根因**：FTS5 索引只覆盖了 `user_need`, `approach`, `what_failed`, `what_worked`, `source_session_title` 五列（store.ts:344-351），tags 存为 JSON 字符串不在索引中。
 
-**解决**：先 `search("关键词")` 语义初筛，再 `.filter(m => m.tags?.includes('behavior-rule'))` tag 精筛。
+**解决**：先 `search("关键词")` 语义初筛，再 `.filter(m => m.tags?.includes('chundu'))` tag 精筛。
 
 **教训**：不能假设 FTS5 能搜一切。看 `CREATE VIRTUAL TABLE` 定义确认索引覆盖的字段。
+
+### MCP 连接失败：env 过滤器删了 PATHEXT（2026-06-25 排查）
+
+**问题**：MCP 服务器 context7 和 codegraph 均报 "Connection closed"，但终端中独立启动正常。
+
+**根因**：`client-stdio.ts:221` 的 `ALLOWED_ENV_PREFIXES` 列表中缺少 `PATHEXT` 和 `COMSPEC`。
+Windows 上 cross-spawn 7.0.6 在 `shell: false` 模式下依赖 `PATHEXT` 来解析命令名的扩展名（`context7-mcp` → `context7-mcp.cmd`）。env 过滤器把这俩环境变量删了，cross-spawn 找不到可执行文件，MCP 连接全部失败。
+
+**修复**：`ALLOWED_ENV_PREFIXES` 加入 `'PATHEXT', 'COMSPEC'`，四包重建。
+
+**教训**：
+1. Windows 上 spawn 依赖 `PATHEXT` 解析 .cmd 文件——env 过滤器不要砍它
+2. MCP 服务器终端的独立启动正常 ≠ 在 scream 进程中能正常启动（env 不同）
+3. Node 24 CVE-2024-27980 加固后 `.cmd` 文件必须经 `cmd.exe` 包装才能 spawn，cross-spawn 的 `parseNonShell()` 做这个包装需要 PATHEXT
+
+### MCP 连接失败 #2：PATHEXT 被 Git Bash 注入双引号字符（2026-06-25）
+
+**问题**：context7 和 codegraph MCP 服务器持续报 "Connection closed" + "不是内部或外部命令" 的错误。桌面快捷方式启动正常，终端（Git Bash）启动失败。
+
+**根因**：Git Bash（MSYS2/MINGW）有一个已知行为——从 Windows 继承环境变量时，会在 `PATHEXT` 值周围包裹双引号。实际值形如：
+```
+"\";.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.SH\";.CPL"
+```
+首尾各有一个嵌入式 `"`（ASCII 0x22）。
+
+当 cross-spawn 收到 `normalizeWinCommand()` 追加 `.cmd` 的命令（如 `context7-mcp.cmd`），其 `parseNonShell()` 检测到文件不是 `.com/.exe`（`isExecutableRegExp`），于是包装为：
+```
+cmd.exe /d /s /c "context7-mcp.cmd ..."
+```
+`.cmd` 文件内容执行 `"%_prog%"`（即 `"node"`）时，`cmd.exe` 用 `PATHEXT` 来解析 `"node"`。但畸形的 PATHEXT 包含了双引号，导致 `cmd.exe` 找不到 `node.exe`，立刻报错退出。MCP SDK 的 `StdioClientTransport.start()` 收到 process error（`error` 事件），标记连接关闭。
+
+为什么桌面快捷方式正常？因为 `wt.exe` → `scream.cmd` → `cmd.exe` → `node main.mjs` 这个路径下，`process.env.PATHEXT` 来自原生 `cmd.exe`，值是干净的（无引号）。而 Git Bash 的 `sh` → `scream` shebang 脚本 → `node main.mjs` 路径下，MSYS2 转译时给 PATHEXT 加了双引号。
+
+**完整 env 传递链**：
+```
+MCP SDK getDefaultEnvironment() → 只传 12 个 Win32 白名单变量（不含 PATHEXT）
+  ↓ 合并
+Scream mergeStdioEnv() → 从 process.env 复制 PATHEXT（含引号）
+  ↓ 传给子进程 env
+cross-spawn → parseNonShell() 包装 cmd.exe
+  ↓
+cmd.exe 运行 .cmd 文件 → %PATHEXT% 含引号 → 找不到 node → 报错
+```
+
+**修复**：`mergeStdioEnv()` 中对 `PATHEXT` 值执行 `value.replace(/"/g, '')` 清洗双引号。
+
+**教训**：
+1. Git Bash/MSYS2 下的 `process.env` 不干净——环境变量可能含转译 artifact
+2. PATHEXT 这个变量在 Windows 的 `cmd.exe` 中尤其敏感，畸形值直接导致 `cmd.exe` 找不到任何命令
+3. 快捷方式启动 vs 终端启动的差异，本质是 `cmd.exe` 原生环境 vs Git Bash 转译环境的差异
+4. pnpm 本身也在 Git Bash 中被同样问题影响——修复前连 `pnpm build` 都跑不了
+
+### yongjiu 标签不生效：代码正确但 app 没重建（2026-06-25 排查）
+
+**问题**：源代码中 yongjiu 的 demote 免疫、ResNet D=1、PROTECTED_TAGS、♾️图标全部写好了，但运行时不生效。
+
+**根因**：双构建链陷阱（`deps.alwaysBundle`）。scream-code 的 `tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` 把所有 `@scream-*` 包都打包进 scream-code 的 bundle。只 build memory/agent-core 不够，**必须 build scream-code** 才会生成包含新代码的最终 bundle。此外 symlink `/d/reasonix/node_modules/scream-code` → `ScreamCode/apps/scream-code` 指向正确，但 dist 是旧版本。
+
+**排查过程**：
+1. 查源代码 → yongjiu 代码全部正确 ✅
+2. 查 memory/dist/agent-core/dist → yongjiu 存在 ✅
+3. 查 scream-code/dist → 旧 bundle 没有 yongjiu ❌ → 原来是 screams-code 未重建
+4. 查 symlink 确认指向最新版本 → 正确 ✅
+5. 查 scream --version → 0.6.10 ✅ 但运行时载入的是旧 bundle
+
+**修复**：四个包全部用 tsdown 入口逐个重建（config → memory → agent-core → scream-code）。
+
+**教训**：
+1. 验证链路必须是：源代码 → 每个依赖包的 dist → 最终入口的 bundle → 测试 → 重启
+2. 中间产物（memory/agent-core 的 dist）不对 = 不用继续查源文件，直接重建
+3. 写了正确代码 + build 通过 ≠ 最终 bundle 已更新。scream-code 的最后一步 build 必须跑
+4. "代码正确"和"生效"之间差一个完整的构建链
+
+### 双构建链陷阱的验证方法（2026-06-25 补充）
+
+**问题**：如何确认最终 bundle 确实包含了新代码？
+
+**解决**：三步验证法：
+
+```bash
+# Step 1: 查 dist 产物（最快判断方向）
+grep "yongjiu" packages/memory/dist/index.mjs      # memory 包有吗？
+grep "yongjiu" apps/scream-code/dist/app-*.mjs     # 最终 bundle 有吗？
+
+# Step 2: 查 bundle hash 是否变了
+ls -la apps/scream-code/dist/                      # 看 hash 和 timestamp
+cat apps/scream-code/dist/main.mjs                 # main 指向哪个 bundle？
+
+# Step 3: 运行测试
+npx vitest run packages/memory/test/tier-yongjiu.test.ts  # 功能测试
+```
+
+**教训**：永远不要相信"代码改了 + build 没报错 = 已生效"。必须在最终 bundle 中 grep 确认。
 
 ### baohu 标签的副作用 — Dream 免疫导致无法通过工具编辑
 
@@ -355,7 +448,131 @@ scream --version                 # 确认工作
 
 ## 调试教训
 
-### 症状相同 ≠ 根因相同 — LSP 超时调试的链式故障反思（2026-06-23）
+### MCP 连接失败全复盘 — 同一个现象背后是 2 个独立 bug 的链式叠加（2026-06-25）
+
+> 三次修复，三次重启，同一个现象 "Connection closed"，背后是 env 过滤 + normalizeCommand + PATHEXT 污染三个 bug 依次浮现。
+
+#### 经过
+
+```
+2026-06-24 晚上：
+  用户反馈：MCP context7/codegraph 全部报 "Connection closed"
+  尝试：自己开终端独立启动 context7-mcp → 正常
+  判断：不是服务端问题，是 scream 的 spawn 环境有问题
+
+Round 1 → 修 ALLOWED_ENV_PREFIXES（约 30 分钟）
+  猜测：env 过滤太严格，砍了 PATHEXT/COMSPEC
+  操作：client-stdio.ts 的 ALLOWED_ENV_PREFIXES 加入 PATHEXT/COMSPEC
+  构建：四包重建，重启
+  结果：还是一样 ❌
+
+Round 2 → 修 normalizeWinCommand + findCmdInPath（约 45 分钟）
+  猜测：bare name "context7-mcp" 没有 .cmd 后缀，cross-spawn 找到 shebang 脚本后死锁
+  操作：增加 normalizeWinCommand() 对 Win32 追加 .cmd，增加 findCmdInPath() 搜索 PATH
+  构建：四包重建，重启
+  结果：桌面快捷方式正常了 ✅，但终端启动仍然失败 ❌
+        → 发现"桌面快捷方式正常"这个关键线索
+
+Round 3 → 修 PATHEXT 双引号污染（约 60 分钟）
+  猜测：终端 vs 快捷方式的差异来自启动环境不同
+  验证 PATH：findCmdInPath 在 node 环境本身就能找到 .cmd → 没问题
+  验证 env 传递链：发现 MCP SDK 的 getDefaultEnvironment() 有自己的一套白名单！
+  验证 cross-spawn 解析：parseNonShell() 对 .cmd 文件包装 cmd.exe /d /s /c
+  关键测试：cmd /c context7-mcp.cmd --version 在过滤后的 env 中运行 → 报错
+  PATHEXT 检查：发现 process.env.PATHEXT 的值包含嵌入式双引号！
+  "\";.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.SH\";.CPL"
+  修复：mergeStdioEnv() 中对 PATHEXT 值做 value.replace(/"/g, '')
+  构建：四包重建，重启
+  结果：桌面和终端都正常了 ✅
+```
+
+#### bug 叠加关系
+
+```
+Bug 1: ALLOWED_ENV_PREFIXES 缺 PATHEXT
+  ↓ 修了
+Bug 2: cross-spawn 对 bare name 走 shebang 死锁（normalizeWinCommand）
+  ↓ 修了
+Bug 3: Git Bash 给 PATHEXT 注入双引号，.cmd 文件里 cmd.exe 找不到 node
+  ↓ 这个才是终端启动失败的最终根因
+```
+
+没有 Round 1 的修复，Round 3 的 PATHEXT 值就算清洗了也传不进去。
+没有 Round 2 的修复，bare name 会走 shebang 路径先报错。
+三个 bug 叠加 → 同一个 "Connection closed" 现象。
+
+#### 关键排查方法
+
+1. **AB 对比（桌面 vs 终端）**：同一个代码，不同的启动环境。这种对比比胡乱改代码高效百倍——环境差异才是突破口。
+2. **写最小复现测试**：`cmd /c context7-mcp.cmd --version` 在过滤后的 env 中跑——结果报的不是"Connection closed"而是"不是内部或外部命令"。中文 Windows 把真正的根因暴露出来了。
+3. **逐层检查 env 传递链**：`process.env.PATHEXT` → `mergeStdioEnv()` 输出 → `getDefaultEnvironment()` 合并 → cross-spawn 接收的 env → cmd.exe 看到的 PATHEXT。每一层都做一个 console.log 确认值。
+4. **拆分成功/失败的 env 差异**：对比桌面快捷方式的 env（干净 PATHEXT）和终端启动的 env（含引号 PATHEXT）→ 直接定位到污染源。
+
+#### 教训总结
+
+**教训 1：同一个现象，背后可能是多个独立 bug 叠加**
+"Connection closed"可以是：
+- 命令找不到（PATHEXT 被过滤）
+- shebang 死锁（bare name 没加 .cmd）
+- cmd.exe 解析失败（PATHEXT 被污染）
+
+每次都修一个，每次都以为修完了——但只有三个全修了才走通。
+
+**教训 2：终端启动 ≠ 桌面快捷方式启动**
+这是 Windows 特有的坑。快捷方式走 `wt.exe → cmd.exe → node`，终端走 `sh → shebang → node`。两个路径下 `process.env` 的内容不同：
+- 快捷方式：环境变量直接来自 Windows 注册表 → 干净
+- Git Bash：MSYS2 转译 → 可能给环境变量加引号、改格式
+
+**教训 3：MCP SDK 有自己的 env 白名单**
+`@modelcontextprotocol/sdk` 的 `StdioClientTransport.start()` 调用 `getDefaultEnvironment()`，只继承了 12 个 Windows 白名单变量（不含 PATHEXT/COMSPEC）。所以只修 scream 的 `mergeStdioEnv()` 加白名单还不够——还要确保 SDK 自带的 env 继承不会筛掉它们。
+
+看代码：`getDefaultEnvironment()` 不会覆盖 scream 传入的 env，因为 SDK 先 `...getDefaultEnvironment()` 再 `...env`。所以 mergeStdioEnv 额外传一份就能覆盖——但前提是 mergeStdioEnv 本身传了正确的值。
+
+**教训 4：最小复现测试比猜代码更有效**
+与其反复读 `client-stdio.ts` 猜"这里会不会有问题"，不如直接写一个 20 行的 CJS 文件模拟 spawn：
+```
+cp.spawnSync('cmd.exe', ['/d','/s','/c', 'context7-mcp.cmd --version'], { env })
+```
+结果马上告诉你问题在 env 不在代码逻辑。
+
+**教训 5：process.env 在 Git Bash 下不可信任**
+```
+Raw PATHEXT: "\";.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.SH\";.CPL"
+```
+Git Bash 的环境变量可能包含引号包裹等 MSYS2 转译 artifact——任何传递给子进程的 env 变量都应该做基本清洗。
+
+**教训 6：交叉验证链路**
+```
+源代码改了 → dist 编译了 → bundle 确认包含新代码 → 最小复现测试通过 → 重启
+```
+每一步都能通过 grep/file 验证，不要跳过任意一环。本轮排查踩的坑——"修了 build 了重启了还是一样"——就是因为 patch 1 和 patch 2 没有在 bundle 中 grep 确认存在。
+
+#### MCP 调试 checklist（更新版）
+
+```
+症状：MCP 服务器报 "Connection closed" 或 "不是内部或外部命令"
+
+Step 1：区分启动路径（30s）
+  桌面快捷方式 vs 终端（Git Bash）启动 → 结果是否相同？
+  不同 → 环境差异问题；相同 → 代码逻辑问题
+
+Step 2：独立启动验证（30s）
+  终端直接跑命令看能否正常运行
+  能 → spawn 环境问题；不能 → 服务端/安装问题
+
+Step 3：写最小复现（5min）
+  cp.spawnSync('cmd.exe', ['/d','/s','/c', '<command> --version'], { env })
+  看 stderr 的具体错误（不是 Connection closed，而是"不是内部或外部命令"）
+
+Step 4：检查 env 传递链（5min）
+  process.env.PATHEXT 是否干净？
+  mergeStdioEnv() 的输出是否包含 PATHEXT/COMSPEC？
+  getDefaultEnvironment() 的 12 个白名单是否足够？
+
+Step 5：检查 bundle（2min）
+  grep "PATHEXT" dist/app-*.mjs → 确认新代码已打包
+  dist/main.mjs 是否指向最新的 hash bundle
+
 
 **经过**：修复 LSP.references 超时用了 10+ 轮对话，尝试了 5 种不同方向（agent.yaml 工具注册、僵尸进程、workspace root、npx fallback、全局安装、Windows .cmd）才全部解决。
 

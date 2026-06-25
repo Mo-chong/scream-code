@@ -57,7 +57,8 @@
 | 保护标签 baohu | `SYSTEM/dream.md` §保护标签 |
 | 置顶标签 ding | `SYSTEM/memory-store.md` §标签体系 |
 | 拼音标签体系 | `SYSTEM/memory-store.md` §标签体系 |
-| behavior-rule 怎么过滤 | `SYSTEM/memory-store.md` §纯度控制 |
+| chundu 怎么过滤规则 | `SYSTEM/memory-store.md` §纯度控制 |
+| yongjiu 标签有什么用 | `SYSTEM/memory-store.md` §标签体系 |
 | 搜索评分 ding 权重 | `SYSTEM/memory-store.md` §dingBoost |
 | MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
 | 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
@@ -68,6 +69,9 @@
 | 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
 | 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
 | 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
+| MCP 连接失败（PATHEXT 被删） | `SYSTEM/pitfalls.md` §MCP 连接失败 |
+| yongjiu 不生效（构建链陷阱） | `SYSTEM/pitfalls.md` §yongjiu 标签不生效 |
+| 双构建链陷阱的验证方法 | `SYSTEM/pitfalls.md` §双构建链陷阱的验证方法 |
 | MCP 工具有几种/怎么配 | `SYSTEM/mcp-server.md` |
 | codegraph 索引了什么 | `SYSTEM/mcp-server.md` §codegraph |
 | 内置工具和 MCP 工具有权重差吗 | `SYSTEM/mcp-server.md` §工具类型与权重 |

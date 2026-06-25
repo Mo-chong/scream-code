@@ -2,6 +2,8 @@ import { ErrorCodes, ScreamError } from '#/errors';
 import type { McpServerStdioConfig } from '#/config/schema';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import * as path from 'node:path';
+import { existsSync } from 'node:fs';
 
 import {
   buildRequestOptions,
@@ -13,6 +15,68 @@ import {
   type UnexpectedCloseReason,
 } from './client-shared';
 import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
+
+/**
+ * Decode a stderr buffer: prefer UTF-8, fall back to GBK on Windows.
+ *
+ * On Chinese/Japanese/Korean Windows, console output is typically encoded in
+ * the system code page (cp936 / shift-jis / euc-kr), not UTF-8.  Guessing the
+ * right encoding from node alone is impractical, so we take a pragmatic
+ * heuristic: try UTF-8 first; if the result contains replacement characters
+ * (U+FFFD, a sign of invalid byte sequences), decode as GBK (the most common
+ * non-UTF-8 Windows code page for CJK environments).
+ */
+function decodeStderr(chunk: Buffer): string {
+  if (process.platform !== 'win32') return chunk.toString('utf8');
+  const utf8 = chunk.toString('utf8');
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    return new TextDecoder('gbk').decode(chunk);
+  } catch {
+    return utf8;
+  }
+}
+
+/**
+ * Normalize a bare command name on Windows so cross-spawn resolves the `.cmd`
+ * wrapper instead of the POSIX shebang script.
+ *
+ * Many npm / pnpm binaries ship three files under the global bin directory:
+ *   - `foo`       (POSIX shebang script: `#!/bin/sh`)
+ *   - `foo.cmd`   (Windows batch wrapper)
+ *   - `foo.ps1`   (PowerShell wrapper)
+ *
+ * When the MCP config specifies `"command": "foo"` (no extension),
+ * cross-spawn's `parseNonShell()` finds the bare `foo` file, reads its
+ * shebang (`#!/bin/sh`), resolves `sh` → `/usr/bin/sh` (which has no `.exe`
+ * extension in the resolved path), wraps EVERYTHING in `cmd.exe`, and then
+ * `cmd.exe` cannot execute the shebang script — producing the misleading
+ * "不是内部或外部命令，也不是可运行的程序或批处理文件" error.
+ *
+ * Only append `.cmd` when a `.cmd` wrapper actually exists in PATH — bare
+ * commands like `node` (which resolve to `node.exe`) are left untouched.
+ */
+function normalizeWinCommand(command: string): string {
+  // Only normalize bare names (no path separator, no extension).
+  if (command.includes('/') || command.includes('\\')) return command;
+  const ext = path.extname(command);
+  if (ext.length > 0) return command;
+  return findCmdInPath(command) ? command + '.cmd' : command;
+}
+
+/** Search PATH for `<command>.cmd`. Returns the full path or undefined. */
+function findCmdInPath(command: string): string | undefined {
+  const pathDirs = (process.env.PATH || '').split(path.delimiter);
+  for (const dir of pathDirs) {
+    try {
+      const cmdPath = path.join(dir, command + '.cmd');
+      if (existsSync(cmdPath)) return cmdPath;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
 
 export interface StdioMcpClientOptions {
   readonly clientName?: string;
@@ -56,8 +120,9 @@ export class StdioMcpClient implements MCPClient {
     if (config.executor !== undefined && config.executor !== 'local') {
       throw new ScreamError(ErrorCodes.NOT_IMPLEMENTED, `MCP stdio executor '${config.executor}' is not yet implemented`);
     }
+    const command = process.platform === 'win32' ? normalizeWinCommand(config.command) : config.command;
     this.transport = new StdioClientTransport({
-      command: config.command,
+      command,
       args: config.args,
       env: mergeStdioEnv(config.env),
       cwd: config.cwd,
@@ -68,7 +133,7 @@ export class StdioMcpClient implements MCPClient {
     // connection manager can attach it to user-facing failure messages
     // (`Timed out after 30000ms` on its own tells the user nothing).
     this.transport.stderr?.on('data', (chunk: Buffer | string) => {
-      this.stderrBuffer.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      this.stderrBuffer.push(typeof chunk === 'string' ? chunk : decodeStderr(chunk));
     });
     this.client = new Client({
       name: options.clientName ?? SCREAM_MCP_CLIENT_NAME,
@@ -226,6 +291,10 @@ const ALLOWED_ENV_PREFIXES = [
   'SYSTEMROOT', 'ProgramFiles', 'ProgramFiles(x86)', 'APPDATA', 'LOCALAPPDATA',
   'TERM', 'COLORTERM', 'NO_COLOR', 'FORCE_COLOR',
   'SSH_AUTH_SOCK', 'SSH_AGENT_PID',
+  // Windows: required for command resolution in child processes (Node 24
+  // CVE-2024-27980 hardening blocks .cmd/.bat spawn with shell:false, so MCP
+  // servers that use .cmd wrappers need PATHEXT to resolve the real target).
+  'PATHEXT', 'COMSPEC',
 ];
 
 function isEnvAllowed(key: string): boolean {
@@ -235,7 +304,17 @@ function isEnvAllowed(key: string): boolean {
 function mergeStdioEnv(configEnv?: Record<string, string>): Record<string, string> {
   const merged: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && isEnvAllowed(key)) merged[key] = value;
+    if (value !== undefined && isEnvAllowed(key)) {
+      // Git Bash / MSYS2 can inject stray double-quotes into PATHEXT
+      // (e.g. `\"";.COM;...;.SH";.CPL"`).  Those quotes break cmd.exe's
+      // command resolution when a `.cmd` wrapper runs `"%_prog%"` — the
+      // corrupt PATHEXT prevents `cmd.exe` from locating `node`.
+      if (key === 'PATHEXT') {
+        merged[key] = value.replace(/"/g, '');
+      } else {
+        merged[key] = value;
+      }
+    }
   }
   if (configEnv !== undefined) Object.assign(merged, configEnv);
   return merged;

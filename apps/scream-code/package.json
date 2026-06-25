@@ -59,6 +59,7 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.78.1",
     "@mariozechner/clipboard": "^0.3.2",
+    "@photostructure/sqlite-vec": "^1.1.1",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",
     "commander": "^13.1.0",

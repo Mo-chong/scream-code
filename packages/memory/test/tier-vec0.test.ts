@@ -153,6 +153,15 @@ describe('Hot/Cold tier + vec0 integration', () => {
     expect(await store.get(memo.id)).toBeDefined();
   });
 
+  it('demote also refuses chundu-tagged memos (merged from behavior-rule)', async () => {
+    const memo = makeMemo({ id: 'chundu-demote', tags: ['chundu'] });
+    await store.append(memo);
+
+    const ok = await store.demote(memo.id);
+    expect(ok).toBe(false);
+    expect(await store.get(memo.id)).toBeDefined();
+  });
+
   it('demote preserves vec0 entry with ARCHIVED tier', async () => {
     const memo = makeMemo({ id: 'd-vec0' });
     await store.append(memo);
@@ -296,6 +305,19 @@ describe('Hot/Cold tier + vec0 integration', () => {
 
     await store.autoDemoteIfNeeded();
     // baohu — should still be in hot tier
+    expect(await store.get(memo.id)).toBeDefined();
+  });
+
+  it('autoDemoteIfNeeded also spares chundu-tagged hot memos', async () => {
+    const memo = makeMemo({
+      id: 'chundu-auto',
+      recordedAt: Date.now() - 200 * 24 * 60 * 60 * 1000,
+      tags: ['chundu'],
+    });
+    await store.append(memo);
+
+    await store.autoDemoteIfNeeded();
+    // chundu — should still be in hot tier
     expect(await store.get(memo.id)).toBeDefined();
   });
 

@@ -34,6 +34,26 @@ import { printableChar } from '#/tui/utils/printable-key';
 
 const ELLIPSIS = '…';
 
+const PRIORITY_TAGS = new Set(['baohu', 'ding', 'chundu', 'yongjiu']);
+
+function applyPrioritySort(memos: MemoryMemoSummary[]): MemoryMemoSummary[] {
+  return memos.sort((a, b) => {
+    const aPrio = a.tags?.some((t) => PRIORITY_TAGS.has(t)) ?? false;
+    const bPrio = b.tags?.some((t) => PRIORITY_TAGS.has(t)) ?? false;
+    if (aPrio !== bPrio) return aPrio ? -1 : 1;
+    return b.recordedAt - a.recordedAt;
+  });
+}
+
+/** 记忆热力分值（模拟 ResNet）：标签保底 + 新近度衰减 */
+function computeHeatScore(memo: MemoryMemoSummary): number {
+  if (memo.tags?.includes('yongjiu') || memo.tags?.includes('chundu')) return 1;
+  if (memo.tags?.includes('baohu')) return 0.99;
+  if (memo.tags?.includes('ding')) return 0.95;
+  const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
+  return Math.max(0, +(1 - daysSince / 90).toFixed(2));
+}
+
 function formatRelativeTime(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
   const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
@@ -112,6 +132,7 @@ function memoBadges(tags: string[] | undefined): string {
   if (tags.includes('baohu')) icons.push('🔒');
   if (tags.includes('ding')) icons.push('📌');
   if (tags.includes('chundu')) icons.push('🧠');
+  if (tags.includes('yongjiu')) icons.push('♾️');
   return icons.length > 0 ? icons.join('') : '';
 }
 
@@ -152,7 +173,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
   constructor(opts: MemoryPickerOptions) {
     super();
     this.store = opts.store;
-    this.memos = opts.memos;
+    this.memos = applyPrioritySort(opts.memos);
     this.total = opts.total;
     this.loading = opts.loading;
     this.colors = opts.colors;
@@ -166,8 +187,10 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.ui?.requestRender();
     try {
       await this.store.init();
-      const result = await this.store.list({ limit: 50, search: this.searchQuery || undefined });
-      this.memos = result.memos;
+      const result = await this.store.list({ limit: 200, search: this.searchQuery || undefined });
+      // 带 baohu/ding/chundu/yongjiu 标签的记忆优先置顶，其余按时间倒序
+      applyPrioritySort(result.memos);
+      this.memos = result.memos.slice(0, 50);
       this.total = result.total;
       this.selectedIndex = 0;
     } catch {
@@ -411,7 +434,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const time = formatRelativeTime(memo.recordedAt);
     const src = sourceLabel(memo.extractionSource);
     const badges = memoBadges(memo.tags);
-    const trailingParts = [badges, time, src].filter((p) => p.length > 0);
+    const score = computeHeatScore(memo);
+    const scoreStr = score < 1 ? score.toFixed(2) : '1.00';
+    const trailingParts = [badges, scoreStr, time, src].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1;

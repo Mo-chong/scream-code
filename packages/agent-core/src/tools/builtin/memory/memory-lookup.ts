@@ -206,7 +206,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
         const resNetFactors = new Map<string, number>();
         for (const memo of all) {
           const tags = new Set(memo.tags ?? []);
-          const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 0.88 : 0.85;
+          const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 1 : tags.has('yongjiu') ? 1 : 0.85;
           const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
           const resNetFactor = Math.pow(D, daysSince);
           resNetFactors.set(memo.id, resNetFactor);

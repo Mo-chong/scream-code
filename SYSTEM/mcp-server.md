@@ -144,3 +144,31 @@ get loopTools(): readonly ExecutableTool[] {
 3. **工具发现**：Scream Code **没有自动发现机制**，MCP server 必须手动写入 `mcp.json`
 4. **名称覆盖**：MCP 工具按 `mcp__<serverName>__<toolName>` 命名（`tool-naming.ts`），超 64 字符自动截断加 hash
 5. **输出保护**：MCP 返回超过 100K 字符自动截断（`output.ts`）
+
+---
+
+### Windows 环境变量陷阱
+
+MCP stdio 服务器在 Windows 上的 spawn 流程涉及多层 env 过滤，每层都可能引入问题：
+
+```
+process.env（含 Git Bash 转译 artifact）
+  ↓
+Scream mergeStdioEnv() — 白名单过滤，只保留 ALLOWED_ENV_PREFIXES
+  ↓
+MCP SDK getDefaultEnvironment() — 仅继承 12 个 Win32 变量
+  ↓
+cross-spawn parseNonShell() — 对 .cmd 文件包装 cmd.exe
+  ↓
+cmd.exe 运行 .cmd 文件 — 依赖 PATHEXT 解析命令
+```
+
+**已知问题：**
+
+1. **Git Bash 污染 PATHEXT**：MSYS2/MINGW 从 Windows 继承环境变量时，`PATHEXT` 可能被注入双引号字符。修复：`client-stdio.ts:313` 中 `mergeStdioEnv()` 对 PATHEXT 值做 `value.replace(/"/g, '')`。
+
+2. **cross-spawn 对 bare name 走 shebang 死锁**：对于 `context7-mcp`（无扩展名），cross-spawn 找到 POSIX shebang 脚本后尝试用 `cmd.exe` 包装，但 `cmd.exe` 不识别 shebang。修复：`normalizeWinCommand()` 对 Windows 上 PATH 中存在 `.cmd` 的命令自动追加后缀。
+
+3. **MCP SDK 有自己的 env 白名单**：`getDefaultEnvironment()` 只传 12 个 Win32 变量。Scream 的 `mergeStdioEnv()` 必须在 SDK 合并 *之后* 附加额外变量（如 PATHEXT/COMSPEC），否则 SDK 的白名单会砍掉它们。当前实现中，Scream 的 env **覆盖** SDK 的默认值，所以 SDK 白名单不影响额外变量传递。
+
+4. **pnpm 也被同样影响**：在 Git Bash 中，如果直接调 `pnpm build` 可能因 PATHEXT 污染失败。变通：`node -e "process.env.PATHEXT = process.env.PATHEXT.replace(/\"/g,''); require('child_process').execSync('pnpm build', {stdio:'inherit'})"`。

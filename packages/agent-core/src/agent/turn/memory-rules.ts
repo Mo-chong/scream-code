@@ -1,10 +1,10 @@
 /**
  * MemoryRulesInjector — 记忆主动注入：场景匹配时注入自定义规则记忆。
  *
- * 从记忆系统中搜索 tags 含 'behavior-rule' 的记忆，命中后
+ * 从记忆系统中搜索 tags 含 'chundu' 的记忆，命中后
  * 以 system_trigger 注入到上下文。
  *
- * 纯度保证：只注入用户手动写的规则记忆（tags.includes('behavior-rule')），
+ * 纯度保证：只注入用户手动写的规则记忆（tags.includes('chundu')），
  * 不注入 AI 自动存储的经验记忆。
  */
 
@@ -31,7 +31,7 @@ export async function searchBehaviorRules(
   try {
     const candidates = await store.search(query, { candidateLimit: 20 });
     const rules = candidates.filter(
-      (m) => m.tags?.includes('behavior-rule'),
+      (m) => m.tags?.includes('chundu'),
     );
     return rules.slice(0, limit);
   } catch {

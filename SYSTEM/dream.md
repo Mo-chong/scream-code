@@ -45,14 +45,14 @@ Consolidator (consolidator.ts)  ← 实际干活，buildConsolidationPlan() + ap
 
 ---
 
-## 保护标签 baohu（2026-06-22 新增）
+## 保护标签 baohu + chundu（2026-06-22 新增，v0.6.10 扩展）
 
 ### 原理
 
 ```typescript
 // consolidator.ts:74-75
-const PROTECTED_TAGS = ['baohu'];
-const active = allMemos.filter(m => !m.tags?.includes('baohu'));
+const PROTECTED_TAGS = ['baohu', 'chundu', 'yongjiu'];
+const active = allMemos.filter(m => !m.tags?.some(t => PROTECTED_TAGS.includes(t)));
 // active 不包含保护记忆 → 不会进入合并/删除/过期判断
 ```
 
@@ -93,7 +93,7 @@ m.recordedAt < threshold &&        // 超过 staleDays（30天）
 !m.outcome.includes('blocked')      // 非阻塞
 ```
 
-⚠️ 行为矫正的规则记忆 `outcome: "规则定义 - 永久有效"` 不含"完成"不匹配 completed，30天后也会被标记过期——除非加了 `baohu` 标签。
+⚠️ 行为矫正的规则记忆（带 chundu 标签）已被 `PROTECTED_TAGS` 保护，不会过期。
 
 ---
 
@@ -101,7 +101,8 @@ m.recordedAt < threshold &&        // 超过 staleDays（30天）
 
 | 需求 | tags |
 |------|:----:|
-| 规则记忆 + 受保护 | `["behavior-rule", "baohu"]` |
-| 规则记忆 + 受保护 + 置顶 | `["behavior-rule", "baohu", "ding"]` |
+| 规则记忆 + 受保护 | `["chundu", "baohu"]` |
+| 规则记忆 + 受保护 + 置顶 | `["chundu", "baohu", "ding"]` |
 | 纯保护不想被管 | `["baohu"]` |
-| 可被 dream 整理的普通规则 | `["behavior-rule"]`（不带 baohu） |
+| 永久保留的记忆 | `["yongjiu"]` |
+| 可被 dream 整理的普通规则 | `["chundu"]`（但 chundu 本身已免疫整理——此场景不再存在） |

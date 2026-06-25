@@ -184,7 +184,7 @@ async demote(id): Promise<boolean>
 ```
 
 1. 从 `memos` 读取完整记录
-2. **baohu 免疫**：带 baohu 标签的直接 return false
+2. **baohu/chundu/yongjiu 免疫**：带 baohu 或 chundu 或 yongjiu 标签的直接 return false
 3. 提前读 `memory_embeddings.embedding_json` 保存
 4. `appendToArchive()` 写入 archive（含 embeddingJson）
 5. `deleteInternal(id)` 删除主表 → CASCADE 清 memory_embeddings → `deleteVec0(id)`
@@ -204,7 +204,7 @@ async autoDemoteIfNeeded(): Promise<number>
 |------|------|
 | ResNet < 0.3 | demote |
 | 距 recording > 30 天 | demote |
-| baohu 标签 | 跳过（免疫） |
+| baohu/chundu 标签 | 跳过（免疫） |
 | 热层 > 100 条 | 从最旧开始 evict |
 
 每批次最多 demote **5 条**，避免大量降级。
@@ -325,10 +325,11 @@ detectQueryIntent(query):
 ### 5.4 ResNet 衰减因子
 
 ```typescript
-const D = tags.has('baohu')  ? 0.99   // 几乎不衰减（保护）
-       : tags.has('ding')    ? 0.95   // 慢速衰减（置顶）
-       : tags.has('chundu')  ? 0.88   // 中速衰减（纯度规则）
-       : 0.85;                        // 默认快速衰减（普通经验）
+const D = tags.has('baohu')   ? 0.99   // 几乎不衰减（保护）
+       : tags.has('ding')     ? 0.95   // 慢速衰减（置顶）
+       : tags.has('chundu')   ? 1      // 永不衰减（规则记忆）
+       : tags.has('yongjiu')  ? 1      // 永不衰减（永久记忆）
+       : 0.85;                          // 默认快速衰减（普通经验）
 
 const resNetFactor = Math.pow(D, daysSince);  // 1.0 → 逐渐趋近 0
 ```
@@ -358,29 +359,29 @@ const resNetFactor = Math.pow(D, daysSince);  // 1.0 → 逐渐趋近 0
 
 | 标签 | 图标 | 含义 | 系统效果 | 所属模块 |
 |:----:|:----:|------|----------|----------|
+| `chundu` | 🧠 | 规则记忆 | 注入过滤 + demote/Dream 免疫 + ResNet D=1 | memory-rules.ts + store.ts + consolidator.ts |
 | `baohu` | 🔒 | 保护 | Dream 完全免疫 + demote 跳过 | consolidator.ts + store.ts |
 | `ding` | 📌 | 置顶 | 搜索评分 +0.25 flat bonus | scoring.ts |
-| `chundu` | 🧠 | 纯度规则 | TUI 显示 🧠 标记 | memory-picker.ts |
-| `yongjiu` | — | 永久 | 预留，效果同 baohu | — |
-| `behavior-rule` | — | 行为规则 | 注入系统过滤 | turn/index.ts |
+| `yongjiu` | ♾️ | 永久记忆 | ResNet D=1 永不衰减 + demote/Dream 免疫 | store.ts + consolidator.ts |
 
 ### 6.2 标签隔离
 
 ```
-baohu/ding/chundu     → 系统功能标签（保护/置顶/标记）
-behavior-rule          → 注入系统标签（决定注入与否）
-其他中文标签           → 普通分类标签（AI 自动存储时生成）
+chundu                  → 规则记忆标签（注入过滤 + demote/Dream 免疫 + 永不衰减）
+baohu                   → 保护标签（Dream 免疫 + demote 跳过，衰减 D=0.99）
+ding                    → 置顶标签（搜索 +0.25，衰减 D=0.95）
+yongjiu                 → 永久记忆标签（永不衰减 D=1 + demote/Dream 免疫）
+其他中文标签            → 普通分类标签（AI 自动存储时生成）
 ```
-
-两条线不交叉：baohu 控制 dream 行为 + demote 免疫，behavior-rule 控制注入行为。一条记忆可以同时拥有两者。
 
 ### 6.3 推荐用法
 
 | 场景 | tags | 效果 |
 |------|:----:|------|
-| 最重要的几条规则 | `["behavior-rule","baohu","ding","chundu"]` | 保护+置顶+图标 |
-| 参考用的规则 | `["behavior-rule","chundu"]` | 有图标，dream 可整理 |
+| 最重要的几条规则 | `["chundu", "baohu", "ding"]` | 注入+保护+置顶+图标 |
+| 参考用的规则 | `["chundu"]` | 有图标，可注入 |
 | 不想被管的普通记忆 | `["baohu"]` | 只保护，不参与行为矫正 |
+| 永久保留的记忆 | `["yongjiu"]` | 永不衰减 + 免疫 demote/Dream + 图标 |
 
 ---
 
@@ -410,7 +411,7 @@ for (const memo of resolved) {
 | 已解决删除 | outcome=完成 + >7天 | demote |
 | 过期删除 | >30天 + 未完成 + 非blocked | demote |
 
-baohu 标签对以上全部免疫。
+baohu/chundu/yongjiu 标签对以上全部免疫。
 
 ---
 

@@ -50,7 +50,7 @@ export interface ConsolidationPlan {
 }
 
 /** Tags that immunize a memo from all consolidation (merge, delete, archive). */
-const PROTECTED_TAGS = ['baohu'];
+const PROTECTED_TAGS = ['baohu', 'chundu', 'yongjiu'];
 
 const SIMILARITY_THRESHOLD = 0.45;
 const STALE_DAYS = 30;
@@ -70,9 +70,9 @@ export async function buildConsolidationPlan(
     allMemos.push(memo);
   }
 
-  // 🆕 Protected memos (tagged 'baohu') are immune from merge/delete/stale.
-  const protectedCount = allMemos.filter(m => m.tags?.includes('baohu')).length;
-  const active = allMemos.filter(m => !m.tags?.includes('baohu'));
+  // Protected memos (tagged 'baohu' or 'chundu') are immune from merge/delete/stale.
+  const protectedCount = allMemos.filter(m => m.tags?.some(t => PROTECTED_TAGS.includes(t))).length;
+  const active = allMemos.filter(m => !m.tags?.some(t => PROTECTED_TAGS.includes(t)));
 
   const summaries = active.map(toSummary);
   const duplicateGroups = findDuplicateGroups(summaries);

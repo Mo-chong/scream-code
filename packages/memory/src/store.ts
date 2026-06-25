@@ -1006,7 +1006,7 @@ export class MemoryMemoStore {
     await this.init();
     if (this.db === undefined) return false;
     const memo = await this.get(id);
-    if (memo === undefined || (Array.isArray(memo.tags) && memo.tags.includes('baohu'))) return false;
+    if (memo === undefined || (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu')))) return false;
 
     // Save embedding before deleteInternal removes the memo (and its vec0 entry).
     // Reading memory_embeddings here (not vec0) because vec0 stores only auxiliary
@@ -1047,10 +1047,10 @@ export class MemoryMemoStore {
     const hotMemos = await this.getAllHotMemos();
 
     for (const memo of hotMemos) {
-      if (Array.isArray(memo.tags) && memo.tags.includes('baohu')) continue;
+      if (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu'))) continue;
 
       const tags = new Set(memo.tags ?? []);
-      const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 0.88 : 0.85;
+      const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 1 : tags.has('yongjiu') ? 1 : 0.85;
       const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
       const resNetFactor = Math.pow(D, daysSince);
 
@@ -1065,7 +1065,7 @@ export class MemoryMemoStore {
     const currentCount = await this.hotMemoCount();
     if (currentCount > HOT_MAX_SIZE) {
       const remaining = hotMemos
-        .filter((m) => !(Array.isArray(m.tags) && m.tags.includes('baohu')))
+        .filter((m) => !(Array.isArray(m.tags) && (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('yongjiu'))))
         .sort((a, b) => a.recordedAt - b.recordedAt) // oldest first
         .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
       for (const memo of remaining) {

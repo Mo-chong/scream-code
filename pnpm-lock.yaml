@@ -83,6 +83,9 @@ importers:
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
+      '@photostructure/sqlite-vec':
+        specifier: ^1.1.1
+        version: 1.1.1
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
@@ -262,6 +265,9 @@ importers:
 
   packages/memory:
     dependencies:
+      '@photostructure/sqlite-vec':
+        specifier: 1.1.1
+        version: 1.1.1
       fastembed:
         specifier: ^2.1.0
         version: 2.1.0
@@ -1135,6 +1141,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@photostructure/sqlite-vec@1.1.1':
+    resolution: {integrity: sha512-XhqpTq8ycMN4UJZbNNp4EEHAnY5ADlYai9Gk0qZZ6A2Kw48GZ1Li5WQrZBmipqSSZWmCS1Xwx09HUt1EuYo6qA==}
+    engines: {node: '>=14.0.0'}
+    os: [darwin, linux, win32]
+
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
 
@@ -1189,12 +1200,6 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [darwin]
-
-  '@rolldown/binding-freebsd-x64@1.0.3':
-    resolution: {integrity: sha512-yB1IlAsSNHncV6SCTL27/MVGR5htvQsoGxIv5KMGXALp+Ll1wYsn+x98M9MW7qa+NdSbvrrY7ANI4wLJ0n1e6g==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    cpu: [x64]
-    os: [freebsd]
 
   '@rolldown/binding-linux-arm-gnueabihf@1.0.3':
     resolution: {integrity: sha512-Yi30IVAAfLUCy2MseFjbB1jAMDl1VMCAas5StnYp8da9+CKvMd2H2cbEjWcw5NPaPqzvYkVIaF1nNUG+b7u/sw==}
@@ -4422,6 +4427,8 @@ snapshots:
   '@oxlint/binding-win32-x64-msvc@1.59.0':
     optional: true
 
+  '@photostructure/sqlite-vec@1.1.1': {}
+
   '@protobufjs/aspromise@1.1.2': {}
 
   '@protobufjs/base64@1.1.2': {}
@@ -4457,9 +4464,6 @@ snapshots:
     optional: true
 
   '@rolldown/binding-darwin-x64@1.0.3':
-    optional: true
-
-  '@rolldown/binding-freebsd-x64@1.0.3':
     optional: true
 
   '@rolldown/binding-linux-arm-gnueabihf@1.0.3':
@@ -6344,7 +6348,6 @@ snapshots:
       '@rolldown/binding-android-arm64': 1.0.3
       '@rolldown/binding-darwin-arm64': 1.0.3
       '@rolldown/binding-darwin-x64': 1.0.3
-      '@rolldown/binding-freebsd-x64': 1.0.3
       '@rolldown/binding-linux-arm-gnueabihf': 1.0.3
       '@rolldown/binding-linux-arm64-gnu': 1.0.3
       '@rolldown/binding-linux-arm64-musl': 1.0.3

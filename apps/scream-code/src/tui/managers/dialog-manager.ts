@@ -183,7 +183,8 @@ export class DialogManager {
     if (!hasData) {
       void store.init().then(async () => {
         try {
-          const result = await store.list({ limit: 50 });
+          // 全量读取以确保优先标签（baohu/ding/chundu/yongjiu）不会因 limit 截断
+          const result = await store.list({ limit: 200 });
           if (this.host.state.activeDialog === 'memory-picker') {
             this.showMemoryPicker(result.memos, result.total);
           }

@@ -93,6 +93,7 @@ function memoBadges(tags: string[] | undefined): string {
   if (tags.includes('baohu')) icons.push('🔒');
   if (tags.includes('ding'))   icons.push('📌');
   if (tags.includes('chundu')) icons.push('🧠');
+  if (tags.includes('yongjiu')) icons.push('♾️');
   return icons.length > 0 ? icons.join('') : '';
 }
 ```
@@ -102,7 +103,7 @@ function memoBadges(tags: string[] | undefined): string {
 **列表模式**：标题行尾部，紧跟在时间之前：
 
 ```
-  ► 声称测试通过必须检查 exit code  🔒📌🧠    2分钟前  手动记录
+  ► 声称测试通过必须检查 exit code  🔒📌🧠♾️    2分钟前  手动记录
 ```
 
 **详情模式**：「状态: 🔒📌🧠」行，在「标签:」行之前。
@@ -114,6 +115,7 @@ function memoBadges(tags: string[] | undefined): string {
 | `baohu` | 🔒 | 保护 — dream 不碰 |
 | `ding` | 📌 | 置顶 — 搜索优先 |
 | `chundu` | 🧠 | 纯度规则记忆 |
+| `yongjiu` | ♾️ | 永久记忆 — 永不衰减 + 免疫 demote/Dream |
 
 ### 需要重启
 
