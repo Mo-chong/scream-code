@@ -120,6 +120,9 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: false,
+    loopModeEnabled: false,
+    loopPrompt: undefined,
+    loopLimit: undefined,
     recentSessions: [],
   };
 }
@@ -377,7 +380,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.markMemoryExtracted();
   }
 
-  /** Called by StreamingUIController when a turn finishes with no queued continuations. */
+  sendNormalUserInput(text: string): void {
+    this.inputController.sendNormalUserInput(text);
+  }
   onTurnCompleted(): void {
     this.lifecycleController.onTurnCompleted();
   }
@@ -425,10 +430,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   handlePlanToggle(next: boolean): void {
     this.inputController.handlePlanToggle(next);
-  }
-
-  sendNormalUserInput(text: string): void {
-    this.inputController.sendNormalUserInput(text);
   }
 
   steerMessage(session: Session, input: string[]): void {

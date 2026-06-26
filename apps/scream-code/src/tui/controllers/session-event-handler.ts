@@ -54,8 +54,8 @@ import {
 import { openUrl } from '../utils/open-url';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
 import { setProcessTitle } from '../utils/proctitle';
-
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
+import { consumeLoopLimitIteration, isLoopLimitExpired } from '../utils/loop-limit';
 import { nextTranscriptId } from '../utils/transcript-id';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
@@ -86,6 +86,7 @@ export interface SessionEventHost {
   showNotice(title: string, detail?: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
+  sendNormalUserInput(text: string): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
   readonly tasksBrowserController: TasksBrowserController;
   markMemoryExtracted(): void;
@@ -341,6 +342,43 @@ export class SessionEventHandler {
     this.host.streamingUI.resetToolUi();
 
     this.host.streamingUI.finalizeTurn(sendQueued);
+
+    // Auto-resubmit loop prompt after turn completes, if loop mode is active.
+    this.maybeScheduleLoopAutoSubmit();
+  }
+
+  private maybeScheduleLoopAutoSubmit(): void {
+    const { loopModeEnabled, loopPrompt, loopLimit } = this.host.state.appState;
+    if (!loopModeEnabled || loopPrompt === undefined) return;
+
+    if (isLoopLimitExpired(loopLimit)) {
+      this.host.setAppState({ loopModeEnabled: false, loopPrompt: undefined, loopLimit: undefined });
+      const reason = loopLimit?.kind === 'duration' ? '时间' : '次数';
+      this.host.showStatus(`循环${reason}限制已到，循环模式已关闭。`);
+      return;
+    }
+
+    // Brief delay so the user has a chance to press Esc between iterations.
+    setTimeout(() => {
+      if (
+        !this.host.state.appState.loopModeEnabled ||
+        this.host.state.appState.loopPrompt !== loopPrompt ||
+        this.host.state.appState.streamingPhase !== 'idle'
+      ) {
+        return;
+      }
+      if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
+        this.host.setAppState({
+          loopModeEnabled: false,
+          loopPrompt: undefined,
+          loopLimit: undefined,
+        });
+        const reason = this.host.state.appState.loopLimit?.kind === 'duration' ? '时间' : '次数';
+        this.host.showStatus(`循环${reason}限制已到，循环模式已关闭。`);
+        return;
+      }
+      this.host.sendNormalUserInput(loopPrompt);
+    }, 800);
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {

@@ -24,10 +24,17 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'loop',
+    aliases: [],
+    description: '切换循环模式，每次 Agent 完成后自动重新提交同一条 prompt',
+    priority: 122,
+    availability: 'always',
+  },
+  {
     name: 'sessions',
     aliases: ['resume'],
     description: '浏览并恢复会话',
-    priority: 122,
+    priority: 121,
   },
   {
     name: 'goal',

@@ -90,6 +90,7 @@ function createMockHost(): SessionEventHost {
       transcriptEntries.push(entry);
     }),
     sendQueuedMessage: vi.fn(),
+    sendNormalUserInput: vi.fn(),
     shiftQueuedMessage: vi.fn(),
     markMemoryExtracted: vi.fn(),
   };

@@ -7,6 +7,7 @@ import type { Session } from '@scream-code/scream-code-sdk';
 import {
   dispatchInput,
   handlePlanCommand,
+  describeLoopStatus,
   type ScreamSlashCommand,
   type SlashCommandHost,
 } from '../commands';
@@ -22,12 +23,11 @@ import type { TUIState } from '../tui-state';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
+import { consumeLoopLimitIteration } from '../utils/loop-limit';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
 import { nextTranscriptId } from '../utils/transcript-id';
 import chalk from 'chalk';
-
-// ── Idle breathing gradient for the input box border ──────────────────
 
 const BREATHE_FRAMES = 120;
 const BREATHE_INTERVAL_MS = 40;
@@ -89,10 +89,20 @@ export class InputController {
 
   setupAutocomplete(): void {
     const visible = this.host.getSlashCommands().filter((cmd) => !cmd.name.startsWith('skill:'));
-    const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => ({
-      value: cmd.name,
-      label: `/${cmd.name} — ${cmd.description}`,
-    }));
+    const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => {
+      if (cmd.name === 'loop') {
+        const status = describeLoopStatus(
+          this.host.state.appState.loopModeEnabled,
+          this.host.state.appState.loopPrompt,
+          this.host.state.appState.loopLimit,
+        );
+        return {
+          ...cmd,
+          description: `${cmd.description} (${status})`,
+        };
+      }
+      return cmd;
+    });
     const { state } = this.host;
     const provider = new FileMentionProvider(
       slashCommands,
@@ -110,7 +120,6 @@ export class InputController {
       this.#startBreathing();
     }
   }
-
   handleInput(text: string): void {
     if (text.trim().length === 0) return;
     if (this.host.state.appState.isReplaying) {
@@ -134,6 +143,14 @@ export class InputController {
       this.host.showError(LLM_NOT_SET_MESSAGE);
       return;
     }
+
+    // When loop mode is waiting for its first prompt, capture it and reserve
+    // one iteration from the budget.
+    if (this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt) {
+      this.host.setAppState({ loopPrompt: text });
+      consumeLoopLimitIteration(this.host.state.appState.loopLimit);
+    }
+
     if (extraction.hasMedia) {
       this.sendMessage(session, text, {
         hasMedia: true,

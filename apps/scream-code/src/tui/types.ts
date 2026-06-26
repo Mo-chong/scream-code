@@ -18,6 +18,28 @@ export interface RecentSession {
   readonly updatedAt: number;
 }
 
+export type LoopLimitConfig =
+  | {
+      kind: 'iterations';
+      iterations: number;
+    }
+  | {
+      kind: 'duration';
+      durationMs: number;
+    };
+
+export type LoopLimitRuntime =
+  | {
+      kind: 'iterations';
+      initial: number;
+      remaining: number;
+    }
+  | {
+      kind: 'duration';
+      durationMs: number;
+      deadlineMs: number;
+    };
+
 export interface AppState {
   model: string;
   workDir: string;
@@ -47,6 +69,9 @@ export interface AppState {
   goalContinuationCount: number;
   ccConnectActive: boolean;
   wolfpackMode: boolean;
+  loopModeEnabled: boolean;
+  loopPrompt: string | undefined;
+  loopLimit: LoopLimitRuntime | undefined;
   recentSessions: RecentSession[];
 }
 

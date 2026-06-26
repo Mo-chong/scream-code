@@ -9,10 +9,6 @@ export { dispatchInput, type SlashCommandHost } from './dispatch';
 export { handleMakeSkillCommand } from './make-skill';
 export { handleSkillCommand } from './skill-center';
 export {
-  handleConnectCommand,
-  handleLogoutCommand,
-} from './auth';
-export {
   handleCompactCommand,
   handleEditorCommand,
   handleModelCommand,
@@ -23,6 +19,7 @@ export {
   showPermissionPicker,
   showSettingsSelector,
 } from './config';
+export { handleLoopCommand, describeLoopStatus } from './loop';
 export {
   showMcpServers,
   showStatusReport,
