@@ -232,11 +232,26 @@ export function extractKeywords(text: string): string[] {
   const tokens: string[] = [];
   for (const part of parts) {
     if (part.length === 0) continue;
-    // For CJK text, split into individual characters.
+    // For CJK text, split into character bigrams (2-grams).
+    // Single characters provide near-random Jaccard similarity; bigrams
+    // preserve meaningful sub-word units, e.g. "记忆" "忆系" "系统" from "记忆系统".
     if (/[一-鿿㐀-䶿]/.test(part)) {
-      for (const ch of part) {
+      for (let i = 0; i < part.length; i++) {
+        // Emit single CJK characters that survive stopword filter
+        // so very short queries like "记忆" can still match.
+        const ch = part[i]!;
         if (ch.length > 0 && !STOP_WORDS.has(ch)) {
           tokens.push(ch);
+        }
+        // Emit bigram if we have two adjacent non-stopword characters
+        if (i < part.length - 1) {
+          const bigram = part.substring(i, i + 2);
+          const left = part[i]!;
+          const right = part[i + 1]!;
+          // A bigram passes if neither character is a stopword
+          if (!STOP_WORDS.has(left) && !STOP_WORDS.has(right)) {
+            tokens.push(bigram);
+          }
         }
       }
     }

@@ -184,7 +184,7 @@ By default `MemoryLookup` searches memos from all projects. Results are ranked s
 
 You can also use the `MemoryWrite` tool to actively save a new experience when the user explicitly asks for it. Treat any of the following as a request to call `MemoryWrite`:
 "保存到记忆", "保存到备忘录", "总结并保存", "永久记忆", "记录我的记忆", "记住这个", "记一下", "添加到记忆", "写入记忆", "存入记忆库", "帮我记下来", "作为经验保存", "记录这次经验", "加入备忘录", "归档", "记住这次", "以后记得", "保存下来".
-When calling `MemoryWrite`, summarize the experience into: `userNeed` (the user's goal), `approach` (what was done), `outcome` (the result), `whatFailed` (dead ends, or "none"), `whatWorked` (key successful actions, or "none"), and `tags` (3-5 semantic tags). After saving, confirm to the user that the memo has been written.
+When calling `MemoryWrite`, summarize the experience into: `userNeed` (the user's goal), `approach` (what was done), `outcome` (the result), `whatFailed` (dead ends, or "none"), `whatWorked` (key successful actions, or "none"), and `tags` (3-5 semantic tags). **Tags MUST match the user's conversation language.** For Chinese conversations, each tag concept should include both Chinese and English forms separated by "/", for example `["记忆系统/memory-system", "容量守卫/capacity-guard"]`. For English conversations, use plain English tags like `["auth", "deploy"]`. After saving, confirm to the user that the memo has been written.
 
 If a memory is wrong, outdated, or should be removed, use the `MemoryEdit` tool. Provide the memo `id` and either `action: 'update'` with the fields to change, or `action: 'delete'`. Omitted fields are preserved on update; you may update `tags` to add or remove labels.
 

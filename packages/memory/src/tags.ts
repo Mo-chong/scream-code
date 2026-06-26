@@ -91,6 +91,25 @@ export async function processTags(
     tags = tags.slice(0, budget);
   }
 
+  // Phase 7: bilingual expansion — split "A/B" tags into "A" and "B"
+  // so both the Chinese and English forms exist independently in the DB.
+  // TagOverlap is an exact Set.has() match, so having both forms means
+  // both a Chinese query ("容量守卫") and an English query ("capacity-guard")
+  // will score on this memo's tags.
+  const expanded: string[] = [];
+  for (const tag of tags) {
+    const slashIdx = tag.indexOf('/');
+    if (slashIdx > 0 && slashIdx < tag.length - 1) {
+      const left = tag.slice(0, slashIdx).trim();
+      const right = tag.slice(slashIdx + 1).trim();
+      if (left.length > 0) expanded.push(left);
+      if (right.length > 0) expanded.push(right);
+    } else {
+      expanded.push(tag);
+    }
+  }
+  tags = normalizeTags(expanded, TAG_CONFIG.MAX_TAGS_ABSOLUTE);
+
   return tags;
 }
 

@@ -82,7 +82,10 @@ export function buildExitExtractionPrompt(
 \`\`\`
 
 注意：
-- tags 是 3-5 个语义标签，概括任务领域/技术栈/动作类型/具体技术名，例如 ["react", "auth", "部署"]、["mcp", "pathext", "windows spawn"]、["memory", "sqlite-vec", "fts5"]
+- tags 是 3-5 个语义标签，概括任务领域/技术栈/动作类型/具体技术名。**用对话的主要语言书写**。
+  中文对话示例：["记忆系统/memory-system", "容量守卫/capacity-guard", "写锁/write-lock"]
+  英文对话示例：["auth", "deploy", "sqlite-vec"]
+- 中文对话中，每个概念同时提供中文和英文形式，用 "/" 分隔。这样中文和英文搜索都能找到。
 - whatFailed 记录重要的错误尝试，帮助未来避免重蹈覆辙
 - whatWorked 记录最终成功的关键动作，帮助未来复用经验
 - 跳过未完成的工作，除非其中包含有价值的踩坑经验
