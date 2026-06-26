@@ -26,6 +26,7 @@ function createMockHost(): LifecycleControllerHost {
     closeSession: vi.fn(),
     stop: vi.fn(),
     showStatus: vi.fn(),
+    showNotice: vi.fn(),
     applyResolvedAutoTheme: vi.fn(),
     applyTheme: vi.fn(),
     updateActivityPane: vi.fn(),
