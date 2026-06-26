@@ -849,3 +849,63 @@ Step 3：直接手动运行 resolve 路径（3min）
 - `demote` 用 `return this.withWriteLock(async () => {...})` 包裹
 - `.catch(() => {})` 改为 `.catch((err) => { this.log.error?.('...', { error: err }) })`（两处）
 **排查方法**：查冷层 `node -e "const{DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(require('os').homedir()+'/.scream-code/memory/memos.sqlite');console.log('archive:',d.prepare('SELECT COUNT(*) FROM memos_archive').get().c)"` → 0 说明从未降级
+
+### RESERVED_TAGS 防线：自动管道生成拼音标签（2026-06-26 修复）
+
+**问题**：压缩（compaction）、知识提取（Exit Extraction）、Dream 整理、MemoryWrite 的 `processTags` 路径自动生成了 `baohu`/`chundu`/`ding`/`yongjiu` 等拼音标签。这 4 个是系统状态标签，必须只由人工手动写入。
+
+**根因**：4 条自动管道全部汇入 `processTags()` 统一路由。旧代码中 `processTags()` 的 Pipeline 包括后备生成（`generateTags` 从 `fullText` 提取关键词），当 LLM 输出的 tags 包含状态关键词时的误判。
+
+**修复**（3 处改动）：
+```typescript
+// ① tags.ts:186-188 — RESERVED_TAGS 常量
+export const RESERVED_TAGS = new Set(['baohu', 'chundu', 'ding', 'yongjiu']);
+
+// ② tags.ts:146-147 — processTags 末尾过滤（挡住所有自动管道）
+return merged.filter((t) => !RESERVED_TAGS.has(t));
+
+// ③ consolidator.ts:29 — unionWithPriority 末尾过滤（挡住 Dream 合并传播）
+.filter((t) => !RESERVED_TAGS.has(t));
+```
+
+**排查路径**：
+1. 确认 LLM 产生的原始 tags 不含拼音标签（Read 响应日志）
+2. 查 `processTags()` 流程：后备生成 `generateTags()` 接受 `fullText` 从关键词提取 → 误判产生拼音标签
+3. 查 `consolidator.ts` 的 `unionWithPriority()` — Dream 合并路径可传播现有拼音标签
+4. 查 `PROTECTED_TAGS` 缺少 `ding`
+
+**教训**：
+1. 统一路由引入后，所有自动管道都汇入同一入口——在入口设过滤（RESERVED_TAGS）一刀切，比逐一排除管道可靠
+2. 状态标签一旦被自动生成，Dream 合并路径会通过 `unionWithPriority` 传播到更多记忆
+3. `PROTECTED_TAGS` 与 `RESERVED_TAGS` 功能不同：前者防 Dream 误删，后者防自动生成——两者都要维护
+
+### smartTags 概念优先排序替代 normalizeTags 砍头法（2026-06-26）
+
+**问题**：`normalizeTags` 是"砍头法"——按输入顺序截断前 max 个。当 LLM 输出的 tags 中短标签（如 `bug`/`fix`）排在前面、长标签（概念标签）排在后面时，概念标签被砍掉。
+
+**解决**：`smartTags()` 按质量分层排序：
+```typescript
+function smartTags(tags, options):
+  Phase 1: 分两层——概念标签（≥4 字符）→ concepts[]，短标签（≤3 字符）→ shorts[]
+  Phase 2: 同义合并（deduplicateAgainstCorpus）— 只对概念标签做
+  Phase 3: 装配——先 concepts（上限 maxConcepts=10），再 shorts（上限 maxTotal=20）
+```
+
+**教训**：标签排序的 bug 不能在"截断"阶段修，必须在"排序"阶段修。砍头法在标签数量少时不明显，一旦 LLM 批量输出就会出现概念标签被短标签挤出。
+
+### tags 字段从 optional 改为 required（tags 必填）（2026-06-26）
+
+**问题**：旧代码 `tags` 在 schema 中为 `z.array(z.string()).optional()`。当 LLM 不传 tags 时，`processTags(undefined, { fullText })` 触发后备生成——从 `fullText` 提取关键词作为标签，质量不可控。
+
+**修复**：
+```typescript
+// memory-write.ts:33
+tags: z.array(z.string()).min(1).describe('3-5 semantic tags...')
+```
+- Schema 改为 `.min(1)` — tags 必填
+- `processTags` 调用不再传递 `undefined`，始终 `args.tags ?? []`
+- processTags 内部当输入为空时不再触发后备生成，直接返回 `[]`
+
+**测试适配**：6 个测试用例补了 tags 字段；1 个确认空 tags 返回 undefined 的测试改为 `toBeUndefined()`。
+
+**教训**：后备生成从 `fullText` 提取关键词看似安全，实际产出的标签质量低（'问题' '修复' '解决' 等黑名单词反复出现）。让 LLM 直接写 tags 更好——LLM 知道什么是概念标签。tags 必填 = 强制 LLM 每写一条记忆就思考一次标签。

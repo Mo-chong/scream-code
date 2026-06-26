@@ -359,24 +359,43 @@ const resNetFactor = Math.pow(D, daysSince);  // 1.0 → 逐渐趋近 0
 
 ### 6.1 功能标签
 
-| 标签 | 图标 | 含义 | 系统效果 | 所属模块 |
-|:----:|:----:|------|----------|----------|
-| `chundu` | 🧠 | 规则记忆 | 注入过滤 + demote/Dream 免疫 + ResNet D=1 | memory-rules.ts + store.ts + consolidator.ts |
-| `baohu` | 🔒 | 保护 | Dream 完全免疫 + demote 跳过 | consolidator.ts + store.ts |
-| `ding` | 📌 | 置顶 | 搜索评分 +0.25 flat bonus | scoring.ts |
-| `yongjiu` | ♾️ | 永久记忆 | ResNet D=1 永不衰减 + demote/Dream 免疫 | store.ts + consolidator.ts |
+| 标签 | 图标 | 含义 | 系统效果 | 所属模块 | 赋值方式 |
+|:----:|:----:|------|----------|----------|:--------:|
+| `chundu` | 🧠 | 规则记忆 | 注入过滤 + demote/Dream 免疫 + ResNet D=1 | memory-rules.ts + store.ts + consolidator.ts | **仅人工** |
+| `baohu` | 🔒 | 保护 | Dream 完全免疫 + demote 跳过 | consolidator.ts + store.ts | **仅人工** |
+| `ding` | 📌 | 置顶 | 搜索评分 +0.25 flat bonus | scoring.ts | **仅人工** |
+| `yongjiu` | ♾️ | 永久记忆 | ResNet D=1 永不衰减 + demote/Dream 免疫 | store.ts + consolidator.ts | **仅人工** |
 
-### 6.2 标签隔离
+### 6.2 RESERVED_TAGS — 自动管道防护（2026-06-26 新增）
 
-```
-chundu                  → 规则记忆标签（注入过滤 + demote/Dream 免疫 + 永不衰减）
-baohu                   → 保护标签（Dream 免疫 + demote 跳过，衰减 D=0.99）
-ding                    → 置顶标签（搜索 +0.25，衰减 D=0.95）
-yongjiu                 → 永久记忆标签（永不衰减 D=1 + demote/Dream 免疫）
-其他中文标签            → 普通分类标签（AI 自动存储时生成）
+```typescript
+// tags.ts:186-188
+export const RESERVED_TAGS = new Set(['baohu', 'chundu', 'ding', 'yongjiu']);
 ```
 
-### 6.3 推荐用法
+以上 4 个拼音标签被定义为 **RESERVED_TAGS**。所有自动管道（MemoryWrite、Exit Extraction、Dream 合并、compaction）在 `processTags()` 和 `unionWithPriority()` 末尾都会过滤掉它们：
+
+```typescript
+// processTags (tags.ts:146-147) — 挡住所有自动管道
+return merged.filter((t) => !RESERVED_TAGS.has(t));
+
+// unionWithPriority (consolidator.ts:29) — 挡住 Dream 合并传播
+.filter((t) => !RESERVED_TAGS.has(t));
+```
+
+⚠️ **这 4 个标签只能通过人工手动写入（MemoryWrite / 直接 SQLite 编辑）产生。** 任何自动流程都无法再生成它们。
+
+### 6.3 标签隔离
+
+```
+chundu                  → 规则记忆标签（仅人工赋值，注入过滤 + demote/Dream 免疫 + 永不衰减）
+baohu                   → 保护标签（仅人工赋值，Dream 免疫 + demote 跳过，衰减 D=0.99）
+ding                    → 置顶标签（仅人工赋值，搜索 +0.25，衰减 D=0.95）
+yongjiu                 → 永久记忆标签（仅人工赋值，永不衰减 D=1 + demote/Dream 免疫）
+其他中文标签            → 普通分类标签（AI/LLM 生成）
+```
+
+### 6.4 推荐用法
 
 | 场景 | tags | 效果 |
 |------|:----:|------|
@@ -387,189 +406,169 @@ yongjiu                 → 永久记忆标签（永不衰减 D=1 + demote/Dream
 
 ---
 
-## 六点五、标签质量四层优化（v0.6.10 标签处理全链路改造）
+## 六点五、标签处理全链路改造（v0.6.10 → v0.6.11）
 
-> 源代码: `packages/memory/src/tags.ts` (263 行) — TAG_CONFIG + processTags() 统一路由
+> 源代码: `packages/memory/src/tags.ts` (198 行) — processTags() + smartTags() + RESERVED_TAGS
+> Dream 合并标签: `packages/memory/src/consolidator.ts:5-30` — unionWithPriority()
 > 质量统计: `packages/memory/src/tag-stats.ts` (107 行)
 
-### 架构变化：从 3 条独立散落路径 → 1 个统一入口
-
-旧架构中 3 条调用方各自写自己的标签处理逻辑，散落在 3 个文件中。v0.6.10 将全部标签处理收敛到 `processTags()` 统一路由：
+### 架构演变：3 个阶段
 
 ```
-                     ┌─ MemoryWrite ─┐
-LLM/用户产生的原始tags →─ Exit Extraction ──→ processTags(rawTags, context) → string[]
-                     └─ Dream 合并  ─┘
+v0.6.9  旧架构: 3 条散落路径各自 normalizeTags（无统一入口，无黑名单，Dream 合并无过滤）
+v0.6.10 统一路由: 全部收敛到 processTags()（统一入口 + 后备生成 + 黑名单 + 动态预算）
+v0.6.11 算法删除: 去掉所有算法标签生成（后备生成 → []），引入 smartTags 概念优先 + RESERVED_TAGS
 ```
 
-### processTags() 统一路由
+**关键转折：v0.6.11 删除了算法生成标签的全部路径。** LLM 负责提供标签，processTags 只做清洗/排序/展开/过滤，不再从 `fullText` 提取关键词。
+
+### processTags() 当前流程
 
 ```typescript
 // tags.ts — processTags() 完整流程
 export async function processTags(rawTags, context): Promise<string[]> {
-  let tags = normalizeTags(rawTags, TAG_CONFIG.MAX_TAGS_ABSOLUTE); // Phase 0: 统一入口+传递预算上限
-  if (tags.length === 0 && context.fullText) {                     // Phase 1: 后备生成
-    tags = normalizeTags(await generateTags(context.fullText));
-  }
-  if (context.existingTags)                                        // Phase 3: 同项目去重
-    tags = deduplicateAgainstCorpus(tags, context.existingTags);
-  tags = tags.filter(t => !TAG_CONFIG.BLACKLIST.has(t));          // Phase 3: 黑名单过滤
-  if (context.fullText) {                                          // Phase 2: 动态预算
-    const budget = computeTagBudget(context.fullText, tags, context.existingTags);
-    tags = tags.slice(0, budget);
-  }
-  return tags;
+  // Step 1: 基本清洗（lowercase/trim/dedup）— 用大上限，smartTags 做真正限制
+  const sanitized = normalizeTags(rawTags, 999);
+
+  // 不再有算法后备 — LLM 不传 tags 就返回 []
+  if (sanitized.length === 0) return [];
+
+  // Step 2: 双语言展开 — "容量守卫/capacity-guard" → ["容量守卫", "capacity-guard"]
+  for (const tag of sanitized) { /* 分割 A/B */ }
+
+  // Step 3: smartTags 概念优先排序
+  const merged = smartTags(expanded, { existingCorpus: context.existingTags });
+
+  // Step 4: 移除保留标签 — 只允许人工写入
+  return merged.filter(t => !RESERVED_TAGS.has(t));
 }
 ```
 
-### 六层优化一览
+### smartTags() — 概念优先排序
 
-| Phase | 内容 | 解决的问题 | 涉及文件 |
-|:-----:|------|-----------|----------|
-| 0 | 统一路由 `processTags()` + `TAG_CONFIG` 配置表 | 消除 3 文件的散落常量 | `tags.ts`, 3 个调用方 |
-| 1 | 后备生成：`extractor.ts` 改为 `async` + 后备 | Exit 路径无后备导致 tags=undefined | `extractor.ts`, `tags.ts` |
-| 1 | Prompt 示例具体化 | LLM 生成的标签过于泛化 | `compaction-instruction.md` |
-| 2 | 动态标签预算 2~8 个 | 短记忆 2 个、长记忆 8 个，替代固定 5 个 | `tags.ts` |
-| 3 | 黑名单过滤 + 同义合并 + 同项目去重 | 消除 AI 重复打标签倾向（反复出现"bug""修复"） | `tags.ts` |
-| 4 | 偏差链（连续低质量标签检测） | 追踪单个会话是否持续产出垃圾标签 | `store.ts` |
-| 5 | 新鲜度检测（`findStaleTags()`） | 标签从未被用户使用 → 提示清理 | `consolidator.ts` |
-| 6 | 全量质量统计（`computeTagStats()`） | 盘点标签分布、黑名单命中率、新鲜度 | `tag-stats.ts` (新建) |
+替代旧的 `normalizeTags` 砍头法。按质量分层装配：
 
-### 配置表 TAG_CONFIG
+```typescript
+function smartTags(tags, options: { maxConcepts?, maxTotal?, existingCorpus? }): string[] {
+  // Phase 1: 分两层
+  concepts = tags.filter(t => t.length >= 4)  // 概念标签（如 "容量守卫/capacity-guard"）
+  shorts   = tags.filter(t => t.length <  4)  // 短标签（如 "bug", "mcp", "auth"）
 
-所有标签相关的常数集中在一个地方（`tags.ts:28-48`）：
+  // Phase 2: 同义合并（only on concepts）
+  if (existingCorpus) concepts = deduplicateAgainstCorpus(concepts, existingCorpus)
+
+  // Phase 3: 先概念后短标签
+  result = concepts.slice(0, maxConcepts) + shorts.slice(0, maxTotal - result.length)
+}
+```
+
+| 特性 | old normalizeTags | new smartTags |
+|------|:-----------------:|:-------------:|
+| 排序 | 输入顺序（砍头法） | 概念优先（≥4 字符先排） |
+| 上限 | 固定 max=5 或传参 | 双层：maxConcepts=10, maxTotal=20 |
+| 同义合并 | 无 | 对概念标签做 Jaccard > 0.6 合并 |
+| 黑名单 | TAG_CONFIG.BLACKLIST | 内联同款黑名单 |
+| 短标签 | 可能挤掉概念标签 | 最后装配，不占概念名额 |
+
+### 3 条路径的当前行为
+
+| 路径 | 调用方式 | 标签来源 | 后备行为 |
+|------|----------|----------|----------|
+| **MemoryWrite** | `processTags(args.tags)` | LLM 的 tags 参数（**必填**） | tags 不传→schema 校验失败 |
+| **Exit Extraction** | `processTags(rawTags)` | LLM 写在 memory-memo 的 tags | 不写 tags → tags=`undefined`→ `[]` |
+| **Dream 合并** | `unionWithPriority(tagArrays, 12)` | 被合并记忆的现有 tags | tags=[ ] → `[]` |
+
+### Dream 合并路径：unionWithPriority()
+
+Dream 合并不再经过 `processTags`（v0.6.11 重构），而是使用专用的 `unionWithPriority()`：
+
+```typescript
+// consolidator.ts:11-30
+function unionWithPriority(tagArrays, maxTags = 12): string[] {
+  // 频率统计：出现在更多被合并记忆中的 tag 排名更高
+  for (const arr of tagArrays):
+    for (const tag of arr):
+      freq[tag]++
+
+  // 按频率降序 → slice → 过滤 RESERVED_TAGS
+  return freq.entries()
+    .toSorted((a, b) => b[1] - a[1])
+    .slice(0, maxTags)
+    .map(([tag]) => tag)
+    .filter(t => !RESERVED_TAGS.has(t))
+}
+```
+
+这比旧代码（`await processTags(flatTags, { existingTags })`）更精确：
+- 共识标签优先——出现在 3/4 条记忆中的标签自动排前
+- 不经过 `normalizeTags` 的砍头法——更完整的标签继承
+- 仍保留 `RESERVED_TAGS` 过滤
+
+### 配置 TAG_CONFIG
 
 ```typescript
 export const TAG_CONFIG = {
-  MAX_TAGS_ABSOLUTE: 8,          // 绝对硬上限（任何情况不超 8）
-  MAX_TAGS_DEFAULT: 5,           // normalizeTags 默认上限（旧行为兼容）
-  SIMILARITY_THRESHOLD: 0.5,     // 同义合并阈值（Jaccard 相似度）
-  DYNAMIC_BUDGET_MIN: 2,         // 动态预算下限（短记忆最少 2 个）
-  DYNAMIC_BUDGET_MAX: 8,         // 动态预算上限（长记忆最多 8 个）
+  MAX_TAGS_DEFAULT: 5,           // normalizeTags 默认上限（edit tool / archive）
+  MIN_TAGS: 2,                   // 仅 computeTagBudget 使用（deprecated）
+  MAX_TAGS_ABSOLUTE: 8,          // legacy — processTags 不再使用
   BLACKLIST: new Set([           // 黑名单——AI 反复出现的无意义标签
     '问题', '解决', '完成', 'none', 'bug', 'fix',
-    '修复', '修复了', '处理',
+    '修复', '修复了', '处理', '测试', 'test', '测试了',
   ]),
-  BAD_TAG_STREAK_THRESHOLD: 3,   // 偏差链：连续 N 次低质量 → 标记
 };
 ```
 
-### 动态预算公式
-
-```typescript
-function computeTagBudget(fullText: string, tags: string[], existingTags?: string[]): number {
-  const textRichness = Math.min(fullText.length / 100, 1);              // 文本长度归一化
-  const scarcity = Math.max(1 - (tags.length + (existingTags?.length ?? 0)) / 10, 0.2); // 目标稀缺性
-  const budget = Math.round(3 + textRichness * scarcity * 3);           // 基础 3 + 弹性
-  return Math.max(TAG_CONFIG.DYNAMIC_BUDGET_MIN,
-         Math.min(TAG_CONFIG.DYNAMIC_BUDGET_MAX, budget));
-}
-```
-
-| 场景 | outcome | tags 前 | budget |
-|------|---------|---------|--------|
-| 短记忆（"修了一个 Bug"，50 字，已有 3 个标签） | 0.5 × 0.6 ≈ 3 | 3 | 2（下限） |
-| 长记忆（"重构认证模块，增加OAuth支持"，300 字，已有 1 个标签） | 1.0 × 0.9 ≈ 3.9 | 1 | 6~7 |
-| 中记忆（150 字，已有 2 个标签） | 1.0 × 0.8 ≈ 3.8 | 2 | 6~7 |
-| 极短记忆（20 字，新会话无标签） | 0.2 × 0.8 ≈ 1 | 0 | 3（基础） |
+几个旧配置项已废弃但仍保留导出以防外部引用：
+- `computeTagBudget()` — @deprecated，smartTags 内部处理预算
+- `generateTags()` — @deprecated，返回 `[]`
+- `recommendTagsFromEmbedding()` — 占位实现，返回 `[]`
 
 ### 黑名单效果
 
-黑名单词来自观察 AI 反复打的重复标签：
-
 ```
-输入 tags: ["bug", "fix", "mcp", "pathext", "sqlite-vec"]
-输出 tags: ["mcp", "pathext", "sqlite-vec"]   ← bug/fix 被过滤
+输入 tags: ["bug", "fix", "mcp", "容量守卫/capacity-guard", "pathext"]
+输出 tags: ["mcp", "容量守卫", "capacity-guard", "pathext"]
+           ↑ bug/fix 被过滤，双语言标签被展开
 ```
 
-黑名单在 `normalizeTags()` 截断之后、`slice(budget)` 之前执行——优先过滤无意义词，保留有效标签。
-
-### normalizeTags()
-
-旧版本的 `max=5` 硬编码改为接收调用方传入的上限：
+### RESERVED_TAGS 保护（2026-06-26 新增）
 
 ```typescript
-// tags.ts:56-79
-export function normalizeTags(tags: unknown, max = TAG_CONFIG.MAX_TAGS_DEFAULT): string[] {
-  if (!Array.isArray(tags)) return [];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of tags) {
-    if (typeof raw !== 'string') continue;
-    const tag = raw.trim().toLowerCase();
-    if (tag.length === 0 || seen.has(tag)) continue;
-    seen.add(tag);
-    result.push(tag);
-    if (result.length >= max) break;          // 用调用方传入的 max，不是魔数 5
-  }
-  return result;
-}
+export const RESERVED_TAGS = new Set(['baohu', 'chundu', 'ding', 'yongjiu']);
 ```
 
-| 步骤 | 效果 |
-|------|------|
-| `.toLowerCase()` | 统一小写，避免 "MCP" vs "mcp" |
-| `.trim()` | 去首尾空格 |
-| `seen.has()` | 去重 |
-| `max` | 接受调用方 params，默认 5 |
+**所有自动化管道的出口过滤。** 人工通过 MemoryWrite 写的 tags 也可能在流程中意外包含这些标签（如 LLM 用 "ding" 作为标签），processTags 的最后一步无条件移除它们。
 
-### 3 条生成路径的入口
+对比 `PROTECTED_TAGS`：
 
-| 路径 | 调用点 | 调用方式 | 行为变化 |
-|------|--------|----------|----------|
-| **MemoryWrite** | `memory-write.ts:73-77` | `await processTags(args.tags, { fullText })` | 旧: 直接 normalizeTags; 新: 走统一路由获后备+黑名单+预算 |
-| **Exit Extraction** | `extractor.ts:27-28` | `await processTags(rawTags, { fullText })` | 旧: 无后备→tags=undefined; 新: 自动后备生成 |
-| **Dream 合并** | `consolidator.ts:189-191` | `await processTags(flatTags, { existingTags })` | 旧: 纯继承无过滤; 新: 走黑名单+同义合并 |
+| 集合 | 文件 | 功能 | 过滤位置 |
+|------|------|------|----------|
+| `RESERVED_TAGS` | tags.ts:186 | 防止自动产生拼音标签 | processTags + unionWithPriority 出口 |
+| `PROTECTED_TAGS` | consolidator.ts:78 | 防止 Dream 误删保护记忆 | Dream 扫描入口 |
 
-### Dream 合并路径的 Bug 修复
+两者共同构成双层防线：RESERVED_TAGS 防止新污染，PROTECTED_TAGS 防止旧数据被误操作。
 
-旧代码 `consolidator.ts:189-193` 直接 `normalizeTags(flatTags)`，跳过了 `processTags`（无黑名单过滤 + 无同义合并）。v0.6.10 修复为：
+### tags 字段必填化
 
-```typescript
-// 旧: const mergedTags = normalizeTags(group.memos.flatMap((m) => m.tags ?? []));
-// 新:
-const mergedTags = await processTags(
-  group.memos.flatMap((m) => m.tags ?? []),
-  { existingTags: allRelatedTags },
-);
-```
+MemoryWrite Schema 从 `z.array(z.string()).optional()` 改为 `z.array(z.string()).min(1)` — tags 参数必填，且至少 1 个标签。
 
-这确保了 Dream 合并的记忆标签也走黑名单和同义合并。
+此举配合 processTags 取消算法后备：LLM 不提供 tags → schema 校验失败 → 记忆不被写入。
 
-### 调用方更新
-
-v0.6.10 将 `extractor.ts` 的 `generateTags()` 签名从同步改为 `async`，调用链需同步更新：
+### 完整数据流对比
 
 ```
-extractor.ts → generateTags() → extractKeywords()
-                                    ↓ async
-memory-write.ts → processTags() → generateTags() → extractKeywords()
+v0.6.10 processTags():
+  rawTags → normalizeTags(MAX=8)
+    → [空?] → generateTags(fullText)  ← 从文本提取关键词
+    → [已有?] → 黑名单 + 同义合并 + 动态预算
+    → 输出
+
+v0.6.11 processTags():
+  rawTags → normalizeTags(999)
+    → [空?] → 直接返回 []  ← 不再算法生成
+    → [已有?] → 双语言展开 + smartTags + RESERVED_TAGS
+    → 输出
 ```
-
-所有调用方在各自的 Phase 已同步更新。
-
-### 后备链总结
-
-```
-MemoryWrite 路径:
-  AI 传了 tags? → processTags(tags) ✅ (走黑名单+预算+同义合并)
-  没传?         → processTags(undefined, { fullText }) → 后备 generateTags ✅
-
-Exit Extraction 路径:
-  LLM 写了 tags? → processTags(tags) ✅
-  没写?          → processTags(undefined, { fullText }) → 后备 generateTags ✅ (新增!)
-
-Dream 合并路径:
-  永远从现有 tags 继承 → processTags(flatTags, { existingTags }) ✅ (走黑名单+同义合并)
-```
-
-对比旧架构：
-
-| 路径 | 旧 | 新 |
-|------|----|----|
-| MemoryWrite | 后备 ✓ | 后备 + 黑名单 + 预算 ✓✓ |
-| Exit Extraction | ❌ 无后备 | 后备 + 黑名单 + 预算 ✓✓ |
-| Dream 合并 | 纯继承 = 脏标签直接继承 | 走黑名单 + 同义合并 ✓✓ |
 
 ---
 
