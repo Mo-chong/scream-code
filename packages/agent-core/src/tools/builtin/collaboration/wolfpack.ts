@@ -3,7 +3,7 @@
  *
  * Spawns multiple subagents in parallel using a template + items pattern.
  * Each item gets its own subagent; results are batched together.
- * Concurrency capped at WOLFPACK_CONCURRENCY to avoid provider rate-limit exhaustion.
+ * There is no artificial concurrency cap: all items spawn and run in parallel.
  */
 
 import { z } from 'zod';
@@ -13,11 +13,11 @@ import type { Logger } from '../../../logging';
 import { ToolAccesses } from '../../../loop/tool-access';
 import { isAbortError } from '../../../loop/errors';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
-import type { SessionSubagentHost, SubagentHandle } from '../../../session/subagent-host';
+import type { SessionSubagentHost } from '../../../session/subagent-host';
 import { toInputJsonSchema } from '../../support/input-schema';
 import WOLFPACK_DESCRIPTION from './wolfpack.md';
 
-const MAX_ITEMS = 20;
+// Unlimited subagent concurrency: spawn every item in parallel.
 
 export const WolfPackToolInputSchema = z.object({
   description: z
@@ -35,7 +35,6 @@ export const WolfPackToolInputSchema = z.object({
   items: z
     .array(z.string().min(1))
     .min(1)
-    .max(MAX_ITEMS)
     .describe('Array of items to process. Each item gets its own subagent.'),
 });
 
@@ -79,45 +78,35 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
       };
     }
 
-    if (args.items.length > MAX_ITEMS) {
+    if (args.items.length === 0) {
       return {
-        output: `WolfPack max ${MAX_ITEMS} items. Got ${args.items.length}.`,
+        output: 'WolfPack requires at least one item.',
         isError: true,
       };
     }
 
     const profileName = args.subagent_type ?? 'coder';
     const template = args.prompt_template;
-    const WOLFPACK_CONCURRENCY = 8;
 
-    const handlePromises = args.items.map(
-      async (item): Promise<{ item: string; handle: SubagentHandle } | { item: string; error: unknown }> => {
-        ctx.signal.throwIfAborted();
-        try {
-          const prompt = template.replaceAll('{{item}}', () => item);
-          const handle = await this.subagentHost.spawn(profileName, {
-            parentToolCallId: ctx.toolCallId,
-            prompt,
-            description: `${args.description}: ${item}`,
-            runInBackground: false,
-            signal: ctx.signal,
-          });
-          return { item, handle };
-        } catch (error) {
-          return { item, error };
-        }
-      },
-    );
-
-    // Execute spawns in batches to avoid provider rate-limit exhaustion.
-    const handleResults: Array<PromiseSettledResult<{ item: string; handle: SubagentHandle } | { item: string; error: unknown }>> = [];
-    for (let i = 0; i < handlePromises.length; i += WOLFPACK_CONCURRENCY) {
+    // Spawn every requested subagent in parallel (unlimited concurrency mode).
+    const handlePromises = args.items.map(async (item) => {
       ctx.signal.throwIfAborted();
-      const batch = handlePromises.slice(i, i + WOLFPACK_CONCURRENCY);
-      const batchResults = await Promise.allSettled(batch);
-      handleResults.push(...batchResults);
-    }
+      try {
+        const prompt = template.replaceAll('{{item}}', () => item);
+        const handle = await this.subagentHost.spawn(profileName, {
+          parentToolCallId: ctx.toolCallId,
+          prompt,
+          description: `${args.description}: ${item}`,
+          runInBackground: false,
+          signal: ctx.signal,
+        });
+        return { item, handle };
+      } catch (error) {
+        return { item, error };
+      }
+    });
 
+    const handleResults = await Promise.allSettled(handlePromises);
     const completionPromises = handleResults.map(
       async (settled): Promise<{ item: string; result: string; success: boolean; agentId?: string }> => {
         if (settled.status === 'rejected') {
