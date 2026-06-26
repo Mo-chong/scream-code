@@ -16,7 +16,7 @@ const SQLITE_MIGRATION_MARKER = '.migrated-to-sqlite';
 const VEC0_MIGRATION_MARKER = '.migrated-vec0';
 
 // --- vec0 / hot-cold tier constants ---
-const VEC0_DIMS = 384;
+const VEC0_DIMS = 512;
 const HOT_MAX_SIZE = 100;
 const DEMOTE_RESNET_THRESHOLD = 0.3;
 const DEMOTE_DAYS_NO_HIT = 30;
@@ -95,6 +95,7 @@ export class MemoryMemoStore {
     this.createSchema();
     await this.migrateFromJsonl();
     await this.migrateVec0();
+    this.rebuildVec0IfNeeded();
     this.initialized = true;
   }
 
@@ -562,6 +563,37 @@ export class MemoryMemoStore {
     await writeFile(markerPath, '', 'utf8').catch(() => {});
   }
 
+  /**
+   * If vec_memos has the wrong dimension (leftover from VEC0_DIMS=384),
+   * rebuild it. Safe because vec_memos is currently 0 rows.
+   */
+  private rebuildVec0IfNeeded(): void {
+    if (this.db === undefined) return;
+    try {
+      const row = this.db
+        .prepare('SELECT COUNT(*) as cnt FROM vec_memos')
+        .get() as { cnt: number } | undefined;
+      if ((row?.cnt ?? 0) === 0) {
+        this.db.exec('DROP TABLE IF EXISTS vec_memos');
+        this.db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS vec_memos USING vec0(
+            memo_embedding float[${VEC0_DIMS}],
+            project_dir TEXT partition key,
+            extraction_source TEXT,
+            recorded_at INTEGER,
+            +memo_id TEXT,
+            +score_tier TEXT,
+            +user_need TEXT,
+            +approach TEXT,
+            +outcome TEXT
+          )
+        `);
+      }
+    } catch {
+      // Table may not exist yet (first init); fine, createSchema() handles it.
+    }
+  }
+
   private insertMany(memos: readonly MemoryMemo[]): void {
     if (this.db === undefined || memos.length === 0) return;
     const insert = this.db.prepare(
@@ -648,6 +680,11 @@ export class MemoryMemoStore {
       );
       this.db.exec('COMMIT');
       this.scheduleEmbedding(entry);
+
+      // Independent capacity guard: evict oldest unprotected memos if HOT_MAX_SIZE exceeded.
+      void this.enforceHotTierCap().catch((err) => {
+        this.log.error?.('enforceHotTierCap failed', { error: err });
+      });
 
       // Phase 4: deviation chain — track consecutive low-quality tag sets
       const quality = computeTagSetQuality(entry.tags ?? []);
@@ -1027,41 +1064,38 @@ export class MemoryMemoStore {
     return true;
   }
 
-  /** Demote: move a memo from hot tier to archive. */
+  /** Demote: move a memo from hot tier to archive. Serialized via withWriteLock. */
   async demote(id: string): Promise<boolean> {
-    await this.init();
-    if (this.db === undefined) return false;
-    const memo = await this.get(id);
-    if (memo === undefined || (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu')))) return false;
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return false;
+      const memo = await this.get(id);
+      if (memo === undefined || (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu')))) return false;
 
-    // Save embedding before deleteInternal removes the memo (and its vec0 entry).
-    // Reading memory_embeddings here (not vec0) because vec0 stores only auxiliary
-    // columns — the full float32 array lives in memory_embeddings.embedding_json.
-    const embRow = this.db
-      .prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?')
-      .get(id) as { embedding_json: string } | undefined;
+      // Save embedding before deleteInternal removes the memo (and its vec0 entry).
+      const embRow = this.db
+        .prepare('SELECT embedding_json FROM memory_embeddings WHERE memory_id = ?')
+        .get(id) as { embedding_json: string } | undefined;
 
-    const embeddingJson = embRow?.embedding_json;
-    const archiveEntry = {
-      ...memo,
-      archivedAt: Date.now(),
-      hitCount: 0,
-      lastHitAt: 0,
-      embeddingJson,
-    };
-    await this.appendToArchive(archiveEntry);
-    await this.deleteInternal(id); // Also deletes vec0 entry via deleteVec0
+      const embeddingJson = embRow?.embedding_json;
+      const archiveEntry = {
+        ...memo,
+        archivedAt: Date.now(),
+        hitCount: 0,
+        lastHitAt: 0,
+        embeddingJson,
+      };
+      await this.appendToArchive(archiveEntry);
+      await this.deleteInternal(id);
 
-    // Re-insert vec0 with ARCHIVED tier so cold-layer vec0 search still works.
-    // Cannot use updateVec0Tier() here because the memo was just removed from
-    // the memos table — updateVec0Tier does SELECT * FROM memos and would return
-    // undefined. We saved the embedding above before the delete.
-    if (embeddingJson !== undefined) {
-      const vec = new Float32Array(JSON.parse(embeddingJson) as number[]);
-      this.upsertVec0(id, vec, memo, 'ARCHIVED');
-    }
+      // Re-insert vec0 with ARCHIVED tier so cold-layer vec0 search still works.
+      if (embeddingJson !== undefined) {
+        const vec = new Float32Array(JSON.parse(embeddingJson) as number[]);
+        this.upsertVec0(id, vec, memo, 'ARCHIVED');
+      }
 
-    return true;
+      return true;
+    });
   }
 
   /** Auto-demote: scan hot tier, demote cold entries. */
@@ -1101,6 +1135,35 @@ export class MemoryMemoStore {
       }
     }
 
+    return demoted;
+  }
+
+  /**
+   * Independent capacity guard: evicts oldest unprotected hot memos when
+   * the hot tier exceeds HOT_MAX_SIZE. Does NOT depend on embedding engine.
+   * Called from appendInternal after every new memo insertion.
+   */
+  private async enforceHotTierCap(): Promise<number> {
+    await this.init();
+    if (this.db === undefined) return 0;
+    const currentCount = await this.hotMemoCount();
+    if (currentCount <= HOT_MAX_SIZE) return 0;
+
+    const hotMemos = await this.getAllHotMemos();
+    const unprotected = hotMemos.filter(
+      (m) => !(Array.isArray(m.tags) &&
+        (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('yongjiu')))
+    );
+    const evictTargets = unprotected
+      .sort((a, b) => a.recordedAt - b.recordedAt) // oldest first
+      .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
+
+    let demoted = 0;
+    for (const memo of evictTargets) {
+      if (demoted >= DEMOTE_BATCH_SIZE) break;
+      await this.demote(memo.id);
+      demoted++;
+    }
     return demoted;
   }
 
@@ -1333,7 +1396,9 @@ export class MemoryMemoStore {
       // Periodic auto-demote: cool hot tier after embeddings settle.
       // Throttled to avoid running on every single write.
       if (this.lastAutoDemoteAt + MemoryMemoStore.AUTO_DEMOTE_INTERVAL_MS < Date.now()) {
-        void this.autoDemoteIfNeeded().catch(() => {}).then(() => {
+        this.autoDemoteIfNeeded().catch((err) => {
+          this.log.error?.('autoDemoteIfNeeded failed', { error: err });
+        }).then(() => {
           this.lastAutoDemoteAt = Date.now();
         });
       }

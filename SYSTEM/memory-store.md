@@ -79,7 +79,7 @@ CREATE TABLE memory_embeddings (
 );
 ```
 
-由 EmbeddingEngine（fastembed BGESmallZH, 384 维）异步生成。`ON DELETE CASCADE` — 删除 memos 时自动清除 embedding。
+由 EmbeddingEngine（fastembed BGESmallZH, 512 维）异步生成。`ON DELETE CASCADE` — 删除 memos 时自动清除 embedding。
 
 ⚠️ 排序按 `created_at DESC`，旧的 embedding 可能超出 `candidateLimit` 范围而不被搜索。
 
@@ -87,7 +87,7 @@ CREATE TABLE memory_embeddings (
 
 ```sql
 CREATE VIRTUAL TABLE vec_memos USING vec0(
-  memo_embedding float[384],
+  memo_embedding float[512],
   project_dir TEXT partition key,
   extraction_source TEXT,
   recorded_at INTEGER,
@@ -239,7 +239,7 @@ MemoryLookup 工具完整调用链路：
     ▼
 ② vec0 语义搜索
    a) 查询 embedding:
-      engine.embedBatch([query]) → Float32Array(384)
+      engine.embedBatch([query]) → Float32Array(512)
       getCachedQueryEmbedding() — 同 query 缓存复用
    b) 热层搜索（优先）:
       store.searchByVectorVec0(queryVec, { scoreTier: 'HOT', k: candidateLimit })
@@ -619,6 +619,11 @@ baohu/chundu/yongjiu 标签对以上全部免疫。
           → INSERT memory_embeddings（事务内）
           → upsertVec0() 写 vec_memos（事务外，不污染 embedding INSERT）
           → 每 5 分钟节流触发 autoDemoteIfNeeded()
+   → enforceHotTierCap() ⭐（独立于 embedding，每次 append 都执行）
+      → 热层 > 100 条时自动 evict 最旧的 unprotected 记忆到冷层
+      → 每批最多 5 条（DEMOTE_BATCH_SIZE），避免大事务
+   → 若 embedding 引擎不可用 → scheduleEmbedding early-return
+     → autoDemote 不触发 ⚠️ 但 enforceHotTierCap 不受影响（独立守卫）
 ```
 
 ### 8.2 搜索路径

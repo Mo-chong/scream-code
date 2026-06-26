@@ -29,6 +29,7 @@ export default defineConfig({
   },
   define: {
     [BUILT_IN_CATALOG_DEFINE]: builtInCatalogDefine(),
+    __BUILD_TIMESTAMP__: String(Date.now()),
   },
   deps: {
     alwaysBundle: [/^@scream-./],

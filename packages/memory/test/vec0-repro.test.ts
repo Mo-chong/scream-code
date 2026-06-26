@@ -51,7 +51,7 @@ describe('vec0 migration gap repro', () => {
     expect(store.hasVec0()).toBe(false);
 
     // Now manually insert into memory_embeddings (simulating pre-vec0 state)
-    const embed = new Float32Array(384);
+    const embed = new Float32Array(512);
     embed[0] = 0.5;
     embed[1] = -0.3;
     db.prepare(
@@ -95,7 +95,7 @@ describe('vec0 migration gap repro', () => {
 
     // Manually insert embedding so flushEmbeddings writes to vec0
     const db = (store as any).db as DatabaseSync;
-    const embed = new Float32Array(384);
+    const embed = new Float32Array(512);
     db.prepare(
       `INSERT INTO memory_embeddings (memory_id, embedding_json, model, created_at)
        VALUES (?, ?, ?, ?)`,

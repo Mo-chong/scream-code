@@ -44,7 +44,9 @@
     "typescript": "6.0.2",
     "vitest": "4.1.4"
   },
-  "simple-git-hooks": {},
+  "simple-git-hooks": {
+    "pre-commit": "./scripts/guards/check-all.sh --quiet"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "onnxruntime-node"

@@ -40,7 +40,7 @@ async function _resolveCmd(desc: LspCommand): Promise<string[]> {
     }
     // Fallback: try npm next to node.exe
     try {
-      const nodeBin = dirname(process.execPath);
+      const nodeBin = __dirname;
       const npmRoot = execSync(join(nodeBin, 'npm.cmd') + ' root -g', { encoding: 'utf8' }).trim();
       const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
       await access(entry);

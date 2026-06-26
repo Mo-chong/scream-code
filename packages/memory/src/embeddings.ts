@@ -91,11 +91,38 @@ export function createFastEmbedEngine(): EmbeddingEngine {
   };
 }
 
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
+
 async function loadEmbedder(): Promise<FastembedModel | null> {
   try {
-    const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
+    // Primary: resolve from bundle location via createRequire.
+    // This works when the bundle is inside the project's node_modules tree.
+    const distRequire = createRequire(import.meta.url);
+    const fePath = distRequire.resolve('fastembed/package.json');
+    const feDir = dirname(fePath);
+    const { FlagEmbedding, EmbeddingModel } = await import(feDir);
     return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
   } catch {
-    return null;
+    try {
+      // Fallback 1: bare import for dev/run-from-project-root mode.
+      const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
+      return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
+    } catch {
+      try {
+        // Fallback 2: SCREAMCODE_NODE_PATH env hint (manual override).
+        const hintPath = process.env['SCREAMCODE_NODE_PATH'];
+        if (hintPath) {
+          const hintRequire = createRequire(hintPath + '/package.json');
+          const fePath = hintRequire.resolve('fastembed/package.json');
+          const feDir = dirname(fePath);
+          const { FlagEmbedding, EmbeddingModel } = await import(feDir);
+          return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
+        }
+      } catch {
+        // All paths failed
+      }
+      return null;
+    }
   }
 }

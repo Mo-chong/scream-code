@@ -294,6 +294,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // ── Phase 12: 反馈信号闭环 variants ────────────────────────────
   // Rule 1 (阻断) 不走 inject() 路径，无需 VARIANT_META
+  guard_feedback_rule_1:      { weight: 0.9, decayPerStep: 0.90, threshold: 0.30, minStepGap: 3, interceptThreshold: 2 },
   guard_feedback_rule_2:      { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   guard_feedback_rule_3:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 2 },
   feedback_positive:          { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
@@ -302,6 +303,9 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   guard_feedback_rule_4:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   scene_memory_recall:       { weight: 0.8, decayPerStep: 0.88, threshold: 0.30, minStepGap: 5, interceptThreshold: 3 },
   step_code_ref_quality:     { weight: 0.5, decayPerStep: 0.85, threshold: 0.40, minStepGap: 6 },
+
+  // ── Phase 18: 代码质量反馈 ────────────────────────────────────
+  code_quality_feedback:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
 };
 
 /**

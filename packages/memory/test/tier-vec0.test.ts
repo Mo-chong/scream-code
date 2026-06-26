@@ -29,7 +29,7 @@ function makeMemo(overrides: Partial<MemoryMemo> = {}): MemoryMemo {
 }
 
 /**
- * Write a random 384-dim embedding into memory_embeddings + upsertVec0
+ * Write a random 512-dim embedding into memory_embeddings + upsertVec0
  * so vec0 queries can find the memo at the specified tier.
  */
 async function seedEmbedding(
@@ -40,8 +40,8 @@ async function seedEmbedding(
   const db = (store as any).db as DatabaseSync;
   // Produce deterministic but unique vector per memoId so equal vectors
   // also work for distance-based search tests.
-  const embed = new Float32Array(384);
-  for (let i = 0; i < 384; i++) {
+  const embed = new Float32Array(512);
+  for (let i = 0; i < 512; i++) {
     // Use a simple hash of memoId to make vectors different per memo
     embed[i] = ((memoId.charCodeAt(i % memoId.length) || 42) / 255) * 2 - 1;
   }
@@ -169,7 +169,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
 
     await store.demote(memo.id);
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     // Should be findable via ARCHIVED tier
     const arch = store.searchByVectorVec0(q, {
       k: 20, scoreTier: 'ARCHIVED', distanceCutoff: 100,
@@ -222,7 +222,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
     await store.demote(memo.id);
     await store.promote(memo.id);
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     const hot = store.searchByVectorVec0(q, {
       k: 20, scoreTier: 'HOT', distanceCutoff: 100,
     });
@@ -358,7 +358,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
     await seedEmbedding(store, hotM.id, 'HOT');
     await seedEmbedding(store, coldM.id, 'ARCHIVED');
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     const hotRes = store.searchByVectorVec0(q, {
       k: 20, scoreTier: 'HOT', distanceCutoff: 100,
     });
@@ -375,7 +375,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
   });
 
   it('searchByVectorVec0 returns empty for non-matching tier filter', async () => {
-    const res = store.searchByVectorVec0(new Float32Array(384), {
+    const res = store.searchByVectorVec0(new Float32Array(512), {
       k: 20, scoreTier: 'HOT', distanceCutoff: 100,
     });
     expect(res).toEqual([]);
@@ -387,13 +387,13 @@ describe('Hot/Cold tier + vec0 integration', () => {
     await seedEmbedding(store, memo.id);
 
     // cutoff=0 → no results (distances are > 0)
-    const none = store.searchByVectorVec0(new Float32Array(384), {
+    const none = store.searchByVectorVec0(new Float32Array(512), {
       k: 20, distanceCutoff: 0,
     });
     expect(none.some((r) => r.memo_id === memo.id)).toBe(false);
 
     // cutoff=100 → everything matches
-    const all = store.searchByVectorVec0(new Float32Array(384), {
+    const all = store.searchByVectorVec0(new Float32Array(512), {
       k: 20, distanceCutoff: 100,
     });
     expect(all.some((r) => r.memo_id === memo.id)).toBe(true);
@@ -407,7 +407,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
     await seedEmbedding(store, projA.id, 'HOT');
     await seedEmbedding(store, projB.id, 'HOT');
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     const aRes = store.searchByVectorVec0(q, {
       k: 20, projectDir: '/workspace/a', distanceCutoff: 100,
     });
@@ -424,7 +424,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
 
     await store.delete(memo.id);
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     const all = store.searchByVectorVec0(q, { k: 200, distanceCutoff: 100 });
     expect(all.some((r) => r.memo_id === memo.id)).toBe(false);
   });
@@ -449,7 +449,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
     expect(await store.get(memo.id)).toBeUndefined();
 
     // vec0 should be ARCHIVED after second demote
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
     const arch = store.searchByVectorVec0(q, {
       k: 20, scoreTier: 'ARCHIVED', distanceCutoff: 100,
     });
@@ -469,7 +469,7 @@ describe('Hot/Cold tier + vec0 integration', () => {
     await seedEmbedding(store, hotM.id, 'HOT');
     await seedEmbedding(store, coldM.id, 'ARCHIVED');
 
-    const q = new Float32Array(384);
+    const q = new Float32Array(512);
 
     // Phase 1: HOT
     const hotRes = store.searchByVectorVec0(q, {

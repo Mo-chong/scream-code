@@ -6,7 +6,7 @@
 
 ## Architecture overview
 
-**4 injection triggers + 3 pure-function detectors + 1 unified inject route.**
+**4 injection triggers + 7 pure-function detectors + 1 guard engine (4 rules) + 1 memory-rule injector + 1 unified inject route.**
 
 ### Triggers (when injection happens)
 
@@ -26,6 +26,24 @@
 | ConfabulationDetector | `detectors/confabulation.ts` | StepSignature + ContextSnapshot | `DetectionResult` |
 | SceneMemoryDetector | `detectors/scene-memory.ts` | User input + hasMemoryLookup | `SceneMemoryIssue` |
 | CodeRefDetector | `detectors/code-ref.ts` | Assistant text | `CodeRefIssue` |
+| CodeQualityDetector | `detectors/code-quality.ts` | Written code + file path | `CodeQualityResult` |
+
+### GuardEngine (behavior rules, not pure — reads history)
+
+| Check | File | Logic |
+|-------|------|-------|
+| Rule 1 (block) | `guard-engine.ts` | "test passed" claim + Bash exit ≠ 0 → block |
+| Rule 2 (observe) | `guard-engine.ts` | "I can see" claim + no Read/Grep/LSP → observe |
+| Rule 3 (observe) | `guard-engine.ts` | "already edited" claim + no Edit/Write → observe |
+| Rule 4 (observe) | `guard-engine.ts` | MemoryLookup used + code assertion + no Read/Grep → observe |
+
+### MemoryRulesInjector (async, searches memo store)
+
+| Function | File | Trigger |
+|----------|------|---------|
+| `searchBehaviorRules` | `memory-rules.ts` | Guard rule fires + memoStore exists (tags: chundu) |
+| `detectSceneQuery` | `memory-rules.ts` | afterStep, scans assistant text for topic keywords |
+| `searchPendingDoc` | `memory-rules.ts` | Turn pre-close check — pending-doc tags reminder |
 
 ### Unified inject route
 
@@ -36,6 +54,7 @@ inject(text, meta) →
   ├─ system_trigger kind → bypass budget, inject directly
   ├─ quality_escalate_ variant → bypass budget, inject directly
   ├─ interception_log variant → bypass budget, inject directly (Phase15: meta-log)
+  ├─ behavior_feedback variant → meta-log only, never injected (Phase15)
   ├─ repeatDecay(record) === 'skip' → silent discard (triggerCount ≥5)
   ├─ ResNet: !shouldInjectByResidual(record, step, meta) → silent skip (attention still sufficient)
   │     (variant must have a VariantMeta entry; unconfigured variants pass through)
@@ -681,3 +700,247 @@ Async persistence buffer. Collects turn-end snapshots and flushes to disk when t
 | `shouldContinueAfterStop` convergence held | `eventLog.record(convergence_gate/gate_held)` |
 | `shouldContinueAfterStop` convergence passed | `eventLog.record(convergence_gate/gate_passed)` |
 | `runOneTurn` turn end | `eventBuffer.pushTurn()` (async, non-blocking) |
+
+---
+
+## 13. Guard Engine (guard-engine.ts)
+
+**File:** `guard-engine.ts`
+**Pure function:** `checkGuard(history, tools) → GuardResult`
+
+4 rules run in `afterStep` via `runGuardDetection()`. Rules are checked in priority order (1 > 2 > 3 > 4) — only the first match is returned.
+
+### StepToolSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hasKnowledgeTools` | boolean | Read/Grep/LSP called this step |
+| `hasWriteTools` | boolean | Edit/Write called this step |
+| `lastBashExitCode` | number \| null | Bash exit code (null if not run) |
+| `hasMemoryLookup` | boolean | MemoryLookup called this step |
+| `hasCurrentCodeTools` | boolean | Read/Grep/LSP this step (Phase 13) |
+
+### Guard Rules
+
+| Rule | Priority | Trigger | Action | Inject variant |
+|------|:--------:|---------|--------|:--------------:|
+| Rule 1 | 1 (blocking) | "test passed" / "验证通过" in text + Bash exit ≠ 0 | `confabulationBlocked = true` | `guard_rule_1` (via eventLog) |
+| Rule 2 | 2 (observe) | "检查发现"/"我可以看到" in text + no knowledge tools | inject feedback | `guard_feedback_rule_2` |
+| Rule 3 | 3 (observe) | "已修改"/"已编辑" in text + no write tools | inject feedback | `guard_feedback_rule_3` |
+| Rule 4 | 4 (observe) | MemoryLookup used + code assertion + no Read/Grep | inject feedback | `guard_feedback_rule_4` |
+
+### Integration in index.ts
+
+```
+handleAfterStep →
+  Step 2: guard/false-facts + quality detection
+    detectConfabulation → injectAntiConfabulation
+  Step 5: detector sequence
+    detectSceneMemoryIssue()
+    await runGuardDetection()      ← Guard Engine here
+    await injectBehaviorRulesAfterStep()
+```
+
+**Behavior rule injection** (Phase 12): When a guard rule fires and `memoStore` exists, `runGuardDetection()` calls `searchBehaviorRules()` with a query matching the rule's topic. If a `chundu`-tagged memo is found, its content is appended to the guard feedback.
+
+---
+
+## 14. afterStep flow (index.ts:1532)
+
+The complete `handleAfterStep` pipeline:
+
+```
+Step 1: Step feedback + deviation chain
+  ├─ injectStepAfterVariants()       → step_after_edit/search/verify_fail
+  └─ detectDeviationChain()          → deviationChainActive (3 conditions)
+
+Step 2: False facts + quality detection
+  ├─ detectConfabulation(sig, snap)  → injectAntiConfabulation()
+  ├─ runQualityDetection(sig)        → observeBehavior + escalateQuality
+  └─ resetObservedBehaviorViolations()     ← Phase 15
+
+Step 3: Deviation chain resolve + turn-level stats
+  ├─ tryResolveDeviationChain()
+  ├─ turnHasCalledAnyLsp tracking
+  └─ totalStepsWithEditsThisTurn tracking
+
+Step 4: Event log + health check
+  ├─ injectInterceptionSummary()     → interception_log inject
+  └─ checkEventLogHealth()           → warn if 10+ steps with 0 events
+
+Step 5: Detector sequence
+  ├─ detectSceneMemoryIssue()        → scene_memory_recall inject
+  ├─ await runGuardDetection()       → Guard Engine (Phase 12)
+  └─ await injectBehaviorRulesAfterStep()  → memory-rule inject (Phase 12)
+
+Step 6: Positive feedback + CodeRef
+  ├─ injectPositiveFeedbackThisTurn()  → feedback_positive inject
+  └─ detectCodeRefIssue()              → step_code_ref_quality inject
+
+Step 7: Reset step state
+  └─ resetInjectorStepState()
+```
+
+### Phase 12 Guard Rules + Memory integration
+
+```
+runGuardDetection():
+  checkGuard(history, tools) → GuardResult
+  if rule > 0:
+    lastGuardFeedback = guardResult.feedback
+    if memoStore exists:
+      searchBehaviorRules(memoStore, query)  ── chundu-tagged memos
+      if found: append formatBehaviorRule(nearest) to feedback
+    if guardResult.block:                      ── Rule 1 only
+      confabulationBlocked = true
+      eventLog.record(confabulation/guard_rule_1)
+    else:                                      ── Rules 2-4
+      eventLog.record(guard_observe/guard_rule_N)
+      inject(feedback, guard_feedback_rule_N)
+```
+
+### Phase 15: Behavior violation tracking (index.ts:1631-1678)
+
+**Intercept variants:** `guard_feedback_rule_2`, `guard_feedback_rule_3`, `guard_feedback_rule_4`, `scene_memory_recall`, `step_after_edit`, `step_after_verify_fail`
+
+```
+  quality escalation S→S:
+    trackBehaviorViolation(variant)
+      → crossTurnFlags.behaviorViolations[variant]++
+
+  deviation chain condition 3:
+    if behaviorViolations[variant] >= VARIANT_META[variant].interceptThreshold
+      → deviationChainActive = true
+
+  deviation chain intercept inject:
+    buildBehaviorInterceptMsg(variant) → injected with deviation_chain_intercept (S)
+```
+
+### Phase 18: Code quality tracking
+
+Code quality violations are tracked via `scanCodeQuality()` and accumulated in `codeQualityViolations`. At the end of each turn:
+
+```
+  if codeQualityViolationsThisTurn > 0
+    → deviationChainActive (condition 4)
+  if codeQualityViolations cleaned up (thisTurn === 0)
+    → deviationChainResolved
+```
+
+---
+
+## 15. afterStep detectors (full reference)
+
+### SceneMemoryDetector (detectors/scene-memory.ts)
+
+Pure function detecting Chinese recall keywords ("上次"/"以前"/"之前") in user input.
+
+```
+detectSceneMemory(userInput, hasMemoryLookup) → SceneMemoryIssue
+  if recall keyword found + no MemoryLookup call → needsReminder = true
+```
+
+Integration in `index.ts:1741`:
+
+```
+detectSceneMemoryIssue():
+  if step 1 + user input has recall keyword + no MemoryLookup
+    → inject("用户提到了"上次/以前"——先用 MemoryLookup 查历史记录", scene_memory_recall)
+```
+
+### CodeRefDetector (detectors/code-ref.ts)
+
+Scans assistant output for code blocks without preceding file path annotations.
+
+```
+detectCodeRefQuality(assistantText) → CodeRefIssue
+  high-confidence (score ≥ 2) → inject step_code_ref_quality
+```
+
+### CodeQualityDetector (detectors/code-quality.ts)
+
+**New in Phase 18.** Pure function. Run on Write/Edit output.
+
+```
+scanCodeQuality(code, filePath) → CodeQualityResult
+  S1: .js/.jsx file forbidden (allow .ts/.tsx only)
+  S2: `: any` type annotation forbidden (allow eslint-disable-next-line)
+  S3: function parameters and return values must have explicit type signatures
+```
+
+Integration:
+
+```
+runOneTurn → finalizeToolResult:
+  if Write/Edit on code file:
+    scanCodeQuality(output, filePath)
+    if violations found:
+      codeQualityViolations.push(...)
+      codeQualityViolationsThisTurn++
+      inject(formatCodeQualityFeedback(result), code_quality_feedback)
+
+handleAfterTurn:
+  if codeQualityViolationsThisTurn > 0
+    → deviation chain activation
+```
+
+### positiveFeedback (index.ts:1798)
+
+```
+injectPositiveFeedbackThisTurn():
+  conditions (all must be true):
+    ├─ not confabulationBlocked
+    ├─ not deviationChainActive
+    ├─ not verifyFailedThisStep
+    ├─ (hasCalledLspReferencesThisStep OR editWithoutLookupCount === 0)
+    ├─ codeQualityViolationsThisTurn === 0        ← Phase 18
+    └─ at least 1 step completed
+  → inject "【行为确认】本轮验证流程完整且代码质量合规。继续。" (feedback_positive)
+```
+
+### MemoryRulesInjector (memory-rules.ts)
+
+Three entry points:
+
+| Entry | Called from | What it does |
+|-------|-------------|-------------|
+| `searchBehaviorRules` | `runGuardDetection()` + `collectConfabulationBlockReason` | Searches `chundu`-tagged memos matching guard rule topic |
+| `detectSceneQuery` | `injectBehaviorRulesAfterStep()` | Matches assistant text keywords → search query → inject formatted rule |
+| `searchPendingDoc` + `formatPendingDocInject` | `finishTurnDoc()` via `collectPendingDocReason()` | End-of-turn check for pending-doc tagged memos → inject before close |
+
+### finishTurnDoc — pending-doc 集成
+
+```
+finishTurnDoc(reasons) →
+  collectPendingDocReason(reasons):
+    if memoStore exists + no other block reasons:
+      searchPendingDoc(memoStore)  ── search tags: pending-doc, outcome: pending
+      if found: formatPendingDocInject(memos) → add to reasons list
+  if reasons.length > 0:
+    inject(reasons.join('\n'), interception_log)
+```
+
+---
+
+## 16. All registered variants (updated flat list)
+
+| Group | Variants |
+|:-----:|----------|
+| A (prepareToolExecution) | prepare_edit(A), prepare_write(A), prepare_search(A), prepare_memory(A), prepare_bash_file(C), prepare_verify(C) |
+| B (finalizeToolResult) | post_edit(A), post_search(B), post_write_large(B), post_verify_pass(B), post_verify_fail(A), post_memory(B) |
+| C (afterStep) | step_after_edit(A/B), step_after_search(B), step_after_verify_fail(A), step_code_ref_quality(C) |
+| D (runOneTurn) | intent_fix_bug(B/A), intent_refactor(B/A), intent_add_feature(B/A), intent_review(B/A), intent_research(B/A), intent_document(B/A) |
+| E (afterStep — guard feedback) | guard_feedback_rule_2(C), guard_feedback_rule_3(C), guard_feedback_rule_4(C), feedback_positive(D) |
+| F (afterStep — scene) | scene_memory_recall(C) |
+| G (afterStep — code quality) | code_quality_feedback(C) |
+| H (Phase15 — behavior feedback) | behavior_feedback (meta-log only, never injected) |
+| I (Phase15 — S→S intercept variants) | guard_feedback_rule_2, guard_feedback_rule_3, guard_feedback_rule_4, scene_memory_recall, step_after_edit, step_after_verify_fail |
+| Special | deviation_chain_intercept(S), quality_escalate_*(penetrate), system_trigger(penetrate), interception_log(penetrate) |
+
+### ResNet configuration — new variants
+
+| Variant | W | D | threshold | minStepGap | interceptThreshold | Notes |
+|---------|:-:|:-:|:---------:|:----------:|:------------------:|-------|
+| code_quality_feedback | 0.7 | 0.85 | 0.35 | 4 | **3** | Added Phase 18 |
+
+Behavior feedback (`behavior_feedback`) is meta-log only — never injected, never hits budget or ResNet. Interception log events from guard_rule_1, guard_observe_*, code_quality are recorded in the event log system (section 12).

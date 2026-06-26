@@ -467,6 +467,104 @@ scream --version                 # 确认工作
 1. Edit 的 3 个必填参数是 `path` + `old_string` + `new_string`，缺一不可
 2. 在工具调用模板中，`path` 应该永远放在第一个写，不容易忘
 
+### pnpm lifecycle 在 Windows Git Bash 下无法执行（2026-06-26 确认）
+
+**问题**：`pnpm install` 报 "enospc" 或子进程找不到 `node`，`package.json` 的 `prepare` 脚本（`"prepare": "node scripts/prepare.mjs"`）以及 `apps/scream-code` 的 `preinstall`/`postinstall` 全部失败。
+
+**根因**：pnpm lifecycle 在 Windows 上使用 `cmd.exe` 运行子进程脚本。但 `cmd.exe` 继承的 PATH 中缺少 Node.js 路径（`node` 不在 PATH 中），导致 `.cmd` 文件执行时找不到 `node`。
+
+**解决**：绕过 pnpm lifecycle，直接调用 tsdown：
+```bash
+node node_modules/.pnpm/tsdown@*/node_modules/tsdown/dist/run.mjs \
+  --config apps/scream-code/tsdown.config.ts
+```
+
+**教训**：
+1. pnpm lifecycle 在 Windows Git Bash 下不可靠——不要依赖 `prepare`/`preinstall`/`postinstall` 做关键构建步骤
+2. 绕过方式：直接调 tsdown 的 run.mjs，跳过了 pnpm 的 lifecycle 流程
+3. `scripts/prepare.mjs` 中用 `process.execPath` + `shell: true` 可以缓解但不会根治——`cmd.exe` 子进程的问题仍存在
+
+### VEC0_DIMS 常量与模型实际维度不同步（2026-06-26 修复）
+
+**问题**：`VEC0_DIMS = 384`，但嵌入模型 BGESmallZH 实际输出 512 维。一旦写入 `float[384]` 的 vec0 表会 SQLite 报错。
+
+**根因**（Git 时间线）：
+```
+Jun 16 10:44 → VEC0_DIMS 诞生（英文模型 BGESmallENV15，384 维 ✅）
+Jun 16 11:09 → 模型切换为中文 BGESmallZH（512 维 🔴 此时还没 VEC0_DIMS）
+Jun 25       → sqlite-vec 引入 VEC0_DIMS = 384（继承了错误值 🔴）
+```
+从引入恒量 `VEC0_DIMS` 的第一天起就是错的——写代码的人假设模型是 384 维，没去核实 9 天前模型已被换成 512 维的 BGESmallZH。
+
+**修复**：`VEC0_DIMS = 512` + `rebuildVec0IfNeeded()` 在启动时检查 vec_memos 是否空，空则 DROP+CREATE。
+
+**教训**：
+1. 模型切换时必须同步更新所有模型相关的常量（特别是维度）
+2. Git 历史能帮你找出错误的真正起点——追到 `4377862`（Jun 16 11:09 切模型）和 `0e8fb88`（Jun 25 引入 VEC0_DIMS）
+3. `VEC0_DIMS` 的注释应该写 `// 512 = BGESmallZH`，这样下次换模型时一眼就知道要改哪里
+4. 全项目搜 `Float32Array(384)` 是测试文件维度硬编码残留的可靠检查方法
+
+### 容量控制被 embedding 管道锁死（2026-06-26 修复）
+
+**问题**：143 条记忆全部在热层（`memos` 表），冷层（`memos_archive`）0 条。`autoDemoteIfNeeded()` 从未被调用。
+
+**根因**：`scheduleEmbedding()` 开头有一个 early-return：
+```typescript
+// store.ts:1305-1306
+if (this.embeddingEngine === undefined || !this.embeddingEngine.available) return;
+```
+embedding 引擎不可用 → `scheduleEmbedding` 直接 return → `flushEmbeddings()` 不被触发 → `autoDemoteIfNeeded()` 不被调用。但 `autoDemoteIfNeeded()` 后半段（热层 > 100 条就 evict）完全不依赖 embedding——被无辜连坐。
+
+**修复**：新增独立容量守卫 `enforceHotTierCap()`（`store.ts:1147-1169`），在 `appendInternal` 尾部（line 685）每次写记忆都自动触发，不依赖 embedding。
+
+**教训**：
+1. 异步管道的触发链耦合会导致连带故障——embedding 挂了降级也一起死了
+2. 容量控制这种基础功能永远不应该依赖一个"可能不可用"的外部子系统
+3. `enforceHotTierCap` 的防御性设计：先 COUNT 轻查询，超限才全表扫描——兼顾性能和防呆
+
+### loadEmbedder() 的 import('fastembed') 运行时永远找不到模块（2026-06-26 修复）
+
+**问题**：`memory_embeddings = 0`，所有记忆从未生成过 embedding。
+
+**根因**：`import('fastembed')` 是 ESM 动态导入，Node.js 从 `process.cwd()` 开始遍历目录树找 `node_modules/fastembed`。但 `sc` CLI 构建后（tsdown bundle），运行时 CWD 是用户目录（如 `C:/Users/Administrator/`），不是项目根目录，所以模块解析链找不到 `fastembed`。
+
+**修复**：三级 fallback 机制：
+```
+Primary:   createRequire(import.meta.url).resolve('fastembed/package.json')
+           → 从 bundle 位置向上找 node_modules → 找到绝对路径 → import(feDir)
+Fallback 1: 裸 import('fastembed') → 开发模式（CWD = 项目根）时正常工作
+Fallback 2: SCREAMCODE_NODE_PATH 环境变量 → 手动指定路径的逃生舱
+```
+
+**教训**：
+1. bundle 后 CWD = 用户目录，不是项目根——不要假设 `import('xxx')` 能找到任何包
+2. `createRequire(import.meta.url)` 可以在 bundle 中创建一个从 bundle 位置出发的 require 解析器——这是 ESM bundle 中找 node_modules 的通用解法
+3. fastembed 内含 ONNX Runtime 原生 `.node` 扩展，不能被 bundle（`alwaysBundle` 排除），所以运行时必须能解析到 `node_modules/fastembed` 的真实路径
+4. 当前 embedding 引擎仍不可用——虽然修复了加载路径，但 ONNX Runtime 原生模块在 bundle 环境中的加载可能还有后续问题
+
+### tsdown.config.ts 的 Date.now() 类型错误（2026-06-26 修复）
+
+**问题**：`tsdown build` 报类型错误，构建中断。
+
+**根因**：`tsdown.config.ts` 中 `define: { __BUILD_TIMESTAMP__: Date.now() }`。rolldown 的 `define` 选项要求值是 `string` 类型，`Date.now()` 返回 `number`，导致构建报错。
+
+**修复**：`String(Date.now())`。
+
+**教训**：`tsdown.config.ts` 的构建错误在本轮修复之前就被掩盖了——因为 `pnpm build` 走 pnpm lifecycle，先死在 lifecycle，根本到不了 tsdown。`Date.now()` 的类型错误是绕过了 pnpm 直接跑 tsdown 后才暴露出来的。
+
+### 测试文件硬编码 Float32Array(384) 残留（2026-06-26 修复）
+
+**问题**：`tier-vec0.test.ts` 和 `vec0-repro.test.ts` 中共 14 处 `Float32Array(384)`。
+
+**根因**：`VEC0_DIMS` 常量的初始化发生在方案的 Step 1（store.ts），但这些测试文件写于方案实施之前或时，使用了硬编码 384 而非引用常量。
+
+**修复**：14 处全部改为 `Float32Array(512)`。
+
+**教训**：
+1. 修改常量后必须全项目 grep 该常量的旧值（例如 `Float32Array(384)`）——测试文件最容易被遗漏
+2. 硬编码维度在测试中尤其危险——测试可能"通过"但实际插入的是错误维度的数据
+3. 以后应该用 `new Float32Array(VEC0_DIMS)` 替代 `new Float32Array(512)`——但 VEC0_DIMS 是模块级常量，测试文件中 import 不了（因为是 internal const）
+
 ---
 
 ## 设计误区
@@ -739,3 +837,15 @@ Step 3：直接手动运行 resolve 路径（3min）
   node -e "console.log(require('child_process').execSync('npm root -g').toString())"
   → 在 bundle 环境（/d/reasonix/）跑一遍看是否成功
 ```
+
+### 降级容量守卫形同虚设（.catch 吞错 + 缺写锁）
+**现象**：热层 152 条 > HOT_MAX_SIZE=100，冷层永远 0 条。`enforceHotTierCap()` 从未成功执行。
+**发现**：2026-06-26 全链路追查，手工 SQL 模拟降级成功（INSERT archive + DELETE memos + DELETE vec_memos 均正常），但线上从不触发。
+**根因**：
+- `store.ts:685` `void this.enforceHotTierCap().catch(() => {})` — 所有抛错被静默吞掉
+- `store.ts:1066` `demote()` 没有 `withWriteLock` 包裹，与主 append 路径并发时 SQLITE_BUSY 超时抛错 → 被吞
+- `store.ts:1400` `void this.autoDemoteIfNeeded().catch(() => {})` — 同款吞错
+**修复**（2026-06-26）：
+- `demote` 用 `return this.withWriteLock(async () => {...})` 包裹
+- `.catch(() => {})` 改为 `.catch((err) => { this.log.error?.('...', { error: err }) })`（两处）
+**排查方法**：查冷层 `node -e "const{DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(require('os').homedir()+'/.scream-code/memory/memos.sqlite');console.log('archive:',d.prepare('SELECT COUNT(*) FROM memos_archive').get().c)"` → 0 说明从未降级

@@ -42,6 +42,7 @@ import { checkGuard, type StepToolSummary } from './guard-engine';
 import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendingDoc, formatPendingDocInject } from './memory-rules';
 import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
+import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -149,6 +150,12 @@ export class TurnFlow {
   private exploratoryStepsWithoutCodegraph = 0;
   /** Paths edited/written this turn — Read of these = verification (not exploratory). */
   private recentlyModifiedPathsThisTurn: Set<string> = new Set();
+
+  // ── Phase 18: 代码质量追踪 ─────────────────────────────────
+  /** 本回合代码质量违规记录列表 */
+  private codeQualityViolations: CodeQualityViolation[] = [];
+  /** 本回合代码质量违规检测总次数 */
+  private codeQualityViolationsThisTurn = 0;
 
   // ── Guard 规则引擎 (Phase 11) ────────────────────────────────
   private lastBashExitCode: number | null = null;
@@ -530,6 +537,8 @@ export class TurnFlow {
     this.lastUserInputText = input.map(c => c.type === 'text' ? (c.text ?? '') : '').join(' ');
     this.positiveFeedbackGivenThisTurn = false;
     this.guardRule1FiredThisTurn = false;
+    this.codeQualityViolations = [];
+    this.codeQualityViolationsThisTurn = 0;
     this.initConvergenceConditions();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -942,7 +951,7 @@ export class TurnFlow {
               // 🆕 A组: 工具执行前注入 — prepareToolExecution
               if (ctx.toolCall.name === 'Edit') {
                 this.inject(
-                  'MUST update all callers after edit. Use LSP.references.',
+                  '修改函数/API 后，必须更新所有调用方。先调 LSP.references 查找所有引用点。',
                   { kind: 'injection', variant: 'prepare_edit' },
                 );
               }
@@ -960,7 +969,7 @@ export class TurnFlow {
               }
               if (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') {
                 this.inject(
-                  'NEVER edit after seeing only one match. Evaluate ALL results.',
+                  '搜到一个匹配后不要立即编辑。评估所有搜索结果后再动手。',
                   { kind: 'injection', variant: 'prepare_search' },
                 );
               }
@@ -983,7 +992,7 @@ export class TurnFlow {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
                   this.inject(
-                    'Fail → fix. NEVER downgrade verification.',
+                    '验证失败后必须修复根因重新跑完整验证，不准降低验证标准。',
                     { kind: 'injection', variant: 'prepare_verify' },
                   );
                 }
@@ -1014,6 +1023,21 @@ export class TurnFlow {
                     );
                   }
                 }
+              }
+
+              // ── Phase 18: 代码质量偏差链阻断（Write/Edit 尝试时）──
+              if ((ctx.toolCall.name === 'Write' || ctx.toolCall.name === 'Edit') &&
+                  this.deviationChainActive && !this.deviationChainResolved &&
+                  this.deviationChainReason.includes('代码质量')) {
+                return {
+                  syntheticResult: {
+                    isError: true,
+                    output: '偏差链活跃：代码质量违规未修正。违规列表：\n'
+                      + this.codeQualityViolations.map(v => `  - ${v.file}: ${v.detail}`).join('\n')
+                      + '\n修正违规后再写新代码。',
+                    stopTurn: false,
+                  },
+                };
               }
 
               return undefined;
@@ -1261,7 +1285,7 @@ export class TurnFlow {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
                   this.inject(
-                    'NEVER downgrade verification. Fix the root cause.',
+                    '验证失败后必须修复根因重新跑完整验证，不准降低验证标准。',
                     { kind: 'injection', variant: 'post_verify_fail' },
                   );
                 }
@@ -1273,6 +1297,27 @@ export class TurnFlow {
                     'NOW apply whatFailed lessons from results above.',
                     { kind: 'injection', variant: 'post_memory' },
                   );
+                }
+              }
+
+              // ── Phase 18: 代码质量检测（Write/Edit 成功时）──
+              if (isError !== true && (ctx.toolCall.name === 'Write' || ctx.toolCall.name === 'Edit')) {
+                const fp = (ctx.args as { path?: string }).path ?? '';
+                if (/\.(ts|tsx|js|jsx)$/.test(fp)) {
+                  const content = toolOutputText(output);
+                  if (content.length > 0) {
+                    const qcResult = scanCodeQuality(content, fp);
+                    if (qcResult.hasViolations) {
+                      this.codeQualityViolations.push(...qcResult.violations);
+                      this.codeQualityViolationsThisTurn += qcResult.violations.length;
+                      this.inject(formatCodeQualityFeedback(qcResult), { kind: 'injection', variant: 'code_quality_feedback' });
+                      this.eventLog.record({
+                        kind: 'code_quality', variant: 'violation', action: 'feedback',
+                        step: this.currentStep, turnId: this.currentTurnId,
+                        reason: `代码质量违规: ${qcResult.violations.map(v => v.type).join(', ')}`,
+                      });
+                    }
+                  }
                 }
               }
 
@@ -1534,18 +1579,18 @@ export class TurnFlow {
     if (this.editOnCodeFileThisStep && !this.hasCalledLspReferencesThisStep) {
       this.editWithoutLookupCount++;
       if (this.editWithoutLookupCount >= 2) {
-        this.inject('MUST check callers. Missing LSP.references before edit.', { kind: 'injection', variant: 'step_after_edit' });
+        this.inject('编辑前必须先查 LSP.references 找调用方。', { kind: 'injection', variant: 'step_after_edit' });
       } else {
-        this.inject('Edit done → consider verifying before continuing.', { kind: 'injection', variant: 'step_after_edit' });
+        this.inject('编辑完成。在继续前先用 LSP.references 检查调用方。', { kind: 'injection', variant: 'step_after_edit' });
       }
     } else if (this.editOnCodeFileThisStep) {
       this.editWithoutLookupCount = 0;
     }
     if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
-      this.inject('Refs found. Design change before editing.', { kind: 'injection', variant: 'step_after_search' });
+      this.inject('找到引用点了。设计好改动方案后再编辑。', { kind: 'injection', variant: 'step_after_search' });
     }
     if (this.verifyFailedThisStep) {
-      this.inject('NEVER downgrade. Fix the root cause, re-run verification.', { kind: 'injection', variant: 'step_after_verify_fail' });
+      this.inject('验证失败后必须修复根因重新跑完整验证，不准降低验证标准。', { kind: 'injection', variant: 'step_after_verify_fail' });
     }
   }
 
@@ -1574,6 +1619,12 @@ export class TurnFlow {
           break;
         }
       }
+    }
+
+    // 🆕 Phase 18: 代码质量违规 → 偏差链（跨回合累积，interceptThreshold=3）
+    if (!this.deviationChainActive && this.codeQualityViolationsThisTurn > 0) {
+      this.deviationChainActive = true;
+      this.deviationChainReason = '代码质量违规：存在 ' + this.codeQualityViolationsThisTurn + ' 个未修正的规范违反。';
     }
   }
 
@@ -1652,6 +1703,12 @@ export class TurnFlow {
       const lastText = extractLastAssistantText(this.agent.context.history);
       const sig = compressStep(this.stepToolCounts, lastText);
       if (sig.hasVerificationTools) this.deviationChainResolved = true;
+    }
+    // Phase 18: 代码质量偏差链 — 违规消失则已修复
+    if (this.deviationChainReason.includes('代码质量')) {
+      if (this.codeQualityViolationsThisTurn === 0) {
+        this.deviationChainResolved = true;
+      }
     }
   }
 
@@ -1739,16 +1796,25 @@ export class TurnFlow {
 
   /** 正反馈注入 — 每回合一次 */
   private injectPositiveFeedbackThisTurn(): void {
-    if (
-      !this.positiveFeedbackGivenThisTurn &&
-      this.hasCalledLspReferencesThisStep &&
+    if (this.positiveFeedbackGivenThisTurn) return;
+
+    // 行为正反馈（原逻辑）
+    const behaviorClean =
       !this.confabulationBlocked &&
       !this.deviationChainActive &&
-      !this.verifyFailedThisStep &&
-      this.currentStep > 2
-    ) {
+      !this.verifyFailedThisStep;
+
+    const hasGoodBehavior =
+      this.hasCalledLspReferencesThisStep ||   // 查了引用
+      this.editWithoutLookupCount === 0;        // 没跳步编辑
+
+    // 代码质量正反馈（Phase 18 新增）
+    const codeQualityClean = this.codeQualityViolationsThisTurn === 0;
+    const hasNonEmptyTurn = this.currentStep >= 1;
+
+    if (behaviorClean && hasGoodBehavior && codeQualityClean && hasNonEmptyTurn) {
       this.positiveFeedbackGivenThisTurn = true;
-      this.inject('【行为确认】本轮验证流程完整——LSP 查引用 + 验证通过 + 无编造。继续。', { kind: 'injection', variant: 'feedback_positive' });
+      this.inject('【行为确认】本轮验证流程完整且代码质量合规。继续。', { kind: 'injection', variant: 'feedback_positive' });
     }
   }
 

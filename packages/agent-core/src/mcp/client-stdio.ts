@@ -66,7 +66,7 @@ function normalizeWinCommand(command: string): string {
 
 /** Search PATH for `<command>.cmd`. Returns the full path or undefined. */
 function findCmdInPath(command: string): string | undefined {
-  const pathDirs = (process.env.PATH || '').split(path.delimiter);
+  const pathDirs = (process.env['PATH'] || '').split(path.delimiter);
   for (const dir of pathDirs) {
     try {
       const cmdPath = path.join(dir, command + '.cmd');
