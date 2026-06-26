@@ -1,14 +1,11 @@
 /**
  * /update slash command — manually install the latest Scream Code update.
  *
- * Runs `git pull + pnpm install + pnpm -r build` in ~/.scream-code,
- * then asks the user to restart.  Each step has a timeout and network-
- * error detection with user-friendly Chinese prompts.
+ * Runs `npm install -g scream-code@latest`, then asks the user to restart.
+ * Network-error detection with user-friendly Chinese prompts.
  */
 
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
@@ -16,14 +13,8 @@ import { selectUpdateTarget } from '#/cli/update/select';
 
 import type { SlashCommandHost } from './dispatch';
 
-const INSTALL_DIR = join(homedir(), '.scream-code');
-
-// Per-step timeouts (ms).  The default Node.js spawn timeout is infinite.
-const TIMEOUTS: Record<string, number> = {
-  'git pull': 120_000,
-  'pnpm install': 180_000,
-  'pnpm -r build': 180_000,
-};
+// Per-step timeout (ms). The default Node.js spawn timeout is infinite.
+const INSTALL_TIMEOUT_MS = 300_000;
 
 const NETWORK_ERROR_PATTERNS = [
   /ETIMEDOUT/i,
@@ -55,13 +46,12 @@ interface StepResult {
 async function runInstallStep(
   cmd: string,
   args: string[],
-  cwd: string,
+  cwd: string | undefined,
   label: string,
+  timeoutMs: number = INSTALL_TIMEOUT_MS,
 ): Promise<StepResult> {
-  const timeoutMs = TIMEOUTS[`${cmd} ${args[0]}`] ?? 120_000;
-
   return new Promise<StepResult>((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: 'pipe' });
+    const child = spawn(cmd, args, { cwd, stdio: 'pipe', shell: true });
     let stderr = '';
     let settled = false;
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
@@ -144,19 +134,16 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
 
   host.showStatus(`正在更新到 ${target.version}...`);
 
-  const steps: Array<{ label: string; cmd: string; args: string[] }> = [
-    { label: '拉取最新代码', cmd: 'git', args: ['pull', 'origin', 'main'] },
-    { label: '安装依赖', cmd: 'pnpm', args: ['install'] },
-    { label: '编译', cmd: 'pnpm', args: ['-r', 'build'] },
-  ];
-
-  for (const step of steps) {
-    host.showStatus(`正在${step.label}...`);
-    const result = await runInstallStep(step.cmd, step.args, INSTALL_DIR, step.label);
-    if (!result.ok) {
-      host.showError(`❌ ${result.message}`);
-      return;
-    }
+  host.showStatus('正在通过 npm 安装最新版本...');
+  const result = await runInstallStep(
+    'npm',
+    ['install', '-g', 'scream-code@latest'],
+    undefined,
+    '安装 scream-code',
+  );
+  if (!result.ok) {
+    host.showError(`❌ ${result.message}`);
+    return;
   }
 
   host.showStatus(

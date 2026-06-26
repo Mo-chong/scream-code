@@ -1,58 +1,58 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { fetchLatestVersionFromCdn } from '#/cli/update/cdn';
-import { SCREAM_CODE_CDN_LATEST_URL } from '#/constant/app';
+import { fetchLatestVersionFromNpm } from '#/cli/update/cdn';
 
-function mockFetchOk(tagName: string): typeof fetch {
-  return vi.fn(async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ tag_name: tagName }),
-  })) as unknown as typeof fetch;
+function mockExecFileOk(stdout: string): typeof import('node:child_process').execFile {
+  const cb = (
+    _cmd: string,
+    _args: readonly string[],
+    _opts: unknown,
+    callback: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+  ) => {
+    callback(null, { stdout, stderr: '' });
+  };
+  return vi.fn(cb) as unknown as typeof import('node:child_process').execFile;
 }
 
-function mockFetchStatus(status: number): typeof fetch {
-  return vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => ({}),
-  })) as unknown as typeof fetch;
+function mockExecFileFails(error: Error): typeof import('node:child_process').execFile {
+  const cb = (
+    _cmd: string,
+    _args: readonly string[],
+    _opts: unknown,
+    callback: (err: Error | null, result: { stdout: string; stderr: string }) => void,
+  ) => {
+    callback(error, { stdout: '', stderr: error.message });
+  };
+  return vi.fn(cb) as unknown as typeof import('node:child_process').execFile;
 }
 
-describe('fetchLatestVersionFromCdn', () => {
-  it('returns the tag_name from GitHub Releases API', async () => {
-    const f = mockFetchOk('v0.5.0');
-    await expect(fetchLatestVersionFromCdn(f)).resolves.toBe('0.5.0');
-    expect(f).toHaveBeenCalledWith(SCREAM_CODE_CDN_LATEST_URL);
+describe('fetchLatestVersionFromNpm', () => {
+  it('returns the trimmed version from npm view output', async () => {
+    const execFile = mockExecFileOk('0.5.0\n');
+    await expect(fetchLatestVersionFromNpm(execFile)).resolves.toBe('0.5.0');
+    expect(execFile).toHaveBeenCalledWith(
+      'npm',
+      ['view', 'scream-code', 'version'],
+      expect.objectContaining({ timeout: expect.any(Number), maxBuffer: expect.any(Number) }),
+      expect.any(Function),
+    );
   });
 
-  it('strips leading v from tag_name', async () => {
-    const f = mockFetchOk('v1.2.3');
-    await expect(fetchLatestVersionFromCdn(f)).resolves.toBe('1.2.3');
+  it('strips surrounding whitespace from npm output', async () => {
+    await expect(fetchLatestVersionFromNpm(mockExecFileOk('  1.2.3\n'))).resolves.toBe('1.2.3');
   });
 
-  it('throws when response is non-2xx', async () => {
-    await expect(fetchLatestVersionFromCdn(mockFetchStatus(404))).rejects.toThrow(/HTTP 404/);
+  it('throws when npm output is not valid semver', async () => {
+    await expect(fetchLatestVersionFromNpm(mockExecFileOk('not-a-version'))).rejects.toThrow(/semver/);
   });
 
-  it('throws when tag_name is not valid semver', async () => {
-    const f = mockFetchOk('not-a-version');
-    await expect(fetchLatestVersionFromCdn(f)).rejects.toThrow(/semver/);
+  it('throws when npm output is empty', async () => {
+    await expect(fetchLatestVersionFromNpm(mockExecFileOk(''))).rejects.toThrow(/semver/);
   });
 
-  it('throws when tag_name is missing', async () => {
-    const f = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({}),
-    })) as unknown as typeof fetch;
-    await expect(fetchLatestVersionFromCdn(f)).rejects.toThrow(/semver/);
-  });
-
-  it('propagates the underlying fetch error', async () => {
-    const f = vi.fn(async () => {
-      throw new Error('network down');
-    }) as unknown as typeof fetch;
-    await expect(fetchLatestVersionFromCdn(f)).rejects.toThrow(/network down/);
+  it('propagates the underlying npm error', async () => {
+    await expect(
+      fetchLatestVersionFromNpm(mockExecFileFails(new Error('network down'))),
+    ).rejects.toThrow(/network down/);
   });
 });

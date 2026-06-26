@@ -2157,6 +2157,8 @@ function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | undefined 
         toolCallId: event.toolCallId,
         output: event.result.output,
         isError: event.result.isError,
+        display:
+          event.result.isError === true ? undefined : event.result.display,
       };
     case 'turn.interrupted':
       if (event.activeStep === undefined) return undefined;

@@ -120,6 +120,12 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: false,
+    loopModeEnabled: false,
+    loopPrompt: undefined,
+    loopLimit: undefined,
+    loopVerifier: undefined,
+    loopIteration: 0,
+    loopLastVerifyPassed: undefined,
     recentSessions: [],
   };
 }
@@ -360,8 +366,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
-    this.state.footer.setTransientHint('正在整理会话记忆...');
-    this.state.ui.requestRender();
+    this.showStatus('正在整理会话记忆...', this.state.theme.colors.textDim);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -378,7 +383,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.markMemoryExtracted();
   }
 
-  /** Called by StreamingUIController when a turn finishes with no queued continuations. */
+  sendNormalUserInput(text: string): void {
+    this.inputController.sendNormalUserInput(text);
+  }
   onTurnCompleted(): void {
     this.lifecycleController.onTurnCompleted();
   }
@@ -426,10 +433,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   handlePlanToggle(next: boolean): void {
     this.inputController.handlePlanToggle(next);
-  }
-
-  sendNormalUserInput(text: string): void {
-    this.inputController.sendNormalUserInput(text);
   }
 
   steerMessage(session: Session, input: string[]): void {
@@ -507,6 +510,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   setExternalEditorRunning(running: boolean): void {
     this.state.externalEditorRunning = running;
+  }
+
+  cancelPendingMemoryExtraction(): void {
+    this.lifecycleController.cancelPendingMemoryExtraction();
   }
 
   setTasksBrowser(value: TUIState['tasksBrowser']): void {

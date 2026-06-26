@@ -4,6 +4,7 @@ import type {
   ProviderConfig,
   PromptPart,
   ToolInputDisplay,
+  ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
 
 import type { NotificationsConfig } from './config';
@@ -16,6 +17,28 @@ export interface RecentSession {
   readonly title?: string;
   readonly updatedAt: number;
 }
+
+export type LoopLimitConfig =
+  | {
+      kind: 'iterations';
+      iterations: number;
+    }
+  | {
+      kind: 'duration';
+      durationMs: number;
+    };
+
+export type LoopLimitRuntime =
+  | {
+      kind: 'iterations';
+      initial: number;
+      remaining: number;
+    }
+  | {
+      kind: 'duration';
+      durationMs: number;
+      deadlineMs: number;
+    };
 
 export interface AppState {
   model: string;
@@ -46,6 +69,12 @@ export interface AppState {
   goalContinuationCount: number;
   ccConnectActive: boolean;
   wolfpackMode: boolean;
+  loopModeEnabled: boolean;
+  loopPrompt: string | undefined;
+  loopLimit: LoopLimitRuntime | undefined;
+  loopVerifier: { command: string; timeoutMs: number } | undefined;
+  loopIteration: number;
+  loopLastVerifyPassed: boolean | undefined;
   recentSessions: RecentSession[];
 }
 
@@ -72,6 +101,12 @@ export interface ToolResultBlockData {
   output: string;
   is_error?: boolean;
   synthetic?: boolean;
+  /**
+   * Structured payload for TUI renderers. When present, renderers prefer this
+   * over parsing `output`. Currently populated by Grep `content` mode as
+   * `search_results`.
+   */
+  display?: ToolResultDisplay;
 }
 
 export interface SubagentReplayToolCallData {

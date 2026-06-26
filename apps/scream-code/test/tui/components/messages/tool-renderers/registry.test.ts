@@ -42,12 +42,15 @@ describe('tool-result registry', () => {
     expect(out).toContain('...（还有 1 行，按 ctrl+o 展开）');
   });
 
-  it('Read renders no body when collapsed (header chip carries the count)', () => {
+  it('Read renders line count · extension glance when collapsed', () => {
     const renderer = pickResultRenderer('Read');
-    const out = joinRender(
-      renderer(call('Read', { path: 'foo.ts' }), result('1\tfoo\n2\tbar'), ctx),
+    const out = strip(
+      joinRender(
+        renderer(call('Read', { path: 'foo.ts' }), result('1\tfoo\n2\tbar'), ctx),
+      ),
     );
-    expect(out.trim()).toBe('');
+    expect(out).toContain('2 lines');
+    expect(out).toContain('ts');
   });
 
   it('Read expands to the raw file content when expanded', () => {
@@ -98,7 +101,7 @@ describe('tool-result registry', () => {
     expect(out.trim()).toBe('');
   });
 
-  it('Glob glance lists path samples', () => {
+  it('Glob glance groups by directory with extension counts', () => {
     const renderer = pickResultRenderer('Glob');
     const out = strip(
       joinRender(
@@ -108,7 +111,9 @@ describe('tool-result registry', () => {
     expect(out).toContain('a.ts');
     expect(out).toContain('b.ts');
     expect(out).toContain('c.ts');
-    expect(out).toContain('+1 more');
+    expect(out).toContain('./'); // directory group header
+    expect(out).toContain('(+1)'); // one remaining file beyond the sample window
+    expect(out).toContain('.ts: 4'); // extension count
   });
 
   it('FetchURL renders no body when collapsed', () => {

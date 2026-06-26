@@ -1,3 +1,5 @@
+import type { LspDiagnostic } from '../../src/lsp/client';
+import type { LspRegistry } from '../../src/lsp/registry';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
@@ -530,5 +532,239 @@ describe('EditTool', () => {
     );
     expect(second.isError).toBe(true);
     expect(second.output).toContain('anchor no longer matches');
+  });
+
+  it('refuses to edit strictly inside an unresolved merge conflict block', async () => {
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/conflict.ts',
+        old_string: 'return 1;',
+        new_string: 'return 0;',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('unresolved merge conflict');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('allows replacing the entire conflict block including markers', async () => {
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/conflict.ts',
+        old_string: '<<<<<<< HEAD\n  return 1;\n=======\n  return 2;\n>>>>>>> branch',
+        new_string: '  return 3;',
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalled();
+  });
+
+  it('allows editing code outside a conflict block', async () => {
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+      'function bar() {',
+      '  return 3;',
+      '}',
+    ].join('\n');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/conflict.ts',
+        old_string: 'return 3;',
+        new_string: 'return 4;',
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalled();
+  });
+
+  it('refuses when new_string introduces complete merge conflict markers', async () => {
+    const content = 'function foo() {\n  return 1;\n}\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/clean.ts',
+        old_string: 'return 1;',
+        new_string: '<<<<<<< HEAD\n  return 1;\n=======\n  return 2;\n>>>>>>> branch',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('new_string contains merge conflict markers');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('allows new_string with a lone marker that does not form a complete block', async () => {
+    const content = 'function foo() {\n  return 1;\n}\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/clean.ts',
+        old_string: 'return 1;',
+        new_string: 'return 2; // <<<<<<< just a comment, not at column 0',
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalled();
+  });
+
+  it('marks isError when LSP reports error-severity diagnostics after edit', async () => {
+    const errorDiag: LspDiagnostic = {
+      range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+      severity: 1,
+      message: 'Type error',
+    };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+
+    const content = 'const x = 1;\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.ts',
+        old_string: '1',
+        new_string: '2',
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('Replaced 1 occurrence');
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Type error');
+  });
+
+  it('does not mark isError when LSP reports only warnings', async () => {
+    const warningDiag: LspDiagnostic = {
+      range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+      severity: 2,
+      message: 'Unused variable',
+    };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnostics: vi.fn().mockResolvedValue([warningDiag]),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+
+    const content = 'const x = 1;\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText,
+      }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.ts',
+        old_string: '1',
+        new_string: '2',
+      }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Unused variable');
   });
 });

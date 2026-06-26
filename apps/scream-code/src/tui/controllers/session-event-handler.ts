@@ -54,8 +54,9 @@ import {
 import { openUrl } from '../utils/open-url';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
 import { setProcessTitle } from '../utils/proctitle';
-
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
+import { consumeLoopLimitIteration, isLoopLimitExpired } from '../utils/loop-limit';
+import { runShellVerifier } from '../utils/loop-verifier';
 import { nextTranscriptId } from '../utils/transcript-id';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
@@ -86,6 +87,7 @@ export interface SessionEventHost {
   showNotice(title: string, detail?: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
+  sendNormalUserInput(text: string): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
   readonly tasksBrowserController: TasksBrowserController;
   markMemoryExtracted(): void;
@@ -277,6 +279,7 @@ export class SessionEventHandler {
           tool_call_id: `${subagentId}:${event.toolCallId}`,
           output: serializeToolResultOutput(event.output),
           is_error: event.isError,
+          display: event.display,
         });
         return true;
       case 'agent.status.updated': {
@@ -340,6 +343,75 @@ export class SessionEventHandler {
     this.host.streamingUI.resetToolUi();
 
     this.host.streamingUI.finalizeTurn(sendQueued);
+
+    // Auto-resubmit loop prompt after turn completes, if loop mode is active.
+    this.maybeScheduleLoopAutoSubmit();
+  }
+
+  private maybeScheduleLoopAutoSubmit(): void {
+    const { loopModeEnabled, loopPrompt, loopLimit } = this.host.state.appState;
+    if (!loopModeEnabled || loopPrompt === undefined) return;
+
+    if (isLoopLimitExpired(loopLimit)) {
+      const reason = loopLimit?.kind === 'duration' ? '时间' : '次数';
+      this.disableLoop(`循环${reason}限制已到，循环模式已关闭。`);
+      return;
+    }
+
+    // Brief delay so the user has a chance to press Esc between iterations.
+    setTimeout(() => {
+      void this.advanceLoopIteration(loopPrompt);
+    }, 800);
+  }
+
+  private disableLoop(message: string): void {
+    this.host.setAppState({
+      loopModeEnabled: false,
+      loopPrompt: undefined,
+      loopLimit: undefined,
+      loopVerifier: undefined,
+      loopIteration: 0,
+      loopLastVerifyPassed: undefined,
+    });
+    this.host.showStatus(message);
+  }
+
+  private async advanceLoopIteration(loopPrompt: string): Promise<void> {
+    const state = this.host.state.appState;
+    if (
+      !state.loopModeEnabled ||
+      state.loopPrompt !== loopPrompt ||
+      state.streamingPhase !== 'idle'
+    ) {
+      return;
+    }
+
+    const currentIteration = state.loopIteration + 1;
+    this.host.setAppState({ loopIteration: currentIteration });
+
+    const verifier = state.loopVerifier;
+    if (verifier) {
+      const result = await runShellVerifier(verifier, state.workDir);
+      // verifier 期间用户可能按 Esc 暂停或修改 prompt，需重新检查
+      const after = this.host.state.appState;
+      if (!after.loopModeEnabled || after.loopPrompt !== loopPrompt) return;
+
+      if (result.passed) {
+        this.disableLoop(`✓ 验证通过，循环结束（${currentIteration} 次迭代）。`);
+        return;
+      }
+      this.host.setAppState({ loopLastVerifyPassed: false });
+    }
+
+    if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
+      const limit = this.host.state.appState.loopLimit;
+      const reason = limit?.kind === 'duration' ? '时间' : '次数';
+      const suffix = verifier ? '，验证未通过' : '';
+      this.disableLoop(`循环${reason}限制已到${suffix}，循环模式已关闭。`);
+      return;
+    }
+
+    this.host.sendNormalUserInput(loopPrompt);
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {
@@ -511,6 +583,7 @@ export class SessionEventHandler {
       output: serializeToolResultOutput(event.output),
       is_error: event.isError,
       synthetic: event.synthetic,
+      display: event.display,
     };
     const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {

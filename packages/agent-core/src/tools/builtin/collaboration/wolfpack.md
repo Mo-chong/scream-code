@@ -7,10 +7,10 @@ Input:
 - subagent_type: Subagent profile name. Defaults to "coder".
 - prompt_template: A prompt pattern where each item value is substituted in
   to produce a per-item prompt. See the parameter schema for placeholder syntax.
-- items: Array of item strings. Each item gets its own subagent (max 20).
+- items: Array of item strings. Each item gets its own subagent (no limit).
 
 Items must be independent — no subagent depends on another's output.
 If items depend on each other, use separate Agent calls instead.
 
-Example: review three source files for OWASP vulnerabilities by setting
-items to the file paths and prompt_template to the review instruction.
+Example: review source files for OWASP vulnerabilities by setting items to the file
+paths and prompt_template to the review instruction. All items are processed in parallel.

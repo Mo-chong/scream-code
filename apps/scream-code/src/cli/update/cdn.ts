@@ -1,28 +1,32 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { valid } from 'semver';
 
-import { SCREAM_CODE_CDN_LATEST_URL } from '#/constant/app';
+const NPM_TIMEOUT_MS = 15_000;
 
 /**
- * Fetch the latest published Scream Code version from the GitHub Releases API.
+ * Query the latest published Scream Code version from the npm registry
+ * via `npm view scream-code version`.
  *
- * **Throws** on any failure (network error, non-2xx, empty body, non-semver
- * tag). Callers must catch — `refreshUpdateCache` deliberately lets the
+ * **Throws** on any failure (network error, npm not in PATH, non-semver
+ * output). Callers must catch — `refreshUpdateCache` deliberately lets the
  * error propagate so the existing cache stays intact instead of being
  * overwritten with a null `latest` on a transient blip.
  *
- * `fetchImpl` is injectable for tests; defaults to the global `fetch`.
+ * `execFileImpl` is injectable for tests; defaults to a promisified spawn.
  */
-export async function fetchLatestVersionFromCdn(
-  fetchImpl: typeof fetch = fetch,
+export async function fetchLatestVersionFromNpm(
+  execFileImpl: typeof execFile = execFile,
 ): Promise<string> {
-  const response = await fetchImpl(SCREAM_CODE_CDN_LATEST_URL);
-  if (!response.ok) {
-    throw new Error(`GitHub Releases API returned HTTP ${response.status}`);
-  }
-  const data = (await response.json()) as { tag_name?: string };
-  const raw = data.tag_name?.replace(/^v/, '') ?? '';
+  const execAsync = promisify(execFileImpl);
+  const { stdout } = await execAsync(
+    'npm',
+    ['view', 'scream-code', 'version'],
+    { timeout: NPM_TIMEOUT_MS, maxBuffer: 1024, shell: true },
+  );
+  const raw = stdout.trim();
   if (valid(raw) === null) {
-    throw new Error(`GitHub Releases tag is not valid semver: ${JSON.stringify(data.tag_name)}`);
+    throw new Error(`npm view 返回的版本号不是合法 semver: ${JSON.stringify(raw)}`);
   }
   return raw;
 }

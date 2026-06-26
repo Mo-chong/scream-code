@@ -12,7 +12,6 @@ import {
   installUpdate,
 } from './install-strategy';
 import {
-  type InstallSource,
   type UpdateDecision,
   type UpdatePreflightResult,
   type UpdateTarget,
@@ -25,6 +24,8 @@ export interface RunUpdatePreflightOptions {
   readonly stderr?: { write(chunk: string): boolean };
   readonly isTTY?: boolean;
 }
+
+const INSTALL_TIMEOUT_MS = 300_000;
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -45,17 +46,17 @@ function refreshInBackground(): void {
 async function promptInstall(
   currentVersion: string,
   target: UpdateTarget,
-  source: InstallSource,
   installCommand: string,
 ): Promise<boolean> {
   const options: InstallPromptOptions = {
     currentVersion,
     target,
     installCommand,
-    installSource: source,
   };
   return promptForInstallConfirmation(options);
 }
+
+
 
 export function decideUpdateAction(
   target: UpdateTarget | null,
@@ -81,26 +82,22 @@ export async function runUpdatePreflight(
 
     const isInteractive =
       options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
-    const source: InstallSource =
-      target === null || !isInteractive ? 'unsupported' : detectInstallSource();
 
     const decision = decideUpdateAction(target, isInteractive);
     if (decision === 'none' || target === null) return 'continue';
 
     const installCommand = INSTALL_COMMAND_STRING;
 
-    if (source === 'unsupported') {
+    if (decision === 'manual-command') {
       stdout.write(renderManualUpdateMessage(currentVersion, target));
       return 'continue';
     }
 
-    const confirmed = await promptInstall(currentVersion, target, source, installCommand);
+    const confirmed = await promptInstall(currentVersion, target, installCommand);
     if (!confirmed) return 'continue';
 
-    const installDir = join(homedir(), '.scream-code');
-
     try {
-      await installUpdate(installDir);
+      await installUpdate();
       stdout.write(renderInstallSuccessMessage(target));
       return 'exit';
     } catch (error) {

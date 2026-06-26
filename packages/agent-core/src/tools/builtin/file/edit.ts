@@ -19,6 +19,7 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
 import { materializeModelText, toModelTextView, computeAnchor } from './line-endings';
 import EDIT_DESCRIPTION from './edit.md';
@@ -109,11 +110,50 @@ export class EditTool implements BuiltinTool<EditInput> {
       };
     }
 
+    const newStringBlocks = scanConflictLines(args.new_string.split('\n'));
+    if (newStringBlocks.length > 0) {
+      return {
+        isError: true,
+        output:
+          'new_string contains merge conflict markers (<<<<<<< / ======= / >>>>>>>). ' +
+          'Remove them before writing. These markers indicate an unresolved merge and should not be introduced into files.',
+      };
+    }
+
     try {
       const raw = await this.jian.readText(safePath);
       const modelView = toModelTextView(raw);
       const content = modelView.text;
       const replaceAll = args.replace_all ?? false;
+
+      const existingBlocks = scanConflictLines(content.split('\n'));
+      if (existingBlocks.length > 0) {
+        const oldStringLineCount = args.old_string.split('\n').length;
+        let pos = 0;
+        let conflictViolation: string | null = null;
+        while (pos < content.length) {
+          const idx = content.indexOf(args.old_string, pos);
+          if (idx === -1) break;
+          const matchStartLine = content.slice(0, idx).split('\n').length;
+          const matchEndLine = matchStartLine + oldStringLineCount - 1;
+          const insideBlock = existingBlocks.some(
+            (b) => matchStartLine > b.startLine && matchEndLine < b.endLine,
+          );
+          if (insideBlock) {
+            const blockList = existingBlocks
+              .map((b) => `lines ${String(b.startLine)}-${String(b.endLine)}`)
+              .join(', ');
+            conflictViolation =
+              `${args.path} has unresolved merge conflict markers (${blockList}). ` +
+              'Resolve the conflict before editing inside it, or include the conflict markers in old_string to replace them.';
+            break;
+          }
+          pos = idx + args.old_string.length;
+        }
+        if (conflictViolation !== null) {
+          return { isError: true, output: conflictViolation };
+        }
+      }
 
       if (args.anchor !== undefined) {
         const currentAnchor = computeAnchor(content);
@@ -153,8 +193,9 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
         );
-        const notice = await this.appendDiagnostics(safePath);
-        return { output: `Replaced 1 occurrence in ${args.path}${notice}` };
+        const { notice, hasErrors } = await this.appendDiagnostics(safePath);
+        const output = `Replaced 1 occurrence in ${args.path}${notice}`;
+        return hasErrors ? { isError: true, output } : { output };
       }
 
       const parts = content.split(args.old_string);
@@ -169,8 +210,9 @@ export class EditTool implements BuiltinTool<EditInput> {
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
       );
-      const notice = await this.appendDiagnostics(safePath);
-      return { output: `Replaced ${String(replacementCount)} occurrences in ${args.path}${notice}` };
+      const { notice, hasErrors } = await this.appendDiagnostics(safePath);
+      const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}${notice}`;
+      return hasErrors ? { isError: true, output } : { output };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {
@@ -183,7 +225,9 @@ export class EditTool implements BuiltinTool<EditInput> {
     }
   }
 
-  private async appendDiagnostics(safePath: string): Promise<string> {
+  private async appendDiagnostics(
+    safePath: string,
+  ): Promise<{ notice: string; hasErrors: boolean }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
@@ -192,6 +236,9 @@ export class EditTool implements BuiltinTool<EditInput> {
     );
     const notice = formatDiagnosticsNotice(result);
     const hint = formatDiagnosticsHint(result);
-    return [notice, hint].filter((s) => s.length > 0).join('');
+    return {
+      notice: [notice, hint].filter((s) => s.length > 0).join(''),
+      hasErrors: result.hasErrors,
+    };
   }
 }

@@ -584,6 +584,84 @@ describe('GrepTool', () => {
     });
   });
 
+  describe('structured search_results display', () => {
+    it('attaches search_results display with file/line/text in content mode', async () => {
+      const stdout = [
+        nullRecord('/workspace/src/a.ts', '12:hit one'),
+        nullRecord('/workspace/src/b.ts', '34:hit two'),
+      ].join('\n');
+      const exec = vi.fn().mockResolvedValue(processWithOutput(stdout));
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(tool, context({ pattern: 'hit', output_mode: 'content' }));
+
+      expect(result.isError).toBeFalsy();
+      if (result.isError === true) throw new Error('expected success result');
+      expect(result.display).toEqual({
+        kind: 'search_results',
+        query: 'hit',
+        matches: [
+          { file: '/workspace/src/a.ts', line: 12, text: 'hit one' },
+          { file: '/workspace/src/b.ts', line: 34, text: 'hit two' },
+        ],
+      });
+    });
+
+    it('uses line 0 and full payload when -n is disabled', async () => {
+      const stdout = nullRecord('/workspace/src/a.ts', 'hit text');
+      const exec = vi.fn().mockResolvedValue(processWithOutput(stdout));
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(
+        tool,
+        context({ pattern: 'hit', output_mode: 'content', '-n': false }),
+      );
+
+      expect(result.isError).toBeFalsy();
+      if (result.isError === true) throw new Error('expected success result');
+      expect(result.display).toEqual({
+        kind: 'search_results',
+        query: 'hit',
+        matches: [{ file: '/workspace/src/a.ts', line: 0, text: 'hit text' }],
+      });
+    });
+
+    it('omits display when there are no content matches', async () => {
+      const exec = vi.fn().mockResolvedValue(processWithOutput(''));
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(tool, context({ pattern: 'hit', output_mode: 'content' }));
+
+      expect(result.isError).toBeFalsy();
+      if (result.isError === true) throw new Error('expected success result');
+      expect(result.display).toBeUndefined();
+    });
+
+    it('omits display for files_with_matches mode', async () => {
+      const exec = vi.fn().mockResolvedValue(
+        processWithOutput(nullRecord('/workspace/src/a.ts')),
+      );
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(tool, context({ pattern: 'hit' }));
+
+      expect(result.isError).toBeFalsy();
+      if (result.isError === true) throw new Error('expected success result');
+      expect(result.display).toBeUndefined();
+    });
+
+    it('omits display when the search errors out', async () => {
+      const exec = vi.fn().mockResolvedValue(
+        processWithOutput('', 'rg: regex error', 2),
+      );
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(tool, context({ pattern: 'hit', output_mode: 'content' }));
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
   it('rejects relative path escapes before spawning ripgrep', async () => {
     const exec = vi.fn();
     const tool = new GrepTool(createFakeJian({ exec }), {

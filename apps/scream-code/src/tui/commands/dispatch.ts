@@ -42,7 +42,7 @@ import {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
-import { handleGoalCommand, handleGoalOffCommand } from './goal';
+import { handleGoalCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
 import { handleCcCommand } from './cc';
 import { handleUpdateCommand } from './update';
@@ -52,6 +52,7 @@ import { handleMemoryCommand } from './memory';
 import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
+import { handleLoopCommand } from './loop';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -86,7 +87,7 @@ export {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
-export { handleGoalCommand, handleGoalOffCommand } from './goal';
+export { handleLoopCommand, disableLoopMode, describeLoopStatus } from './loop';
 export { handleRevokeCommand } from './revoke';
 export { handleCcCommand } from './cc';
 export { handleUpdateCommand } from './update';
@@ -273,6 +274,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'wolfpack':
       await handleWolfpackCommand(host, args);
+      return;
+    case 'loop':
+      await handleLoopCommand(host, args);
       return;
     case 'revoke':
       await handleRevokeCommand(host, args);

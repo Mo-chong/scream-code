@@ -16,7 +16,7 @@ const WOLFPACK_MODE_ENTER_REMINDER = [
   '',
   'This spawns one subagent per item in parallel. Results are batched and returned together.',
   'Items must be independent — do not use WolfPack when one item depends on another\'s output.',
-  'Max 20 items per call.',
+  'There is no item limit; use as many items as needed.',
 ].join('\n');
 
 const WOLFPACK_MODE_EXIT_REMINDER =

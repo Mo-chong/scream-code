@@ -6,7 +6,7 @@ export interface UpdateTarget {
 }
 
 export interface UpdateCache {
-  readonly source: 'cdn';
+  readonly source: 'npm';
   readonly checkedAt: string | null;
   readonly latest: string | null;
 }
@@ -16,7 +16,7 @@ export type UpdatePreflightResult = 'continue' | 'exit';
 
 export function emptyUpdateCache(): UpdateCache {
   return {
-    source: 'cdn',
+    source: 'npm',
     checkedAt: null,
     latest: null,
   };

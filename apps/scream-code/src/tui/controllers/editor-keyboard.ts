@@ -13,13 +13,16 @@ import {
 } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
-import type { PendingExit } from '../types';
+import type { AppState, PendingExit, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 export interface EditorKeyboardHost {
   state: TUIState;
   session: Session | undefined;
   cancelInFlight: (() => void) | undefined;
+
+  setAppState(patch: Partial<AppState>): void;
+  showStatus(msg: string, color?: string): void;
 
   readonly inputController: { handleInput(text: string): void };
   steerMessage(session: Session, input: string[]): void;
@@ -34,6 +37,7 @@ export interface EditorKeyboardHost {
   handlePlanToggle(next: boolean): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
+  cancelPendingMemoryExtraction(): void;
 }
 
 export class EditorKeyboardController {
@@ -111,6 +115,12 @@ export class EditorKeyboardController {
       }
       if (host.state.appState.streamingPhase !== 'idle') {
         this.cancelCurrentStream();
+        return;
+      }
+      // 如果循环模式正在等待自动重发，则暂停当前迭代，但不完全关闭循环模式。
+      if (host.state.appState.loopModeEnabled && host.state.appState.loopPrompt) {
+        host.setAppState({ loopPrompt: undefined });
+        host.showStatus('循环已暂停。输入 /loop <提示词> 恢复或修改。');
       }
     };
 
@@ -136,7 +146,7 @@ export class EditorKeyboardController {
     editor.onCtrlS = () => {
       if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) return;
       const text = editor.getText().trim();
-      const queuedTexts = host.state.queuedMessages.map((m) => m.text);
+      const queuedTexts = host.state.queuedMessages.map((m: QueuedMessage) => m.text);
       host.clearQueuedMessages();
 
       const parts: string[] = [];
@@ -157,6 +167,10 @@ export class EditorKeyboardController {
       }
       host.updateQueueDisplay();
       host.state.ui.requestRender();
+    };
+
+    editor.onCtrlW = () => {
+      host.cancelPendingMemoryExtraction();
     };
 
     editor.onUpArrowEmpty = () => {

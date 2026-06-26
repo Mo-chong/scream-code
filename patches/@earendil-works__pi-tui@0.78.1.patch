@@ -1,8 +1,8 @@
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index 50f92259fa88f4efe406a60b7db8e54a9eedace6..ebf0548c449fc40b1e91a277730a0241e5629850 100644
+index 50ca0f8c5778e92bfde51e1724c3da0e9326d4d1..a236e10b0d7c4c367d284d6a1b8d6680ba3d6b15 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -487,6 +487,7 @@ export class Editor {
+@@ -489,6 +489,7 @@ export class Editor {
              }
              if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
                  this.autocompleteList.handleInput(data);
@@ -11,6 +11,7 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..ebf0548c449fc40b1e91a277730a0241
              }
              if (kb.matches(data, "tui.input.tab")) {
 diff --git a/dist/tui.js b/dist/tui.js
+index b80ecfaaa512b54c599547d8b483da037570e8ca..6693fb6655de06cb67c796cbed8f3d77963b7578 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
 @@ -121,6 +121,7 @@ export class TUI extends Container {
@@ -42,3 +43,12 @@ diff --git a/dist/tui.js b/dist/tui.js
          // Composite overlays into the rendered lines (before differential compare)
          if (this.overlayStack.length > 0) {
              newLines = this.compositeOverlays(newLines, width, height);
+@@ -905,7 +920,7 @@ export class TUI extends Container {
+             let buffer = "\x1b[?2026h"; // Begin synchronized output
+             if (clear) {
+                 buffer += this.deleteKittyImages(this.previousKittyImageIds);
+-                buffer += "\x1b[2J\x1b[H\x1b[3J"; // Clear screen, home, then clear scrollback
++                buffer += process.platform === "win32" ? "\x1b[2J\x1b[H" : "\x1b[2J\x1b[H\x1b[3J"; // Win ConPTY pins viewport to top after \x1b[3J
+             }
+             for (let i = 0; i < newLines.length; i++) {
+                 if (i > 0)

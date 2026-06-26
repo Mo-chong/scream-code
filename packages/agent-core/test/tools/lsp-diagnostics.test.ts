@@ -8,6 +8,7 @@ import {
   fetchDiagnostics,
   formatDiagnosticsHint,
   formatDiagnosticsNotice,
+  hasErrors,
   type DiagnosticsResult,
 } from '../../src/tools/builtin/file/lsp-diagnostics';
 import { createFakeJian } from './fixtures/fake-jian';
@@ -133,11 +134,11 @@ describe('fetchDiagnostics', () => {
 
 describe('formatDiagnosticsNotice', () => {
   it('returns empty string when LSP was unavailable', () => {
-    expect(formatDiagnosticsNotice({ available: false, diagnostics: [] })).toBe('');
+    expect(formatDiagnosticsNotice({ available: false, diagnostics: [], hasErrors: false })).toBe('');
   });
 
   it('returns empty string when no diagnostics', () => {
-    expect(formatDiagnosticsNotice({ available: true, diagnostics: [] })).toBe('');
+    expect(formatDiagnosticsNotice({ available: true, diagnostics: [], hasErrors: false })).toBe('');
   });
 
   it('formats header and each diagnostic line', () => {
@@ -145,7 +146,7 @@ describe('formatDiagnosticsNotice', () => {
       makeDiagnostic({ severity: 1, message: 'Cannot find name foo', range: { start: { line: 4, character: 3 }, end: { line: 4, character: 6 } } }),
       makeDiagnostic({ severity: 2, message: 'Unused var', range: { start: { line: 9, character: 0 }, end: { line: 9, character: 5 } } }),
     ];
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags });
+    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
     expect(out).toBe(
       '[LSP] 2 diagnostic(s):\n' +
       '- Error at 5:4: Cannot find name foo\n' +
@@ -157,7 +158,7 @@ describe('formatDiagnosticsNotice', () => {
     const diags = Array.from({ length: 10 }, (_, i) =>
       makeDiagnostic({ message: `err ${i}`, range: { start: { line: i, character: 0 }, end: { line: i, character: 1 } } }),
     );
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags });
+    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
     expect(out).toContain('[LSP] 10 diagnostic(s):');
     expect(out).toContain('… (2 more)');
     expect(out.split('\n').length).toBe(1 + 8 + 1);
@@ -167,19 +168,48 @@ describe('formatDiagnosticsNotice', () => {
     const diags = Array.from({ length: 8 }, (_, i) =>
       makeDiagnostic({ message: `err ${i}` }),
     );
-    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags });
+    const out = formatDiagnosticsNotice({ available: true, diagnostics: diags, hasErrors: true });
     expect(out).not.toContain('more)');
+  });
+});
+
+describe('hasErrors', () => {
+  it('returns true when any diagnostic has severity 1 (Error)', () => {
+    const diags: LspDiagnostic[] = [
+      makeDiagnostic({ severity: 1 }),
+      makeDiagnostic({ severity: 2 }),
+    ];
+    expect(hasErrors(diags)).toBe(true);
+  });
+
+  it('returns false when no diagnostic has severity 1', () => {
+    const diags: LspDiagnostic[] = [
+      makeDiagnostic({ severity: 2 }),
+      makeDiagnostic({ severity: 3 }),
+    ];
+    expect(hasErrors(diags)).toBe(false);
+  });
+
+  it('returns false for an empty diagnostics array', () => {
+    expect(hasErrors([])).toBe(false);
+  });
+
+  it('returns false when severity is undefined', () => {
+    const diags: LspDiagnostic[] = [
+      makeDiagnostic({ severity: undefined }),
+    ];
+    expect(hasErrors(diags)).toBe(false);
   });
 });
 
 describe('formatDiagnosticsHint', () => {
   it('returns empty string for unsupported file types', () => {
-    const result: DiagnosticsResult = { available: false, diagnostics: [], reason: 'unsupported' };
+    const result: DiagnosticsResult = { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
     expect(formatDiagnosticsHint(result)).toBe('');
   });
 
   it('returns empty string when LSP started successfully', () => {
-    const result: DiagnosticsResult = { available: true, diagnostics: [] };
+    const result: DiagnosticsResult = { available: true, diagnostics: [], hasErrors: false };
     expect(formatDiagnosticsHint(result)).toBe('');
   });
 
@@ -187,6 +217,7 @@ describe('formatDiagnosticsHint', () => {
     const result: DiagnosticsResult = {
       available: false,
       diagnostics: [],
+      hasErrors: false,
       reason: 'server-missing',
       serverCommand: undefined,
     };
@@ -197,6 +228,7 @@ describe('formatDiagnosticsHint', () => {
     const result: DiagnosticsResult = {
       available: false,
       diagnostics: [],
+      hasErrors: false,
       reason: 'server-missing',
       serverCommand: 'typescript-language-server',
     };
@@ -210,6 +242,7 @@ describe('formatDiagnosticsHint', () => {
     const result: DiagnosticsResult = {
       available: false,
       diagnostics: [],
+      hasErrors: false,
       reason: 'server-missing',
       serverCommand: 'pyright-langserver',
     };

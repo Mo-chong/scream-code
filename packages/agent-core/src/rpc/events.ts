@@ -6,9 +6,9 @@ import type { ScreamErrorPayload } from '../errors';
 import type { PermissionMode } from '../agent/permission';
 import type { SkillSource } from '../skill';
 import type { BackgroundTaskInfo } from '../tools/background/manager';
-import type { ToolInputDisplay } from '../tools/display';
+import type { ToolInputDisplay, ToolResultDisplay } from '../tools/display';
 
-export type { ToolInputDisplay } from '../tools/display';
+export type { ToolInputDisplay, ToolResultDisplay } from '../tools/display';
 export type { ScreamErrorPayload } from '../errors';
 
 export interface UsageStatus {
@@ -198,6 +198,13 @@ export interface ToolResultEvent {
   readonly output: unknown;
   readonly isError?: boolean | undefined;
   readonly synthetic?: boolean | undefined;
+  /**
+   * Structured result payload for TUI renderers. When present, renderers
+   * consume this instead of parsing the text `output`. The model still sees
+   * `output`; this field is a side channel for the UI layer. Currently
+   * populated by Grep's `content` mode as a `search_results` payload.
+   */
+  readonly display?: ToolResultDisplay | undefined;
 }
 
 export interface SubagentSpawnedEvent {

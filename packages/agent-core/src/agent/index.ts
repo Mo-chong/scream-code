@@ -419,7 +419,7 @@ export class Agent {
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
       extractMemoriesOnExit: async () => {
-        await this.extractMemoriesOnExit();
+        return this.extractMemoriesOnExit();
       },
       sideQuestion: async (payload) => {
         const answer = await this.sideQuestion(payload.question);
@@ -491,8 +491,8 @@ export class Agent {
   }
 
   /** Extract memory memos from the full conversation history on session exit. */
-  async extractMemoriesOnExit(): Promise<void> {
-    if (!this.memoStore) return;
+  async extractMemoriesOnExit(): Promise<number> {
+    if (!this.memoStore) return 0;
     await this.memoStore.init();
 
     // ── Phase 12: pending-doc 退出兜底 ─────────────────────────
@@ -509,7 +509,7 @@ export class Agent {
     }
 
     const history = this.context.history;
-    if (history.length < 4) return; // Too short to contain meaningful task loops
+    if (history.length < 4) return 0; // Too short to contain meaningful task loops
 
     // homedir = <projectDir>/<sessionId>/agents/<agentId>
     const sessionId = this.homedir
@@ -518,9 +518,9 @@ export class Agent {
 
     const sessionTitle = await this.getSessionTitle();
 
-    // Sample last 30 messages to stay within reasonable token budget
+    // Sample last 50 messages to stay within reasonable token budget
     const sampleText = history
-      .slice(-30)
+      .slice(-50)
       .map((m) => {
         const text = m.content
           .filter((p) => p.type === 'text')
@@ -551,7 +551,7 @@ export class Agent {
         : response.message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
 
       const memos = await parseMemoryMemos(summary);
-      if (memos.length === 0) return;
+      if (memos.length === 0) return 0;
 
       const store = this.memoStore;
       const results = await Promise.allSettled(
@@ -571,12 +571,15 @@ export class Agent {
         });
       }
 
+      const stored = memos.length - failed;
       this.log.info('Extracted memory memos on session exit', {
-        count: memos.length,
+        count: stored,
         sessionId,
       });
+      return stored;
     } catch (error) {
       this.log.warn('Exit memory extraction failed', { error: String(error) });
+      throw error;
     }
   }
 

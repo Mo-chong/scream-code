@@ -1,6 +1,6 @@
 {
   "name": "scream-code-monorepo",
-  "version": "0.6.10",
+  "version": "0.7.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -50,7 +50,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "onnxruntime-node"
-    ]
+    ],
+    "patchedDependencies": {
+      "@earendil-works/pi-tui@0.78.1": "patches/@earendil-works__pi-tui@0.78.1.patch"
+    }
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [

@@ -14,6 +14,7 @@ import { literalRulePattern } from '../../support/rule-match';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { partitionExistingPaths } from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import { ReadTool } from './read';
 import readGroupDescriptionTemplate from './read-group.md';
 
@@ -27,7 +28,64 @@ function toolOutputText(output: ExecutableToolResult['output']): string {
     .join('');
 }
 
-export const MAX_READ_GROUP_FILES = 10;
+/**
+ * Scan a Read result's output for merge conflict markers. Returns a formatted
+ * notice string (empty when no conflicts found). Strips the `NNN\t` line-number
+ * prefix Read adds before scanning, and extracts the first line number so
+ * reported conflict line ranges match the file's actual line numbers.
+ */
+function conflictNoticeForReadResult(result: ExecutableToolResult): string {
+  if (result.isError === true) return '';
+  const text = toolOutputText(result.output);
+  const lines = text.split('\n');
+
+  let firstLineNumber = 1;
+  for (const line of lines) {
+    const tabIdx = line.indexOf('\t');
+    if (tabIdx > 0) {
+      const num = parseInt(line.slice(0, tabIdx), 10);
+      if (!Number.isNaN(num)) firstLineNumber = num;
+      break;
+    }
+    if (line.length === 0 || line.startsWith('<system>')) continue;
+    break;
+  }
+
+  const rawLines = extractRawContentLines(result);
+  return formatConflictNotice(scanConflictLines(rawLines, firstLineNumber));
+}
+
+export const MAX_READ_GROUP_FILES = 20;
+
+const IMPORTABLE_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs']);
+const IMPORT_RE = /^\s*(?:import|export)\s+.*\sfrom\s+['"](\.\/[^'"]+)['"]/;
+const MAX_IMPORT_EDGES = 10;
+
+function fileExtension(path: string): string {
+  const base = path.split(/[\\/]/).at(-1) ?? path;
+  const dotIdx = base.lastIndexOf('.');
+  if (dotIdx <= 0) return 'no-ext';
+  return base.slice(dotIdx + 1).toLowerCase();
+}
+
+function extractRawContentLines(result: ExecutableToolResult): string[] {
+  if (result.isError === true) return [];
+  const text = toolOutputText(result.output);
+  return text.split('\n').map((line) => {
+    const tabIdx = line.indexOf('\t');
+    return tabIdx === -1 ? line : line.slice(tabIdx + 1);
+  });
+}
+
+function extractImportTargets(rawLines: readonly string[]): string[] {
+  const targets: string[] = [];
+  for (const line of rawLines) {
+    if (line.startsWith('<system>')) continue;
+    const match = IMPORT_RE.exec(line);
+    if (match && match[1] !== undefined) targets.push(match[1]);
+  }
+  return targets;
+}
 
 const NonEmptyStringArraySchema = z.array(z.string().min(1)).min(1).max(MAX_READ_GROUP_FILES);
 
@@ -187,21 +245,66 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
     const orderIndex = new Map(paths.map((p, i) => [p, i]));
     results.sort((a, b) => (orderIndex.get(a.path) ?? 0) - (orderIndex.get(b.path) ?? 0));
 
+    const grouped = new Map<string, { path: string; result: ExecutableToolResult }[]>();
+    for (const { path, result } of results) {
+      const ext = fileExtension(path);
+      const group = grouped.get(ext) ?? [];
+      group.push({ path, result });
+      grouped.set(ext, group);
+    }
+
+    const sortedExts = [...grouped.keys()].sort();
     const parts: string[] = [];
     let hasError = false;
-    for (const { path, result } of results) {
+    for (const ext of sortedExts) {
+      const group = grouped.get(ext);
+      if (group === undefined) continue;
       if (parts.length > 0) parts.push('');
-      parts.push(`--- ${path} ---`);
-      if (result.isError === true) {
-        hasError = true;
-        parts.push(`[ERROR] ${toolOutputText(result.output)}`);
-      } else {
-        parts.push(toolOutputText(result.output));
+      parts.push(`── .${ext} (${String(group.length)}) ──`);
+      for (const { path, result } of group) {
+        parts.push('', `--- ${path} ---`);
+        if (result.isError === true) {
+          hasError = true;
+          parts.push(`[ERROR] ${toolOutputText(result.output)}`);
+        } else {
+          parts.push(toolOutputText(result.output));
+        }
       }
     }
 
     if (missingPaths.length > 0) {
       parts.push('', `Skipped missing paths: ${missingPaths.join(', ')}`);
+    }
+
+    const conflictNotices = results
+      .map((r) => ({ path: r.path, notice: conflictNoticeForReadResult(r.result) }))
+      .filter((r) => r.notice.length > 0);
+    if (conflictNotices.length > 0) {
+      const list = conflictNotices
+        .map((r) => `${r.path}: ${r.notice}`)
+        .join('; ');
+      parts.push('', `Conflict markers detected — ${list}`);
+    }
+
+    const importEdges: string[] = [];
+    for (const { path, result } of results) {
+      if (result.isError === true) continue;
+      const ext = fileExtension(path);
+      if (!IMPORTABLE_EXTENSIONS.has(ext)) continue;
+      const rawLines = extractRawContentLines(result);
+      const targets = extractImportTargets(rawLines);
+      if (targets.length > 0) {
+        const base = path.split(/[\\/]/).at(-1) ?? path;
+        importEdges.push(`${base} → ${targets.join(', ')}`);
+      }
+    }
+    if (importEdges.length > 0) {
+      const shown = importEdges.slice(0, MAX_IMPORT_EDGES);
+      const more =
+        importEdges.length > MAX_IMPORT_EDGES
+          ? ` (+${String(importEdges.length - MAX_IMPORT_EDGES)} more)`
+          : '';
+      parts.push('', `Imports: ${shown.join('; ')}${more}`);
     }
 
     return {
