@@ -349,7 +349,21 @@ export class FooterComponent implements Component {
     const left: string[] = [];
     if (state.planMode) left.push(chalk.hex(colors.planMode).bold('plan'));
     if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold('wolfpack'));
-    if (state.loopModeEnabled) left.push(chalk.hex(colors.primary).bold('loop'));
+    if (state.loopModeEnabled) {
+      const iter = state.loopIteration;
+      const limit = state.loopLimit;
+      let badge = 'loop';
+      if (limit?.kind === 'iterations') {
+        badge = `loop ${iter}/${limit.initial}`;
+      } else if (limit?.kind === 'duration') {
+        const remainMs = Math.max(0, limit.deadlineMs - Date.now());
+        badge = remainMs >= 60_000
+          ? `loop ${Math.ceil(remainMs / 60_000)}m`
+          : `loop ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
+      }
+      if (state.loopLastVerifyPassed === false) badge += ' · ✗';
+      left.push(chalk.hex(colors.primary).bold(badge));
+    }
     if (state.goalActive) {
       left.push(chalk.hex(colors.primary).bold('goal'));
     }

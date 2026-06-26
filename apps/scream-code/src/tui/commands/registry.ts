@@ -26,7 +26,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'loop',
     aliases: [],
-    description: '切换循环模式，每次 Agent 完成后自动重新提交同一条 prompt',
+    description: '循环模式',
     priority: 122,
     availability: 'always',
   },

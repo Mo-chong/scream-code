@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { handleLoopCommand, describeLoopStatus } from '#/tui/commands/loop';
 import type { SlashCommandHost } from '#/tui/commands/dispatch';
-import type { AppState, TUIState } from '#/tui/types';
+import type { AppState } from '#/tui/types';
+import type { TUIState } from '#/tui/tui-state';
 import { darkColors } from '#/tui/theme/colors';
 
 function makeAppState(overrides: Partial<AppState> = {}): AppState {
@@ -38,6 +39,9 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     loopModeEnabled: false,
     loopPrompt: undefined,
     loopLimit: undefined,
+    loopVerifier: undefined,
+    loopIteration: 0,
+    loopLastVerifyPassed: undefined,
     recentSessions: [],
     ...overrides,
   };
@@ -61,7 +65,7 @@ function makeHost(overrides: { appState?: Partial<AppState>; session?: unknown }
     sendNormalUserInput: vi.fn(),
   };
   if ('session' in overrides) {
-    host.session = overrides.session;
+    host['session'] = overrides.session;
   }
   return host as unknown as SlashCommandHost;
 }
@@ -81,6 +85,9 @@ describe('handleLoopCommand', () => {
       loopModeEnabled: false,
       loopPrompt: undefined,
       loopLimit: undefined,
+      loopVerifier: undefined,
+      loopIteration: 0,
+      loopLastVerifyPassed: undefined,
     });
     expect(host.showStatus).toHaveBeenCalledWith('循环模式已关闭。');
   });
@@ -106,6 +113,9 @@ describe('handleLoopCommand', () => {
       loopModeEnabled: true,
       loopPrompt: undefined,
       loopLimit: expect.objectContaining({ kind: 'iterations', initial: 3, remaining: 3 }),
+      loopVerifier: undefined,
+      loopIteration: 0,
+      loopLastVerifyPassed: undefined,
     });
     expect(host.showNotice).toHaveBeenCalledWith('循环模式已开启', expect.stringContaining('剩余 3/3 次'));
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('fix tests');
@@ -119,6 +129,7 @@ describe('handleLoopCommand', () => {
     expect(host.setAppState).toHaveBeenCalledWith({
       loopLimit: { kind: 'iterations', initial: 5, remaining: 3 },
       loopPrompt: 'continue fixing',
+      loopVerifier: undefined,
     });
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('continue fixing');
   });
@@ -131,6 +142,7 @@ describe('handleLoopCommand', () => {
     expect(host.setAppState).toHaveBeenCalledWith({
       loopLimit: { kind: 'iterations', initial: 5, remaining: 3 },
       loopPrompt: 'new prompt',
+      loopVerifier: undefined,
     });
     expect(host.sendNormalUserInput).not.toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenCalledWith('循环提示词已更新。');
@@ -144,6 +156,7 @@ describe('handleLoopCommand', () => {
     expect(host.setAppState).toHaveBeenCalledWith({
       loopLimit: expect.objectContaining({ kind: 'iterations', initial: 10, remaining: 10 }),
       loopPrompt: 'new prompt',
+      loopVerifier: undefined,
     });
   });
 });

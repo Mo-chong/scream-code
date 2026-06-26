@@ -72,6 +72,9 @@ export interface AppState {
   loopModeEnabled: boolean;
   loopPrompt: string | undefined;
   loopLimit: LoopLimitRuntime | undefined;
+  loopVerifier: { command: string; timeoutMs: number } | undefined;
+  loopIteration: number;
+  loopLastVerifyPassed: boolean | undefined;
   recentSessions: RecentSession[];
 }
 

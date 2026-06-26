@@ -25,6 +25,8 @@ export interface ParsedLoopArgs {
   limit?: LoopLimitConfig;
   /** Inline loop prompt: text after the limit, or the whole argument when no limit was given. */
   prompt?: string;
+  /** Shell command run after each turn; loop stops on exit 0. */
+  verifier?: { command: string };
 }
 
 const TIME_UNITS_MS: Record<string, number> = {
@@ -53,18 +55,42 @@ const LOOP_USAGE = '用法：/loop [次数|时长] [提示词]。示例：/loop 
  * 其他内容都视为提示词文本，因此 `/loop` 后面跟普通 prose 会开启无限制循环。
  * 失败时返回错误信息字符串。
  */
+const VERIFY_USAGE = '验证命令需用引号包裹，例如：--verify "pnpm lint"';
+
+function extractVerifyFlag(
+  input: string,
+): { verifier: { command: string }; remaining: string } | string | undefined {
+  const match = input.match(/--verify\s+["']([^"']+)["']/);
+  if (match && match[1]) {
+    const command = match[1];
+    const remaining = input.replace(match[0], '').replace(/\s{2,}/g, ' ').trim();
+    return { verifier: { command }, remaining };
+  }
+  if (/\b--verify\b/.test(input)) return VERIFY_USAGE;
+  return undefined;
+}
+
 export function parseLoopLimitArgs(args: string): ParsedLoopArgs | string {
   const trimmed = args.trim();
   if (!trimmed) return {};
 
-  const firstSpace = trimmed.search(/\s/);
-  const firstToken = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
-  const rest = firstSpace === -1 ? '' : trimmed.slice(firstSpace + 1).trim();
+  const extracted = extractVerifyFlag(trimmed);
+  if (typeof extracted === 'string') return extracted;
+  const verifier = extracted?.verifier;
+  const remaining = extracted ? extracted.remaining : trimmed;
+
+  if (!remaining) {
+    return verifier ? { verifier } : {};
+  }
+
+  const firstSpace = remaining.search(/\s/);
+  const firstToken = firstSpace === -1 ? remaining : remaining.slice(0, firstSpace);
+  const rest = firstSpace === -1 ? '' : remaining.slice(firstSpace + 1).trim();
   const token = firstToken.toLowerCase();
 
-  // 不是限制尝试（如 "keep going"）→ 无限制循环，prompt = 完整参数。
+  // 不是限制尝试（如 "keep going"）→ 无限制循环，prompt = 剩余参数。
   if (!/^[+-]?\d/.test(token)) {
-    return { prompt: trimmed };
+    return { prompt: remaining, verifier };
   }
 
   // 纯整数（可选正负号）：迭代次数，除非下一个 token 是时间单位（"10 minutes"）。
@@ -80,20 +106,20 @@ export function parseLoopLimitArgs(args: string): ParsedLoopArgs | string {
         if (unitMs !== undefined) {
           const limit = makeDuration(token, unitMs);
           if (typeof limit === 'string') return limit;
-          return { limit, prompt: restTokens.slice(1).join(' ').trim() || undefined };
+          return { limit, prompt: restTokens.slice(1).join(' ').trim() || undefined, verifier };
         }
       }
     }
     const limit = makeIterations(token);
     if (typeof limit === 'string') return limit;
-    return { limit, prompt: rest || undefined };
+    return { limit, prompt: rest || undefined, verifier };
   }
 
   // 紧凑 / 组合时长："10m"、"90s"、"1h30m"。
   const duration = parseCompoundDuration(token);
   if (duration !== undefined) {
     if (typeof duration === 'string') return duration;
-    return { limit: duration, prompt: rest || undefined };
+    return { limit: duration, prompt: rest || undefined, verifier };
   }
 
   // 看起来像限制但无法解析（"-1"、"1.5h"、"10x10"）。

@@ -123,6 +123,9 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     loopModeEnabled: false,
     loopPrompt: undefined,
     loopLimit: undefined,
+    loopVerifier: undefined,
+    loopIteration: 0,
+    loopLastVerifyPassed: undefined,
     recentSessions: [],
   };
 }

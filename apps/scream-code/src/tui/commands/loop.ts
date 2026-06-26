@@ -11,6 +11,12 @@ import {
   type LoopLimitRuntime,
 } from '../utils/loop-limit';
 
+const DEFAULT_VERIFY_TIMEOUT_MS = 60_000;
+
+function makeVerifier(command: string) {
+  return { command, timeoutMs: DEFAULT_VERIFY_TIMEOUT_MS };
+}
+
 /**
  * 切换循环模式。开启后，提示词会在每次 Agent 完成一轮后自动重发。
  *
@@ -20,6 +26,7 @@ import {
  * - /loop 10 [提示词]     开启循环，限制 10 次
  * - /loop 5m [提示词]     开启循环，限制 5 分钟
  * - /loop <提示词>        （已暂停）恢复循环并使用该提示词
+ * - /loop 10 ... --verify "命令"  每轮后跑验证命令，通过即停
  */
 export async function handleLoopCommand(host: SlashCommandHost, args: string): Promise<void> {
   const trimmed = args.trim();
@@ -30,7 +37,6 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
       disableLoopMode(host, '循环模式已关闭。');
       return;
     }
-
 
     const parsed = parseLoopLimitArgs(args);
     if (typeof parsed === 'string') {
@@ -43,8 +49,11 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
       ? createLoopLimitRuntime(parsed.limit)
       : host.state.appState.loopLimit;
     const loopPrompt = parsed.prompt ?? host.state.appState.loopPrompt;
+    const loopVerifier = parsed.verifier
+      ? makeVerifier(parsed.verifier.command)
+      : host.state.appState.loopVerifier;
 
-    host.setAppState({ loopLimit, loopPrompt });
+    host.setAppState({ loopLimit, loopPrompt, loopVerifier });
 
     if (wasPaused && loopPrompt !== undefined) {
       host.sendNormalUserInput(loopPrompt);
@@ -58,11 +67,13 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
   if (!trimmed) {
     host.showNotice(
       '/loop 命令说明',
-      '用法：/loop [次数|时长] [提示词]\n' +
+      '用法：/loop [次数|时长] [提示词] [--verify "验证命令"]\n' +
         '· /loop 10 [提示词] — 限制 10 次迭代\n' +
         '· /loop 5m [提示词] — 限制 5 分钟\n' +
         '· /loop 1h30m [提示词] — 组合时长限制\n' +
-        '按 Esc 暂停当前迭代；再次输入 /loop 关闭循环。',
+        '· /loop 10 修复 lint --verify "pnpm lint" — 每轮后跑验证，通过即停\n' +
+        '按 Esc 暂停当前迭代；再次输入 /loop 关闭循环。\n' +
+        '提示：没有可自动判断完成的验证命令时，慎用循环模式。',
     );
     return;
   }
@@ -87,22 +98,29 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
     loopModeEnabled: true,
     loopPrompt: undefined,
     loopLimit,
+    loopVerifier: parsed.verifier ? makeVerifier(parsed.verifier.command) : undefined,
+    loopIteration: 0,
+    loopLastVerifyPassed: undefined,
   });
 
   const limitSuffix = parsed.limit ? ` 限制：${describeLoopLimit(parsed.limit)}。` : '';
   const remainingSuffix = loopLimit ? ` ${describeLoopLimitRuntime(loopLimit)}。` : '';
+  const verifierSuffix = parsed.verifier
+    ? ` 验证命令：${parsed.verifier.command}（通过即停）。`
+    : '';
   const promptBehavior = parsed.prompt
     ? '已固定提示词，每轮结束后自动重发。'
     : '下一条提示词将在每轮结束后自动重发。';
 
   host.showNotice(
     '循环模式已开启',
-    `${promptBehavior}${limitSuffix}${remainingSuffix}\n\n` +
+    `${promptBehavior}${limitSuffix}${remainingSuffix}${verifierSuffix}\n\n` +
       '/loop 命令说明：\n' +
       '· /loop — 切换循环开关\n' +
       '· /loop 10 [提示词] — 限制 10 次迭代\n' +
       '· /loop 5m [提示词] — 限制 5 分钟\n' +
       '· /loop 1h30m [提示词] — 组合时长限制\n' +
+      '· /loop 10 ... --verify "命令" — 每轮后跑验证，通过即停\n' +
       '按 Esc 暂停当前迭代；再次输入 /loop 关闭循环。',
   );
 
@@ -117,6 +135,9 @@ export function disableLoopMode(host: SlashCommandHost, message?: string): void 
     loopModeEnabled: false,
     loopPrompt: undefined,
     loopLimit: undefined,
+    loopVerifier: undefined,
+    loopIteration: 0,
+    loopLastVerifyPassed: undefined,
   });
   if (message) {
     host.showStatus(message);
