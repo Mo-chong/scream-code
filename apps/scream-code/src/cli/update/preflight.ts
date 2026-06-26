@@ -8,7 +8,6 @@ import { selectUpdateTarget } from './select';
 import {
   INSTALL_COMMAND_STRING,
   MANUAL_UPDATE_MESSAGE,
-  detectInstallSource,
   installUpdate,
 } from './install-strategy';
 import {
@@ -24,8 +23,6 @@ export interface RunUpdatePreflightOptions {
   readonly stderr?: { write(chunk: string): boolean };
   readonly isTTY?: boolean;
 }
-
-const INSTALL_TIMEOUT_MS = 300_000;
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -55,8 +52,6 @@ async function promptInstall(
   };
   return promptForInstallConfirmation(options);
 }
-
-
 
 export function decideUpdateAction(
   target: UpdateTarget | null,
