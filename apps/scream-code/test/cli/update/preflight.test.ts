@@ -90,9 +90,10 @@ describe('runUpdatePreflight', () => {
   it('skips when non-interactive', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    const { options } = captureOutput();
+    const { stdout, options } = captureOutput();
     await expect(runUpdatePreflight('0.4.0', { ...options, isTTY: false }),
     ).resolves.toBe('continue');
+    expect(stdout.join('')).toContain('git pull mochong main');
   });
 
   it('source install: prompts and runs git pull + pnpm install + pnpm -r build', async () => {
