@@ -104,7 +104,8 @@ export async function fetchLatestVersion(
  *
  * Throws 在任一命令失败时。
  */
-export async function installUpdate(installDir: string): Promise<void> {
+export async function installUpdate(): Promise<void> {
+  const installDir = resolveScreamHome();
   const commands: readonly {
     readonly cmd: string;
     readonly args: readonly string[];

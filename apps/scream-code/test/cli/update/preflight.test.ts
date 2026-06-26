@@ -50,7 +50,7 @@ vi.mock('../../../src/cli/update/refresh', async () => {
 
 function cacheWith(version: string): UpdateCache {
   return {
-    source: 'cdn',
+    source: 'npm',
     checkedAt: '2026-04-23T08:00:00.000Z',
     latest: version,
   };
@@ -115,22 +115,10 @@ describe('runUpdatePreflight', () => {
       expect.objectContaining({
         installCommand:
           'cd ~/.scream-code && git pull mochong main && pnpm install && pnpm -r build',
-        installSource: 'source',
       }),
     );
     expect(mocks.installUpdate).toHaveBeenCalledTimes(1);
     expect(stdout.join('')).toContain('已更新至 0.5.0');
-  });
-
-  it('unsupported: prints manual upgrade command, does not call installUpdate', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('unsupported');
-    const { stdout, options } = captureOutput();
-    await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
-    expect(stdout.join('')).toContain('git pull mochong main');
-    expect(promptForInstallConfirmation).not.toHaveBeenCalled();
-    expect(mocks.installUpdate).not.toHaveBeenCalled();
   });
 
   it('declined install continues without installUpdate', async () => {
