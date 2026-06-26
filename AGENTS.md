@@ -331,12 +331,12 @@ All slash commands are declared in `src/tui/commands/registry.ts` and dispatched
 
 ### WolfPack Mode (`/wolfpack`)
 
-Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. When active, the LLM can use the `WolfPack` tool to spawn parallel subagents via a template + items pattern (max 20 items), executed concurrently via `Promise.allSettled` with aggregated results. Follows the PlanMode pattern end-to-end.
+Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. When active, the LLM can use the `WolfPack` tool to spawn parallel subagents via a template + items pattern with **no item cap** (all items run in parallel via `Promise.allSettled`), aggregated into a single result. Follows the PlanMode pattern end-to-end.
 
 - **Entry**: `/wolfpack` (aliases: `wp`), toggles on/off with no args
 - **State machine**: `packages/agent-core/src/agent/wolfpack/index.ts` — `WolfPackMode` (enter / exit / restoreEnter / isActive)
 - **Injector**: `packages/agent-core/src/agent/injection/wolfpack.ts` — `WolfPackModeInjector`, injects usage instructions on enter/exit
-- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/wolfpack.ts` — `WolfPackTool`, runtime-gated by `wolfpackMode.isActive`
+- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/wolfpack.ts` — `WolfPackTool`, runtime-gated by `wolfpackMode.isActive`. Tool description injects the 7 preset `subagent_type` profiles (coder/explore/plan/verify/reviewer/oracle/writer) plus a per-batch selection guide so the model can pick the right type for each batch (reviewer for audits, writer for content, etc.).
 - **Permission policy**: `packages/agent-core/src/agent/permission/policies/wolfpack-mode-approve.ts` — auto-approves all tools when WolfPack is active
 - **Records**: `wolfpack.enter` / `wolfpack.exit` for session replay recovery
 - **Footer badge**: `wolfpack` in brand blue when active
@@ -357,9 +357,20 @@ The goal system runs in an autonomous loop (`driveGoal()` in `packages/agent-cor
 - **WriteGoalNote tool**: `packages/agent-core/src/tools/builtin/goal/write-goal-note.ts` — lets the model record working notes (max 10 notes × 200 chars). Notes are stored in `GoalMode` memory state, not in conversation context, so compaction cannot lose them.
 - **GoalInjector**: `packages/agent-core/src/agent/injection/goal.ts` — injects notes into each continuation turn under `## Working Notes`. Also prompts the model to use WriteGoalNote when discovering facts or hitting dead ends.
 - **Lifecycle**: notes are cleared when the goal completes or is cancelled. Notes do not survive session resume (model re-accumulates them).
-- **TUI ordering**: `/goal` is 5th in the quick command list (priority 121, after sessions).
+- **TUI ordering**: `/goal` is 5th in the quick command list (priority 122, after sessions).
 
-### cc-connect (`/cc`)
+### Loop Mode (`/loop`)
+
+Stateless retry with an optional `--verify` shell gate. Each iteration re-sends the same prompt; the model does not see prior iteration output. Use only for idempotent tasks with an objective exit condition (wait for CI, health-check polling, retry a flaky build). For tasks that need to adapt based on the previous failure, use `/goal` instead — the model carries working notes across turns.
+
+- **Entry**: `/loop [iterations|duration] [prompt] [--verify "command"]`
+- **TUI**: `src/tui/commands/loop.ts` — `handleLoopCommand`, `disableLoopMode`, `describeLoopStatus`
+- **Args parser**: `src/tui/utils/loop-limit.ts` — `parseLoopLimitArgs` extracts `--verify` (quoted) + iteration/duration limit + prompt
+- **Verifier**: `src/tui/utils/loop-verifier.ts` — `runShellVerifier` runs the verify command, returns `{ passed, output, durationMs, exitCode }`
+- **Auto-submit**: `src/tui/controllers/session-event-handler.ts` — `advanceLoopIteration` runs the verifier after each turn, stops on pass, decrements the limit, and re-sends the prompt. Esc during the verifier pauses without corrupting state.
+- **Auto permission**: opening loop with `permissionMode === 'manual'` auto-switches to `auto` (via `ensureAutoPermission`) so iterations don't block on approval. Closing loop does **not** restore the previous mode.
+- **Footer badge**: `loop N/M` (iterations), `loop Nm` / `loop Ns` (duration), ` · ✗` suffix when the last verify failed
+- **TUI ordering**: `/loop` sits below `/goal` (priority 121) — it is a lightweight tool, not a goal replacement.
 
 One-click cc-connect daemon life cycle management (cross-platform).
 
@@ -370,15 +381,16 @@ One-click cc-connect daemon life cycle management (cross-platform).
 
 ### Update (`/update`)
 
-Manual update from GitHub. Silent background version check runs at startup.
+Manual and auto update via npm. Silent background version check runs at startup.
 
-- **Version source**: `src/cli/update/cdn.ts` — fetches `api.github.com/repos/LIUTod/scream-code/releases/latest`, strips `v` prefix from `tag_name`.
-- **Cache**: `src/cli/update/cache.ts` — reads/writes `~/.scream-code/updates/latest.json`.
+- **Version source**: `src/cli/update/cdn.ts` — `fetchLatestVersionFromNpm()` runs `npm view scream-code version` (with `shell: process.platform === 'win32'` so npm.cmd resolves on Windows). Validates semver before returning.
+- **Cache**: `src/cli/update/cache.ts` — reads/writes `~/.scream-code/updates/latest.json` with `source: 'npm'` and a Zod schema.
 - **Compare**: `src/cli/update/select.ts` — `semver.gt(latest, current)`.
+- **Refresh**: `src/cli/update/refresh.ts` — `refreshUpdateCache()` calls `fetchLatestVersionFromNpm()`, writes the cache on success, propagates errors so a transient npm blip leaves the existing cache intact.
 - **TUI startup**: `checkForUpdates()` in `scream-tui.ts` calls `refreshUpdateCache()` then `readUpdateCache()` + `selectUpdateTarget()`.
 - **Welcome panel**: shows "有新版本（x.y.z）" when `hasNewVersion` is true.
-- **Manual trigger**: `/update` command in `src/cli/update/` — git pull → pnpm install → pnpm -r build, with per-step timeouts and network error detection.
-- **Constant**: `src/constant/app.ts` — `SCREAM_CODE_CDN_LATEST_URL`, `SCREAM_CODE_GITHUB_REPO`.
+- **Preflight**: `src/cli/update/preflight.ts` — `runUpdatePreflight()` prompts interactively (or prints the manual command when non-TTY) and runs `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'` and `stdio: 'inherit'`. Single step, no git/pnpm.
+- **Manual trigger**: `/update` in `src/tui/commands/update.ts` — `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'`, 5-minute timeout, network-error detection with Chinese user-facing messages.
 
 ### /revoke
 
@@ -394,6 +406,8 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 
 - **Entry**: `/skill` (aliases: `skills`, `plugin`, `plugins`)
 - **TUI**: `src/tui/commands/skill-center.ts` — 选择器面板，支持 `Enter` 激活、`i` 安装并注入、`d` 卸载
+- **Plugin display name**: skill descriptions show the plugin `displayName` (e.g. "GSAP 动画技能包") rather than the raw plugin id, via `formatSkillDescription(skill, plugins)`.
+- **Uninstall impact**: plugin skills can only be uninstalled as a whole package (SDK throws on `removeSkill` for plugin skills). The confirm dialog explicitly surfaces this — `将卸载整个包（共 N 个 Skill），无法只删除单个 Skill` — so the user is not surprised by losing sibling skills. Manual skills still go through `removeSkill` and delete the install unit.
 - **Loading overlay**: `SkillCenterLoadingComponent` 在加载已安装 Skill 与 Marketplace 数据时显示 spinner，避免画面卡顿
 - **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` 提供内置可安装 Skill 包列表
 - **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill` 删除手动安装的 skill 安装单元（包含子 Skill）；`Session.injectSkillRoots` 在不重启会话的情况下加载新插件的 Skill

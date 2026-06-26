@@ -379,7 +379,7 @@ function composeSubagentPrompt(args: AgentToolInput): string {
   return parts.join('\n');
 }
 
-function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents']): string {
+export function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents']): string {
   if (subagents === undefined) return '';
   return Object.entries(subagents)
     .map(([name, subagent]) => {

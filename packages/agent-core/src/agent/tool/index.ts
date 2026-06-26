@@ -654,7 +654,10 @@ export class ToolManager {
           new b.WolfPackTool(
             this.agent.subagentHost,
             () => this.agent.wolfpackMode.isActive,
-            { log: this.agent.log },
+            {
+              subagents: DEFAULT_AGENT_PROFILES['agent']?.subagents,
+              log: this.agent.log,
+            },
           ),
 
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
