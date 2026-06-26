@@ -9,12 +9,10 @@ import { promptForInstallConfirmation } from '#/cli/update/prompt';
 import type * as PromptModule from '#/cli/update/prompt';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import type * as RefreshModule from '#/cli/update/refresh';
-import { detectInstallSource } from '#/cli/update/source';
 import { emptyUpdateCache, type UpdateCache } from '#/cli/update/types';
 
 const mocks = vi.hoisted(() => ({
   readUpdateCache: vi.fn(),
-  detectInstallSource: vi.fn(),
   promptForInstallConfirmation: vi.fn(),
   refreshUpdateCache: vi.fn(),
   spawn: vi.fn(),
@@ -22,10 +20,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/cli/update/cache', () => ({
   readUpdateCache: mocks.readUpdateCache,
-}));
-
-vi.mock('../../../src/cli/update/source', () => ({
-  detectInstallSource: mocks.detectInstallSource,
 }));
 
 vi.mock('../../../src/cli/update/prompt', async () => {
@@ -54,7 +48,7 @@ vi.mock('node:child_process', async () => {
 
 function cacheWith(version: string): UpdateCache {
   return {
-    source: 'cdn',
+    source: 'npm',
     checkedAt: '2026-04-23T08:00:00.000Z',
     latest: version,
   };
@@ -101,23 +95,23 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
     expect(readUpdateCache).toHaveBeenCalledTimes(1);
     expect(refreshUpdateCache).toHaveBeenCalledTimes(1);
-    expect(detectInstallSource).not.toHaveBeenCalled();
   });
 
   it('skips when non-interactive', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    const { options } = captureOutput();
+    const { stdout, options } = captureOutput();
     await expect(
       runUpdatePreflight('0.4.0', { ...options, isTTY: false }),
     ).resolves.toBe('continue');
-    expect(detectInstallSource).not.toHaveBeenCalled();
+    expect(stdout.join('')).toContain('npm install -g scream-code@latest');
+    expect(promptForInstallConfirmation).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
-  it('source install: prompts and runs git pull + pnpm install + pnpm -r build', async () => {
+  it('interactive: prompts and runs npm install -g scream-code@latest', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mockSpawnExit(0);
     const { stdout, options } = captureOutput();
@@ -125,47 +119,21 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('exit');
     expect(mocks.promptForInstallConfirmation).toHaveBeenCalledWith(
       expect.objectContaining({
-        installCommand: 'cd ~/.scream-code && git pull && pnpm install && pnpm -r build',
-        installSource: 'source',
+        installCommand: 'npm install -g scream-code@latest',
       }),
     );
-    expect(mocks.spawn).toHaveBeenCalledTimes(3);
-    expect(mocks.spawn).toHaveBeenNthCalledWith(
-      1,
-      'git',
-      ['pull', 'origin', 'main'],
-      expect.objectContaining({ stdio: 'inherit' }),
-    );
-    expect(mocks.spawn).toHaveBeenNthCalledWith(
-      2,
-      'pnpm',
-      ['install'],
-      expect.objectContaining({ stdio: 'inherit' }),
-    );
-    expect(mocks.spawn).toHaveBeenNthCalledWith(
-      3,
-      'pnpm',
-      ['-r', 'build'],
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      'npm',
+      ['install', '-g', 'scream-code@latest'],
       expect.objectContaining({ stdio: 'inherit' }),
     );
     expect(stdout.join('')).toContain('已更新至 0.5.0');
   });
 
-  it('unsupported: prints manual upgrade command, does not spawn', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('unsupported');
-    const { stdout, options } = captureOutput();
-    await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
-    expect(stdout.join('')).toContain('cd ~/.scream-code && ./install.sh --upgrade');
-    expect(promptForInstallConfirmation).not.toHaveBeenCalled();
-    expect(mocks.spawn).not.toHaveBeenCalled();
-  });
-
   it('declined install continues without spawn', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(false);
     const { options } = captureOutput();
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
@@ -175,13 +143,11 @@ describe('runUpdatePreflight', () => {
   it('warns and continues when spawn exits non-zero, without claiming success', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mockSpawnExit(1);
     const { stdout, stderr, options } = captureOutput();
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
     expect(stderr.join('')).toContain('警告：更新失败');
-    // A failed install must never print the "Updated …" success line.
     expect(stdout.join('')).not.toContain('已更新至');
   });
 

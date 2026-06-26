@@ -55,7 +55,6 @@ describe('promptForInstallConfirmation', () => {
       currentVersion: '0.4.0',
       target: { version: '0.5.0' },
       installCommand: 'npm install -g scream-code@0.5.0',
-      installSource: 'unsupported',
       input,
       output,
     });

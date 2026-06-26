@@ -49,7 +49,7 @@ describe('update cache', () => {
 
   it('writes and reads back the cache from updates/latest.json', async () => {
     const cache = {
-      source: 'cdn',
+      source: 'npm',
       checkedAt: '2026-04-23T08:00:00.000Z',
       latest: '0.5.0',
     } as const;

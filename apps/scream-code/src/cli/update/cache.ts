@@ -7,7 +7,7 @@ import { emptyUpdateCache, type UpdateCache } from './types';
 
 const UpdateCacheSchema: z.ZodType<UpdateCache> = z
   .object({
-    source: z.literal('cdn'),
+    source: z.literal('npm'),
     checkedAt: z.string().min(1).nullable(),
     latest: z.string().min(1).nullable(),
   })

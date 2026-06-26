@@ -12,12 +12,12 @@ describe('refreshUpdateCache', () => {
     });
 
     expect(result).toEqual({
-      source: 'cdn',
+      source: 'npm',
       checkedAt: '2026-05-20T12:34:56.000Z',
       latest: '0.5.0',
     });
     expect(writeCache).toHaveBeenCalledWith({
-      source: 'cdn',
+      source: 'npm',
       checkedAt: '2026-05-20T12:34:56.000Z',
       latest: '0.5.0',
     });

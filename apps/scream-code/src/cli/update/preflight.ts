@@ -1,14 +1,10 @@
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 import { readUpdateCache } from './cache';
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
 import { refreshUpdateCache } from './refresh';
 import { selectUpdateTarget } from './select';
-import { detectInstallSource } from './source';
 import {
-  type InstallSource,
   type UpdateDecision,
   type UpdatePreflightResult,
   type UpdateTarget,
@@ -22,6 +18,8 @@ export interface RunUpdatePreflightOptions {
   readonly isTTY?: boolean;
 }
 
+const INSTALL_TIMEOUT_MS = 300_000;
+
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -31,7 +29,7 @@ function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget)
     `Scream Code 有新版本可用 ` +
     `(${currentVersion} -> ${target.version})。\n` +
     `自动更新失败，请手动执行：\n` +
-    `  cd ~/.scream-code && ./install.sh --upgrade\n`
+    `  npm install -g scream-code@latest\n`
   );
 }
 
@@ -46,43 +44,36 @@ function refreshInBackground(): void {
 async function promptInstall(
   currentVersion: string,
   target: UpdateTarget,
-  source: InstallSource,
   installCommand: string,
 ): Promise<boolean> {
   const options: InstallPromptOptions = {
     currentVersion,
     target,
     installCommand,
-    installSource: source,
   };
   return promptForInstallConfirmation(options);
 }
 
-async function installUpdate(installDir: string): Promise<void> {
-  const commands: readonly { readonly cmd: string; readonly args: readonly string[]; readonly cwd?: string }[] = [
-    { cmd: 'git', args: ['pull', 'origin', 'main'], cwd: installDir },
-    { cmd: 'pnpm', args: ['install'], cwd: installDir },
-    { cmd: 'pnpm', args: ['-r', 'build'], cwd: installDir },
-  ];
-
-  for (const { cmd, args, cwd } of commands) {
-    let resolve!: () => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<void>((res, rej) => {
-      resolve = res;
-      reject = rej;
+async function installUpdate(): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('npm', ['install', '-g', 'scream-code@latest'], { stdio: 'inherit', shell: true });
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('npm install 超时'));
+    }, INSTALL_TIMEOUT_MS);
+    child.once('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
     });
-    const child = spawn(cmd, args, { cwd, stdio: 'inherit' });
-    child.once('error', reject);
     child.once('exit', (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) {
         resolve();
         return;
       }
-      reject(new Error(`${cmd} 失败（exit ${code ?? signal}）`));
+      reject(new Error(`npm install 失败（exit ${code ?? signal}）`));
     });
-    await promise;
-  }
+  });
 }
 
 export function decideUpdateAction(
@@ -109,26 +100,22 @@ export async function runUpdatePreflight(
 
     const isInteractive =
       options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
-    const source: InstallSource =
-      target === null || !isInteractive ? 'unsupported' : detectInstallSource();
 
     const decision = decideUpdateAction(target, isInteractive);
     if (decision === 'none' || target === null) return 'continue';
 
-    const installCommand = 'cd ~/.scream-code && git pull && pnpm install && pnpm -r build';
+    const installCommand = 'npm install -g scream-code@latest';
 
-    if (source === 'unsupported') {
+    if (decision === 'manual-command') {
       stdout.write(renderManualUpdateMessage(currentVersion, target));
       return 'continue';
     }
 
-    const confirmed = await promptInstall(currentVersion, target, source, installCommand);
+    const confirmed = await promptInstall(currentVersion, target, installCommand);
     if (!confirmed) return 'continue';
 
-    const installDir = join(homedir(), '.scream-code');
-
     try {
-      await installUpdate(installDir);
+      await installUpdate();
       stdout.write(renderInstallSuccessMessage(target));
       return 'exit';
     } catch (error) {

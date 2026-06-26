@@ -12,7 +12,7 @@ import {
   UPDATE_PROMPT_WARNING,
 } from '#/constant/update';
 
-import { type InstallSource, type UpdateTarget } from './types';
+import { type UpdateTarget } from './types';
 
 const CHANGELOG_URL = 'https://scream-cli.github.io/scream-code/en/release-notes/changelog.html';
 
@@ -27,7 +27,6 @@ export interface InstallPromptOptions {
   readonly currentVersion: string;
   readonly target: UpdateTarget;
   readonly installCommand: string;
-  readonly installSource: InstallSource;
   readonly input?: NodeJS.ReadStream;
   readonly output?: NodeJS.WriteStream;
 }
@@ -66,7 +65,7 @@ function renderInstallPrompt(
   const label = chalk.hex(UPDATE_PROMPT_TEXT_DIM).bold;
   const currentVersion = chalk.hex(UPDATE_PROMPT_WARNING).bold(options.currentVersion);
   const targetVersion = chalk.hex(UPDATE_PROMPT_SUCCESS).bold(options.target.version);
-  const sourceLabel = chalk.hex(UPDATE_PROMPT_PRIMARY).bold('源码安装');
+  const sourceLabel = chalk.hex(UPDATE_PROMPT_PRIMARY).bold('npm 安装');
   const command = chalk.hex(UPDATE_PROMPT_PRIMARY)(options.installCommand);
   const changelogText = chalk.hex(UPDATE_PROMPT_PRIMARY).underline(`查看更新日志：${CHANGELOG_URL}`);
   const lines = [
