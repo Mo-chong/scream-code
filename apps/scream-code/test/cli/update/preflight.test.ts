@@ -7,6 +7,8 @@ import type * as PromptModule from '#/cli/update/prompt';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import type * as RefreshModule from '#/cli/update/refresh';
 import { emptyUpdateCache, type UpdateCache } from '#/cli/update/types';
+import type * as InstallStrategyModule from '#/cli/update/install-strategy';
+
 
 const mocks = vi.hoisted(() => ({
   readUpdateCache: vi.fn(),
@@ -19,14 +21,13 @@ vi.mock('../../../src/cli/update/cache', () => ({
   readUpdateCache: mocks.readUpdateCache,
 }));
 
-vi.mock('../../../src/cli/update/install-strategy', () => ({
-  installUpdate: mocks.installUpdate,
-  INSTALL_COMMAND_STRING:
-    'cd ~/.scream-code && git pull mochong main && pnpm install && pnpm -r build',
-  MANUAL_UPDATE_MESSAGE:
-    'Scream Code 有新版本可用，自动更新失败。请手动执行：\n' +
-    '  cd ~/.scream-code && git pull mochong main && pnpm install && pnpm -r build\n',
-}));
+vi.mock('../../../src/cli/update/install-strategy', async () => {
+  const actual = await vi.importActual<typeof InstallStrategyModule>('../../../src/cli/update/install-strategy.js');
+  return {
+    ...actual,
+    installUpdate: mocks.installUpdate,
+  };
+});
 
 vi.mock('../../../src/cli/update/prompt', async () => {
   const actual = await vi.importActual<typeof PromptModule>('../../../src/cli/update/prompt.js');
