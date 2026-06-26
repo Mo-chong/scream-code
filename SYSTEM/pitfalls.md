@@ -909,3 +909,95 @@ tags: z.array(z.string()).min(1).describe('3-5 semantic tags...')
 **测试适配**：6 个测试用例补了 tags 字段；1 个确认空 tags 返回 undefined 的测试改为 `toBeUndefined()`。
 
 **教训**：后备生成从 `fullText` 提取关键词看似安全，实际产出的标签质量低（'问题' '修复' '解决' 等黑名单词反复出现）。让 LLM 直接写 tags 更好——LLM 知道什么是概念标签。tags 必填 = 强制 LLM 每写一条记忆就思考一次标签。
+
+### 上游 npm 分发改造的「策略层」防御模式
+
+**问题**：上游 LIUTod v0.7 把更新系统从 `git pull + pnpm build` 改成 `npm install -g scream-code@latest`。fork 不能直接合并——npm 装的是官方版，会覆盖 fork 的所有改动。每次 merge 时 preflight.ts/cdn.ts/source.ts 都会冲突。
+
+**根因**：fork 的核心差异（git remote、构建方式、版本检测源）直接写在上游也在改的文件里，merge 必然冲突。
+
+**解决**：创建 `install-strategy.ts`（上游不存在的文件），把 fork 所有更新逻辑集中到该文件。`preflight.ts` 只做 import 不写逻辑。
+
+**关键代码**（`apps/scream-code/src/cli/update/install-strategy.ts`）：
+```typescript
+export const INSTALL_GIT_REMOTE = 'mochong';  // fork 的 remote
+export const INSTALL_GIT_BRANCH = 'main';
+// detectInstallSource - 检测是否为源码安装
+// fetchLatestVersion - 从 GitHub Releases API 获取版本
+// installUpdate - git pull + pnpm install + pnpm -r build
+```
+
+**文档**：`SYSTEM/v0.7-upgrade-prep.md` — 完整升级评估和踩坑预测
+
+**教训**：当上游改动 fork 核心差异点时，建一个上游不存在的文件做「策略层」，把所有 fork 特有逻辑抽进去。以后 merge 时只有 import 行可能冲突，一次解决永久解决。这个文件永远只增不改，保持零冲突。`install-strategy.ts` 是 Scream Code 的专属文件，上游永远不会有。
+
+### 合并上游更新的标准操作流程 (SOP)
+
+**适用场景**：上游 LIUTod 发布 v0.8 / v0.9 / ...，要把新功能合并到 fork。
+
+**前置条件**：已经创建了 `install-strategy.ts`（策略层防御已就位）。
+
+#### 步骤
+
+```bash
+# 1. 标记当前 fork 状态（万一翻车能回滚）
+git tag fork-before-v0.8
+
+# 2. 拉取上游最新代码
+git fetch origin                  # origin 指向 LIUTod/scream-code
+
+# 3. 开临时分支做合并测试
+git checkout -b merge-v0.8 main
+git merge origin/main             # 合并上游改动
+```
+
+#### 4. 处理冲突
+
+合并后检查冲突文件。大概率只有这些文件可能冲突：
+
+| 文件 | 冲突概率 | 处理方式 |
+|------|----------|----------|
+| `install-strategy.ts` | 🔴 **永不冲突** | 上游没有这个文件，零冲突 |
+| `preflight.ts` | 🟡 可能 | 保留 `install-strategy` 的 import，放弃上游的 npm 逻辑 |
+| `cdn.ts` | 🟡 可能 | 上游可能改版本检测源，接受上游改动（不影响 fork） |
+| `source.ts` | 🟡 可能 | 上游可能改安装源检测，接受上游改动（fork 用 install-strategy） |
+| 其他文件 | 🟢 不易 | 普通功能冲突，正常解决 |
+
+**关键原则**：
+- `install-strategy.ts` **永远不动**——这是 fork 的核心策略层
+- `preflight.ts` 的 import 行必须确保引用的是 `install-strategy` 不是 `source`
+- 其他文件（`cdn.ts`、`source.ts`、`select.ts`、`cache.ts`、`refresh.ts`、`prompt.ts`）可以接受上游改动，因为 `install-strategy.ts` 才是实际生效的路径
+
+#### 5. 验证
+
+```bash
+# TypeScript 检查
+./node_modules/.bin/tsc --noEmit -p apps/scream-code/tsconfig.json
+
+# 运行更新系统测试
+./node_modules/.bin/vitest run apps/scream-code/test/cli/update/preflight.test.ts
+
+# 可选：确认 install-strategy 没有被上游文件覆盖
+grep -r "install-strategy" apps/scream-code/src/cli/update/preflight.ts
+```
+
+#### 6. 合入主分支
+
+```bash
+git checkout main
+git merge merge-v0.8
+git branch -d merge-v0.8
+```
+
+#### 常见问题
+
+**Q: 上游改了 preflight.ts 里 installUpdate 函数名怎么办？**
+A: 没关系。`install-strategy.ts` 导出的 `installUpdate` 是你的版本，上游改的是上游自己的代码。你只需要确认 `preflight.ts` 的 import 来源没被冲掉。
+
+**Q: 上游删了 cdn.ts 改用 npm view 怎么办？**
+A: `install-strategy.ts` 里有自己的 `fetchLatestVersion()`，不受影响。`cdn.ts` 被删了也没关系——`preflight.ts` 用的 `refreshUpdateCache` 来自 `refresh.ts`，它调的是 npm 还是 GitHub API 不影响你的策略层。
+
+**Q: 上游改了 detectInstallSource 的逻辑怎么办？**
+A: `preflight.ts` 用的是 `install-strategy.ts` 的 `detectInstallSource`，上游的改动在 `source.ts` 里，不会影响你。你可以接受上游的 `source.ts` 改动或直接删除它。
+
+

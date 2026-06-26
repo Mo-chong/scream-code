@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,7 +5,12 @@ import { readUpdateCache } from './cache';
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
 import { refreshUpdateCache } from './refresh';
 import { selectUpdateTarget } from './select';
-import { detectInstallSource } from './source';
+import {
+  INSTALL_COMMAND_STRING,
+  MANUAL_UPDATE_MESSAGE,
+  detectInstallSource,
+  installUpdate,
+} from './install-strategy';
 import {
   type InstallSource,
   type UpdateDecision,
@@ -26,13 +30,8 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget): string {
-  return (
-    `Scream Code 有新版本可用 ` +
-    `(${currentVersion} -> ${target.version})。\n` +
-    `自动更新失败，请手动执行：\n` +
-    `  cd ~/.scream-code && ./install.sh --upgrade\n`
-  );
+function renderManualUpdateMessage(_currentVersion: string, _target: UpdateTarget): string {
+  return MANUAL_UPDATE_MESSAGE;
 }
 
 function renderInstallSuccessMessage(target: UpdateTarget): string {
@@ -56,33 +55,6 @@ async function promptInstall(
     installSource: source,
   };
   return promptForInstallConfirmation(options);
-}
-
-async function installUpdate(installDir: string): Promise<void> {
-  const commands: readonly { readonly cmd: string; readonly args: readonly string[]; readonly cwd?: string }[] = [
-    { cmd: 'git', args: ['pull', 'origin', 'main'], cwd: installDir },
-    { cmd: 'pnpm', args: ['install'], cwd: installDir },
-    { cmd: 'pnpm', args: ['-r', 'build'], cwd: installDir },
-  ];
-
-  for (const { cmd, args, cwd } of commands) {
-    let resolve!: () => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<void>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    const child = spawn(cmd, args, { cwd, stdio: 'inherit' });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`${cmd} 失败（exit ${code ?? signal}）`));
-    });
-    await promise;
-  }
 }
 
 export function decideUpdateAction(
@@ -115,7 +87,7 @@ export async function runUpdatePreflight(
     const decision = decideUpdateAction(target, isInteractive);
     if (decision === 'none' || target === null) return 'continue';
 
-    const installCommand = 'cd ~/.scream-code && git pull && pnpm install && pnpm -r build';
+    const installCommand = INSTALL_COMMAND_STRING;
 
     if (source === 'unsupported') {
       stdout.write(renderManualUpdateMessage(currentVersion, target));
