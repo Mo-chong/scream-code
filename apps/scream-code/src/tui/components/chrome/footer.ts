@@ -347,6 +347,8 @@ export class FooterComponent implements Component {
 
     // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
     const left: string[] = [];
+    if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
+    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
     if (state.planMode) left.push(chalk.hex(colors.planMode).bold('plan'));
     if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold('wolfpack'));
     if (state.loopModeEnabled) {

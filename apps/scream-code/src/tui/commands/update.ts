@@ -51,7 +51,7 @@ async function runInstallStep(
   timeoutMs: number = INSTALL_TIMEOUT_MS,
 ): Promise<StepResult> {
   return new Promise<StepResult>((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: 'pipe', shell: true });
+    const child = spawn(cmd, args, { cwd, stdio: 'pipe', shell: process.platform === 'win32' });
     let stderr = '';
     let settled = false;
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });

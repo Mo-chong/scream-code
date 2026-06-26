@@ -56,7 +56,7 @@ async function promptInstall(
 
 async function installUpdate(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn('npm', ['install', '-g', 'scream-code@latest'], { stdio: 'inherit', shell: true });
+    const child = spawn('npm', ['install', '-g', 'scream-code@latest'], { stdio: 'inherit', shell: process.platform === 'win32' });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('npm install 超时'));

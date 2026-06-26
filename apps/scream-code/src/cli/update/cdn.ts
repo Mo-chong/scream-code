@@ -22,7 +22,7 @@ export async function fetchLatestVersionFromNpm(
   const { stdout } = await execAsync(
     'npm',
     ['view', 'scream-code', 'version'],
-    { timeout: NPM_TIMEOUT_MS, maxBuffer: 1024, shell: true },
+    { timeout: NPM_TIMEOUT_MS, maxBuffer: 1024, shell: process.platform === 'win32' },
   );
   const raw = stdout.trim();
   if (valid(raw) === null) {

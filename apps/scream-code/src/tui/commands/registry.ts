@@ -24,29 +24,29 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'loop',
-    aliases: [],
-    description: '循环模式',
-    priority: 122,
-    availability: 'always',
-  },
-  {
     name: 'sessions',
     aliases: ['resume'],
     description: '浏览并恢复会话',
-    priority: 121,
+    priority: 122,
   },
   {
     name: 'goal',
     aliases: ['goaloff'],
     description: '查看/管理自动目标',
-    priority: 121,
+    priority: 122,
     availability: (args) => {
       const trimmed = args.trim();
       return trimmed === '' || trimmed === 'status' || trimmed === 'pause' || trimmed === 'off'
         ? 'always'
         : 'idle-only';
     },
+  },
+  {
+    name: 'loop',
+    aliases: [],
+    description: '循环模式（无状态重试，配 --verify 验证结果）',
+    priority: 121,
+    availability: 'always',
   },
 
   // ── 记忆 / 会话 ──
