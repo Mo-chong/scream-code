@@ -1,4 +1,4 @@
-import { extractKeywords } from './scoring.js';
+// extractKeywords no longer needed — generateTags is deprecated
 
 /**
  * Minimal store interface used by processTags for embedding-based tag
@@ -39,56 +39,85 @@ export function normalizeTags(tags: unknown, max = 5): string[] {
   return result;
 }
 
+/** @deprecated Algorithm-based tag generation is harmful. Kept as export for compat, returns []. */
+export function generateTags(_text: string, _max = 5): string[] {
+  return [];
+}
+
 /**
- * Generate a small set of semantic tags from free-form text.
- * Falls back to keyword extraction when the caller does not supply tags.
+ * Smart tag merging: concept tags (>=4 chars) take priority over short tags.
+ * This prevents algorithm noise from crowding out meaningful LLM-written tags.
+ *
+ * Unlike normalizeTags which is a dumb head-chopper, smartTags separates
+ * tags by quality tier and preserves concept tags first.
  */
-export function generateTags(text: string, max = 5): string[] {
-  const keywords = extractKeywords(text);
-  return normalizeTags(keywords, max);
+export function smartTags(
+  tags: string[],
+  options?: {
+    maxConcepts?: number;
+    maxTotal?: number;
+    existingCorpus?: string[];
+  },
+): string[] {
+  const { maxConcepts = 10, maxTotal = 20, existingCorpus } = options ?? {};
+
+  // Phase 1: filter stopwords/blacklist, separate concepts from shorts
+  const concepts: string[] = [];
+  const shorts: string[] = [];
+
+  for (const tag of tags) {
+    if (typeof tag !== 'string') continue;
+    const t = tag.trim().toLowerCase();
+    if (t.length === 0) continue;
+    if (TAG_CONFIG.BLACKLIST.has(t)) continue;
+    // We don't filter by STOP_WORDS here — tags are LLM-written concepts, not raw text tokens
+    if (t.length >= 4) concepts.push(t);
+    else shorts.push(t);
+  }
+
+  // Phase 2: synonym merge against existing corpus (only for concepts)
+  const merged = (existingCorpus?.length ?? 0) > 0
+    ? deduplicateAgainstCorpus(concepts, existingCorpus!)
+    : concepts;
+
+  // Phase 3: deduplicate and assemble
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const t of merged) {
+    if (result.length >= maxConcepts) break;
+    if (!seen.has(t)) { seen.add(t); result.push(t); }
+  }
+  for (const t of shorts) {
+    if (result.length >= maxTotal) break;
+    if (!seen.has(t)) { seen.add(t); result.push(t); }
+  }
+
+  return result;
 }
 
 /**
  * Unified tag processing entry point.
  * All tag paths (MemoryWrite, Exit Extraction, Compaction, Dream) call this.
  *
- * Phases:
- *   0: normalizes + fallback generateTags
- *   1: embedding recommendation when store available
- *   2: dynamic budget via computeTagBudget
- *   3: synonym merging + blacklist filter
- *   4+: (deviation chain handled externally in store.ts)
+ * Steps:
+ *   1: basic sanitize via normalizeTags (lowercase, trim, dedup)
+ *   2: if empty after sanitize → return [] (no algorithm fallback)
+ *   3: bilingual expansion — split "A/B" tags into "A" and "B"
+ *   4: smart merge via smartTags — concept tags (>=4 chars) first, shorts second
+ *
+ * Tags come ONLY from LLM input. Algorithm-generated tags are harmful and removed.
  */
 export async function processTags(
   rawTags: unknown,
   context: ProcessTagsContext = {},
 ): Promise<string[]> {
-  // Use MAX_TAGS_ABSOLUTE as the intermediate cap so the dynamic budget (Phase 2)
-  // can actually expand beyond the default max of 5.
-  let tags = normalizeTags(rawTags, TAG_CONFIG.MAX_TAGS_ABSOLUTE);
+  // Step 1: basic sanitize (lowercase, trim, dedup) — use large cap, smartTags handles real limiting
+  const sanitized = normalizeTags(rawTags, 999);
 
-  // Fallback: generate or recommend tags when LLM didn't produce any
-  if (tags.length === 0 && context.fullText) {
-    if (context.store) {
-      tags = await recommendTagsFromEmbedding(context.fullText, context.store);
-    } else {
-      tags = generateTags(context.fullText);
-    }
-  }
-
-  // Phase 3: synonym merging — deduplicate against existing corpus
-  if (context.existingTags && context.existingTags.length > 0) {
-    tags = deduplicateAgainstCorpus(tags, context.existingTags);
-  }
-
-  // Phase 3: blacklist filter
-  tags = tags.filter(t => !TAG_CONFIG.BLACKLIST.has(t));
-
-  // Phase 2: dynamic budget — compute max tag count
-  if (context.fullText) {
-    const existingCount = context.existingTags?.length ?? 0;
-    const budget = computeTagBudget(context.fullText, existingCount);
-    tags = tags.slice(0, budget);
+  // Fallback: LLM didn't provide tags — return empty. Algorithm-generated tags are harmful.
+  if (sanitized.length === 0) {
+    return [];
   }
 
   // Phase 7: bilingual expansion — split "A/B" tags into "A" and "B"
@@ -97,7 +126,7 @@ export async function processTags(
   // both a Chinese query ("容量守卫") and an English query ("capacity-guard")
   // will score on this memo's tags.
   const expanded: string[] = [];
-  for (const tag of tags) {
+  for (const tag of sanitized) {
     const slashIdx = tag.indexOf('/');
     if (slashIdx > 0 && slashIdx < tag.length - 1) {
       const left = tag.slice(0, slashIdx).trim();
@@ -108,15 +137,20 @@ export async function processTags(
       expanded.push(tag);
     }
   }
-  tags = normalizeTags(expanded, TAG_CONFIG.MAX_TAGS_ABSOLUTE);
 
-  return tags;
+  // Step 3: smart merge — concept tags first, shorts second
+  const merged = smartTags(expanded, {
+    existingCorpus: context.existingTags,
+  });
+
+  // Step 4: strip reserved system tags — these must ONLY be assigned by human
+  return merged.filter((t) => !RESERVED_TAGS.has(t));
 }
 
 /**
  * Recommend tags by finding semantically similar memos via embedding
- * and collecting their most common tags. Falls back to generateTags
- * when the embedding engine is unavailable.
+ * and collecting their most common tags. No algorithm fallback —
+ * returns [] when embedding engine is unavailable.
  */
 export async function recommendTagsFromEmbedding(
   text: string,
@@ -129,11 +163,11 @@ export async function recommendTagsFromEmbedding(
   // full EmbeddingEngine which extends it.
   const engine = store.getEmbeddingEngine() as { available: boolean; embedBatch?(texts: string[]): Promise<Float32Array[] | null>; cosineSimilarity?(a: Float32Array, b: Float32Array): number } | undefined;
   if (!engine?.available || !engine.embedBatch || !engine.cosineSimilarity) {
-    return generateTags(text, max);
+    return [];  // No embedding engine: LLM must provide tags directly
   }
 
   const vecs = await engine.embedBatch([text]);
-  if (!vecs || vecs.length === 0) return generateTags(text, max);
+  if (!vecs || vecs.length === 0) return [];
   const queryVec = vecs[0]!;
 
   // This is a placeholder for the embedding-based tag recommendation.
@@ -144,10 +178,24 @@ export async function recommendTagsFromEmbedding(
   // 4. Compare queryVec against each centroid via cosine similarity
   // 5. Return top-3 matching tags
   //
-  // For now, fall back to keyword-based generation to keep the change
-  // self-contained without adding a store.read() dependency here.
-  return generateTags(text, max);
+  // For now, return empty to avoid LLM tag bypass.
+  // Phase 1+ can implement full centroid-comparison when store.read() is available.
+  return [];
 }
+
+/**
+ * Reserved system status tags that must ONLY be assigned by human
+ * (manual MemoryWrite / direct DB edit).
+ *
+ * All automated pipelines (extraction, consolidation, Dream, compaction)
+ * MUST strip these from their output. They encode semantic state that
+ * only a human operator can correctly assign:
+ *   - baohu  (保护):  immunizes from Dream consolidation
+ *   - chundu (纯度):  behavior-rule injection tag + demote immunity
+ *   - ding   (钉):    pin a memo (formerly demote immunity)
+ *   - yongjiu(永久):  long-term preservation
+ */
+export const RESERVED_TAGS = new Set(['baohu', 'chundu', 'ding', 'yongjiu']);
 
 // ── Phase 2: TAG_CONFIG ────────────────────────────────────────────
 
@@ -159,12 +207,13 @@ export const TAG_CONFIG = {
   BLACKLIST: new Set([
     '问题', '解决', '完成', 'none',
     'bug', 'fix', '修复', '修复了', '处理',
+    '测试', 'test', '测试了',
   ]),
 
   // Dynamic budget (Phase 2)
-  MAX_TAGS_DEFAULT: 5,
-  MIN_TAGS: 2,
-  MAX_TAGS_ABSOLUTE: 8,
+  MAX_TAGS_DEFAULT: 5,        // Used by normalizeTags (edit tool, archive)
+  MIN_TAGS: 2,                 // Only used by computeTagBudget (deprecated)
+  MAX_TAGS_ABSOLUTE: 8,        // Legacy — no longer used by processTags
   TAG_BUDGET_RICHNESS_LENGTH: 200,
   TAG_BUDGET_SCARCITY_FACTOR: 0.02,
 
@@ -183,10 +232,7 @@ export const TAG_CONFIG = {
 
 // ── Phase 2: Dynamic Tag Budget ─────────────────────────────────────
 
-/**
- * Compute a dynamic tag budget based on text richness and existing
- * distinct tag count. Prevents both over-tagging and under-tagging.
- */
+/** @deprecated Smart tags handles budget internally. Kept for external callers. */
 export function computeTagBudget(text: string, existingDistinctCount: number): number {
   const textLen = text.length;
   const textRichness = Math.min(1, textLen / TAG_CONFIG.TAG_BUDGET_RICHNESS_LENGTH);

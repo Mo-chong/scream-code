@@ -392,12 +392,11 @@ Working on auth module
     expect(memos[0]!.tags).toEqual(['react', 'auth']);
   });
 
-  it('falls back to generated tags when tags field is missing', async () => {
+  it('produces undefined tags when tags field is missing (algorithm tags removed)', async () => {
     const text = '```memory-memo\n{"userNeed": "test", "approach": "x", "outcome": "完成"}\n```';
     const memos = await parseMemoryMemos(text);
-    // processTags generates fallback tags from userNeed + approach
-    expect(Array.isArray(memos[0]!.tags)).toBe(true);
-    expect(memos[0]!.tags!.length).toBeGreaterThanOrEqual(1);
+    // processTags no longer generates fallback tags — see models.ts normalizedTags()
+    expect(memos[0]!.tags).toBeUndefined();
   });
 });
 

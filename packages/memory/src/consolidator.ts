@@ -2,7 +2,32 @@ import type { MemoryMemo, MemoryMemoSummary } from './models.js';
 import { createMemoryMemo, toSummary } from './models.js';
 import type { MemoryMemoStore } from './store.js';
 import { STOP_WORDS, computeKeywordSimilarity } from './scoring.js';
-import { normalizeTags, processTags, TAG_CONFIG } from './tags.js';
+import { normalizeTags, processTags, RESERVED_TAGS, TAG_CONFIG } from './tags.js';
+
+/**
+ * Merge tags from multiple memos with priority for consensus tags.
+ * Tags appearing in more memos rank higher.
+ */
+export function unionWithPriority(
+  tagArrays: string[][],
+  maxTags: number = 12,
+): string[] {
+  const freq = new Map<string, number>();
+  for (const arr of tagArrays) {
+    const seen = new Set<string>();
+    for (const tag of arr) {
+      const normalized = tag.trim().toLowerCase();
+      if (normalized.length === 0 || seen.has(normalized)) continue;
+      seen.add(normalized);
+      freq.set(normalized, (freq.get(normalized) ?? 0) + 1);
+    }
+  }
+  return [...freq.entries()]
+    .toSorted((a, b) => b[1] - a[1])
+    .slice(0, maxTags)
+    .map(([tag]) => tag)
+    .filter((t) => !RESERVED_TAGS.has(t));
+}
 
 export interface DuplicateGroup {
   /** Memos identified as duplicates/similar. */
@@ -50,7 +75,7 @@ export interface ConsolidationPlan {
 }
 
 /** Tags that immunize a memo from all consolidation (merge, delete, archive). */
-const PROTECTED_TAGS = ['baohu', 'chundu', 'yongjiu'];
+const PROTECTED_TAGS = ['baohu', 'chundu', 'ding', 'yongjiu'];
 
 const SIMILARITY_THRESHOLD = 0.45;
 const STALE_DAYS = 30;
@@ -129,7 +154,7 @@ export async function applyConsolidation(
         outcome: '已完成',
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
-        tags: normalizeTags(plan.resolved.flatMap((m) => m.tags ?? [])),
+        tags: await processTags(plan.resolved.flatMap((m) => m.tags ?? [])),
         extractionSource: 'compaction',
       });
       await store.append(archive);
@@ -153,7 +178,7 @@ export async function applyConsolidation(
         outcome: '已归档',
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
-        tags: normalizeTags(plan.stale.flatMap((m) => m.tags ?? [])),
+        tags: await processTags(plan.stale.flatMap((m) => m.tags ?? [])),
         extractionSource: 'compaction',
       });
       await store.append(archive);
@@ -186,10 +211,10 @@ export async function applyConsolidation(
     const newest = group.memos.reduce((a, b) =>
       a.recordedAt > b.recordedAt ? a : b,
     );
-    const flatTags = group.memos.flatMap((m) => m.tags ?? []);
-    const mergedTags = await processTags(
-      flatTags.length > 0 ? flatTags : undefined,
-      { existingTags: flatTags.length > 0 ? [...new Set(flatTags)] : undefined },
+    // Union with priority: consensus tags across duplicates rank highest
+    const mergedTags = unionWithPriority(
+      group.memos.map((m) => m.tags ?? []),
+      12,
     );
     const merged = createMemoryMemo({
       sourceSessionId: newest.sourceSessionId,

@@ -43,6 +43,7 @@ describe('MemoryWriteTool', () => {
       userNeed: 'Fix auth',
       approach: 'Add refresh logic',
       outcome: '完成',
+      tags: ['auth'],
     }).success).toBe(true);
     expect(MemoryWriteInputSchema.safeParse({}).success).toBe(false);
     expect(tool.parameters).toMatchObject({
@@ -109,7 +110,7 @@ describe('MemoryWriteTool', () => {
     expect(appended!.tags).toEqual(['auth', 'redis', 'jwt']);
   });
 
-  it('generates fallback tags when none are provided', async () => {
+  it('passes provided tags through processTags', async () => {
     let appended: { tags?: string[] } | undefined;
 
     const { agent } = makeAgent({
@@ -126,6 +127,7 @@ describe('MemoryWriteTool', () => {
         userNeed: 'Configure TypeScript strict mode',
         approach: 'Update tsconfig and fix type errors',
         outcome: '完成',
+        tags: ['tsconfig', 'typescript'],
       },
       signal,
     });
@@ -133,7 +135,6 @@ describe('MemoryWriteTool', () => {
     expect(appended).toBeDefined();
     expect(appended!.tags).toBeDefined();
     expect(appended!.tags!.length).toBeGreaterThan(0);
-    expect(appended!.tags!.length).toBeLessThanOrEqual(5);
   });
 
   it('defaults optional fields to "none"', async () => {
@@ -154,6 +155,7 @@ describe('MemoryWriteTool', () => {
         userNeed: 'Simple task',
         approach: 'Simple approach',
         outcome: '完成',
+        tags: ['simple'],
       },
       signal,
     });
@@ -184,6 +186,7 @@ describe('MemoryWriteTool', () => {
         outcome: '完成',
         whatFailed: '   ',
         whatWorked: '',
+        tags: ['task'],
       },
       signal,
     });
@@ -204,6 +207,7 @@ describe('MemoryWriteTool', () => {
         userNeed: 'Anything',
         approach: 'Anything',
         outcome: '完成',
+        tags: ['anything'],
       },
       signal,
     });
@@ -229,6 +233,7 @@ describe('MemoryWriteTool', () => {
         userNeed: 'No session',
         approach: 'Nothing',
         outcome: '失败',
+        tags: ['no-session'],
       },
       signal,
     });
@@ -243,6 +248,7 @@ describe('MemoryWriteTool', () => {
       userNeed: 'x',
       approach: 'y',
       outcome: 'z',
+      tags: ['test'],
     });
     expect(execution.isError).toBeFalsy();
     if (execution.isError === true) throw new Error('expected runnable execution');

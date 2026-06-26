@@ -30,7 +30,7 @@ export const MemoryWriteInputSchema = z.object({
     .describe('What ultimately worked — key actions that led to success. Use "none" if nothing notable.'),
   tags: z
     .array(z.string())
-    .optional()
+    .min(1)
     .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type. '
       + 'MUST match the user\'s conversation language. '
       + 'For Chinese conversations: each concept should have both Chinese and English forms '
@@ -75,9 +75,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
         const whatFailed = args.whatFailed?.trim();
         const whatWorked = args.whatWorked?.trim();
         const tags = await processTags(
-          args.tags !== undefined && args.tags.length > 0
-            ? args.tags
-            : undefined,
+          args.tags ?? [],
           { fullText: `${args.userNeed} ${args.approach}` },
         );
 
