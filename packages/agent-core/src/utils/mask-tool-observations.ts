@@ -28,7 +28,7 @@ export function maskToolObservations(
 
   const keep = new Set(indices.slice(cutoff));
   return messages.map((msg, i) => {
-    if (msg.role !== 'tool' || keep.has(i)) return msg;
+    if (msg === undefined || msg.role !== 'tool' || keep.has(i)) return msg;
     return { ...msg, content: [{ type: 'text' as const, text: MASK_TEXT }] };
   });
 }
