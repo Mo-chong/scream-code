@@ -1,21 +1,25 @@
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { detectInstallSource } from '#/cli/update/source';
 
+import { SCREAM_CODE_DATA_DIR_NAME } from '#/constant/app';
+
 describe('detectInstallSource', () => {
   it('returns source when the install directory contains a .git directory', () => {
+    const installDir = '/home/user/.scream-code';
     expect(
       detectInstallSource({
-        getInstallDir: () => '/home/user/.scream-code',
-        existsSync: (path: string) => path === '/home/user/.scream-code/.git',
+        getInstallDir: () => installDir,
+        existsSync: (path: string) => path === join(installDir, '.git'),
       }),
     ).toBe('source');
   });
 
   it('returns source for the legacy ~/.scream-code path even when SCREAM_CODE_HOME points elsewhere', () => {
-    const legacyGitDir = `${homedir()}/.scream-code/.git`;
+    const legacyGitDir = join(homedir(), SCREAM_CODE_DATA_DIR_NAME, '.git');
 
     expect(
       detectInstallSource({
@@ -35,10 +39,11 @@ describe('detectInstallSource', () => {
   });
 
   it('returns unsupported when only the install dir exists without .git', () => {
+    const installDir = '/home/user/.scream-code';
     expect(
       detectInstallSource({
-        getInstallDir: () => '/home/user/.scream-code',
-        existsSync: (path: string) => path === '/home/user/.scream-code',
+        getInstallDir: () => installDir,
+        existsSync: (path: string) => path === installDir,
       }),
     ).toBe('unsupported');
   });
