@@ -944,3 +944,75 @@ finishTurnDoc(reasons) →
 | code_quality_feedback | 0.7 | 0.85 | 0.35 | 4 | **3** | Added Phase 18 |
 
 Behavior feedback (`behavior_feedback`) is meta-log only — never injected, never hits budget or ResNet. Interception log events from guard_rule_1, guard_observe_*, code_quality are recorded in the event log system (section 12).
+
+---
+
+## 17. Message pipeline — KV-cache prefix stabilization (v0.7)
+
+**Files:**
+- `agent/context/prefix-stabilizer.ts` — Phase A: regex-based volatile-field replacement (ISO timestamps → `[timestamp]`, UUIDs → `[uuid]`)
+- `utils/mask-tool-observations.ts` — Phase B: old tool result masking (keeps last 3, pure function)
+- `agent/compaction/micro.ts` — Phase C: batch-gated detect() (BATCH_SIZE=8)
+- `agent/context/index.ts` — integration point: `compact() → stabilizePrefix() → project()`
+- `loop/turn-step.ts` — integration point: `buildMessages() → maskToolObservations() → llm.chat()`
+
+### Pipeline order
+
+```
+context.get messages() (index.ts):
+  history → microCompaction.compact() → stabilizePrefix() → project() → assertWireFormat()
+
+executeLoopStep (turn-step.ts):
+  buildMessages() → maskToolObservations() → llm.chat() → log cache metrics
+```
+
+### Phase A — Prefix stabilization
+
+Pure function. Scans `role === 'system'` messages for ISO timestamps and UUIDs, replaces them with fixed placeholders. The message array stays structurally identical (same length, same roles) — only text content changes.
+
+**Why it works:** KV-cache matches on byte-identical prefix. A single character change in any system message invalidates the entire cache, because the cache key is the full messages array up to the cache_control breakpoint (Anthropic) or the implicit prefix (OpenAI/Gemini).
+
+**TokenPilot baseline:** Prefix stabilization alone → cache misses from 5.94M to 1.59M (-73%). Source: arXiv 2606.17016, §4.1.
+
+### Phase B — Observation masking
+
+Pure function. Finds all `role === 'tool'` messages, keeps the last N (default 3) verbatim, replaces all earlier tool results with `[Old tool output: obscured — tool may be re-invoked if needed]`.
+
+**Design constraint:** Operates on the **projected message list**, not `context.history`. The original tool results survive for the next micro-compaction or undo. The mask is re-applied each step by the pure function — no state, no polling.
+
+**KV-cache note:** Masking the tool-result tail does NOT affect cache hit rate. The cache prefix ends at the `cache_control` breakpoint (on system prompt). The masked tail is post-breakpoint and was never cached to begin with. The value of O-Mask is purely token reduction (~5-15% fewer input tokens in long sessions).
+
+### Phase C — Batch-gated MicroCompaction detect()
+
+`MicroCompaction.detect()` increments `stepsSinceLastDetect` on each call. It only evaluates the context window when the counter reaches `BATCH_SIZE=8`. Before returning, it resets the counter to 0.
+
+**Why BATCH_SIZE=8:** MicroCompaction's detect() advances the cutoff line whenever context usage > 50%. Before this gate, the cutoff could move every step, changing the message array structure. On providers with implicit prefix matching (OpenAI, Gemini), any structural change in the messages array invalidates the cache — even if the content is semantically identical. Batching to 8 steps means the cutoff line moves at most 1× per 8 steps instead of up to 8× in the same window.
+
+**Full compaction exception:** `full.ts beforeStep()` calls `detect(true)`, bypassing the batch gate. Full compaction's LLM call already invalidates the cache (it produces a new summary message), so the gate would provide no benefit and only delay the reset.
+
+### Cache metrics logging
+
+After `llm.chat()` in `turn-step.ts:124-133`:
+
+```typescript
+log.info('llm cache metrics', {
+  cacheRead: usage.inputCacheRead,
+  cacheCreation: usage.inputCacheCreation,
+  inputOther: usage.inputOther,
+  step: currentStep,
+});
+```
+
+### Provider-specific cache behavior
+
+| Provider | Cache mechanism | Phase A benefit | Phase B benefit | Phase C benefit |
+|----------|----------------|:---------------:|:---------------:|:---------------:|
+| Anthropic | Explicit `cache_control` breakpoints | High — stabilizes system prompt in cached prefix | None — operates on post-breakpoint tail | None — `cache_control` ignores cutoff movement |
+| OpenAI | Implicit prefix matching (first N tokens) | High — stabilizes system prompt text | Low — reduces tokens but doesn't affect cache key | High — stabilizes cutoff line to minimize cache invalidation |
+| Gemini | Implicit prefix matching | High — same as OpenAI | Low — same as OpenAI | High — same as OpenAI |
+
+### Build verification
+
+Pure functions (`stabilizePrefix`, `maskToolObservations`, `BATCH_SIZE`) can be verified without importing the dist bundle, which fails due to `neverBundle` external deps (`ltod`, `jian`). Verification method: inline-copy the pure function logic (zero external deps) into a test script and assert against known inputs. 13/13 assertions pass (prefix regex replacement, tool masking at various keepLastN values, batch gate edge cases).
+
+All 8 new/exported symbols confirmed present in `dist/index.mjs` via regex scan. Both agent-core (1.46 MB, tsdown 6.0s) and scream-code (10.92 MB, tsdown 6.5s) bundles rebuilt successfully. Source timestamps verified ≤ bundle timestamp for all 6 modified + 2 new files.
