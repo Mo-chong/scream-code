@@ -17,6 +17,7 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
 import WRITE_DESCRIPTION from './write.md';
 
@@ -90,6 +91,19 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       return { isError: true, output: parentError };
     }
 
+    const contentBlocks = scanConflictLines(args.content.split('\n'));
+    if (contentBlocks.length > 0) {
+      const blockList = contentBlocks
+        .map((b) => `lines ${String(b.startLine)}-${String(b.endLine)}`)
+        .join(', ');
+      return {
+        isError: true,
+        output:
+          `Content contains merge conflict markers (${blockList}). ` +
+          'Resolve the conflict before writing. Merge conflict markers (<<<<<<< / ======= / >>>>>>>) indicate an unresolved merge.',
+      };
+    }
+
     try {
       const mode = args.mode ?? 'overwrite';
       if (mode === 'append') {
@@ -101,10 +115,9 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
-      const notice = await this.appendDiagnostics(safePath);
-      return {
-        output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}${notice}`,
-      };
+      const { notice, hasErrors } = await this.appendDiagnostics(safePath);
+      const output = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}${notice}`;
+      return hasErrors ? { isError: true, output } : { output };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'ENOENT') {
@@ -147,7 +160,9 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     return undefined;
   }
 
-  private async appendDiagnostics(safePath: string): Promise<string> {
+  private async appendDiagnostics(
+    safePath: string,
+  ): Promise<{ notice: string; hasErrors: boolean }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
@@ -156,6 +171,9 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     );
     const notice = formatDiagnosticsNotice(result);
     const hint = formatDiagnosticsHint(result);
-    return [notice, hint].filter((s) => s.length > 0).join('');
+    return {
+      notice: [notice, hint].filter((s) => s.length > 0).join(''),
+      hasErrors: result.hasErrors,
+    };
   }
 }

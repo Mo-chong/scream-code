@@ -18,6 +18,7 @@
  *   src/main.ts · 51 lines
  *   src/cli.ts · reading
  *   src/missing.ts · failed
+ *   src/conflict.ts · 12 lines ⚠ conflict
  */
 
 import type { TUI } from '@earendil-works/pi-tui';
@@ -30,6 +31,9 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallComponent, ToolCallReadSnapshot } from './tool-call';
 
 const THROTTLE_MS = 200;
+// Column-0 git merge conflict markers. Read's output prefixes each line
+// with `NNN\t` so we strip that before scanning for markers at column 0.
+const CONFLICT_MARKER_RE = /^(<<<<<<<|=======|>>>>>>>)/;
 
 interface ReadEntry {
   readonly toolCallId: string;
@@ -40,6 +44,17 @@ export interface DirectResult {
   readonly filePath: string;
   readonly lines: number;
   readonly failed: boolean;
+  readonly hasConflicts?: boolean;
+}
+
+function detectConflictMarkers(contentLines: readonly string[]): boolean {
+  for (const raw of contentLines) {
+    // Strip the `NNN\t` line-number prefix that Read attaches.
+    const tabIdx = raw.indexOf('\t');
+    const line = tabIdx >= 0 ? raw.slice(tabIdx + 1) : raw;
+    if (CONFLICT_MARKER_RE.test(line)) return true;
+  }
+  return false;
 }
 
 export function parseReadGroupOutput(output: string): DirectResult[] {
@@ -68,7 +83,8 @@ export function parseReadGroupOutput(output: string): DirectResult[] {
         }
       }
     }
-    results.push({ filePath: path, lines: lineCount, failed: false });
+    const hasConflicts = detectConflictMarkers(contentLines);
+    results.push({ filePath: path, lines: lineCount, failed: false, hasConflicts });
   };
 
   for (const line of lines) {
@@ -267,6 +283,9 @@ export class ReadGroupComponent extends Container {
       tail = chalk.hex(colors.error)(' · 失败');
     } else {
       tail = dim(` · ${String(result.lines)} 行`);
+      if (result.hasConflicts) {
+        tail = `${tail}${chalk.hex(colors.warning)(' ⚠ 冲突')}`;
+      }
     }
     return `  ${branch} ${pathPart}${tail}`;
   }

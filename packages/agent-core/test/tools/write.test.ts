@@ -1,3 +1,5 @@
+import type { LspDiagnostic } from '../../src/lsp/client';
+import type { LspRegistry } from '../../src/lsp/registry';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type WriteInput, WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
@@ -356,5 +358,131 @@ describe('WriteTool', () => {
 
     expect(result.isError).toBeFalsy();
     expect(writeText).toHaveBeenCalledWith('/workspace-sneaky/file.txt', 'content');
+  });
+
+  it('refuses to overwrite with content containing merge conflict markers', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(createFakeJian({ writeText }), PERMISSIVE_WORKSPACE);
+
+    const content = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+
+    const result = await executeTool(tool, context({ path: '/tmp/conflict.ts', content }));
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('merge conflict markers');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('refuses to append content containing merge conflict markers', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(createFakeJian({ writeText }), PERMISSIVE_WORKSPACE);
+
+    const content = [
+      '// old content',
+      '<<<<<<< HEAD',
+      '  old code',
+      '=======',
+      '  new code',
+      '>>>>>>> branch',
+    ].join('\n');
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/conflict.ts', content, mode: 'append' }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('merge conflict markers');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('allows writing content without conflict markers', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(createFakeJian({ writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/clean.ts', content: 'function foo() { return 1; }\n' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalled();
+  });
+
+  it('marks isError when LSP reports error-severity diagnostics after write', async () => {
+    const errorDiag: LspDiagnostic = {
+      range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+      severity: 1,
+      message: 'Type error',
+    };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnostics: vi.fn().mockResolvedValue([errorDiag]),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(
+      createFakeJian({ writeText, readText: vi.fn().mockResolvedValue('content') }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/bad.ts', content: 'const x: number = "bad";\n' }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('Wrote');
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Type error');
+  });
+
+  it('does not mark isError when LSP reports only warnings after write', async () => {
+    const warningDiag: LspDiagnostic = {
+      range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } },
+      severity: 2,
+      message: 'Unused variable',
+    };
+    const registry = {
+      getClient: vi.fn().mockResolvedValue({
+        didOpen: vi.fn(),
+        didChange: vi.fn(),
+        diagnostics: vi.fn().mockResolvedValue([warningDiag]),
+      }),
+      languageIdForPath: vi.fn().mockReturnValue('typescript'),
+      commandForPath: vi.fn().mockReturnValue(['typescript-language-server', '--stdio']),
+      stopAll: vi.fn(),
+    } as unknown as LspRegistry;
+
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(
+      createFakeJian({ writeText, readText: vi.fn().mockResolvedValue('content') }),
+      PERMISSIVE_WORKSPACE,
+      registry,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/a.ts', content: 'const x = 1;\n' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Unused variable');
   });
 });

@@ -1,7 +1,7 @@
 import type { Jian } from '@scream-code/jian';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ReadGroupTool } from '../../src/tools/builtin/file/read-group';
+import { ReadGroupTool, ReadGroupInputSchema } from '../../src/tools/builtin/file/read-group';
 import type { ReadGroupInput } from '../../src/tools/builtin/file/read-group';
 import { createFakeJian } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
@@ -187,5 +187,124 @@ describe('ReadGroupTool', () => {
     expect(output).toContain('--- /workspace/locked.ts ---');
     expect(output).toContain('[ERROR]');
     expect(result.isError).toBe(true);
+  });
+
+  it('appends conflict-marker footer when a file has merge conflicts', async () => {
+    const conflictContent = [
+      'function foo() {',
+      '<<<<<<< HEAD',
+      '  return 1;',
+      '=======',
+      '  return 2;',
+      '>>>>>>> branch',
+      '}',
+    ].join('\n');
+    const cleanContent = 'function bar() {\n  return 3;\n}\n';
+
+    const tool = new ReadGroupTool(
+      jianWithFiles({
+        '/workspace/conflict.ts': conflictContent,
+        '/workspace/clean.ts': cleanContent,
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ paths: ['/workspace/conflict.ts', '/workspace/clean.ts'] }),
+    );
+
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).toContain('Conflict markers detected');
+    expect(output).toContain('/workspace/conflict.ts');
+    expect(output).toContain('lines 2-6');
+  });
+
+  it('omits conflict footer when no file has conflicts', async () => {
+    const tool = new ReadGroupTool(
+      jianWithFiles({
+        '/workspace/a.ts': 'function foo() { return 1; }\n',
+        '/workspace/b.ts': 'function bar() { return 2; }\n',
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ paths: ['/workspace/a.ts', '/workspace/b.ts'] }),
+    );
+
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).not.toContain('Conflict markers detected');
+  });
+
+  it('groups output by file extension', async () => {
+    const tool = new ReadGroupTool(
+      jianWithFiles({
+        '/workspace/a.ts': 'const x = 1;\n',
+        '/workspace/b.md': '# Title\n',
+        '/workspace/c.ts': 'const y = 2;\n',
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ paths: ['/workspace/a.ts', '/workspace/b.md', '/workspace/c.ts'] }),
+    );
+
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).toContain('── .md (1) ──');
+    expect(output).toContain('── .ts (2) ──');
+    const mdIdx = output.indexOf('── .md (1) ──');
+    const tsIdx = output.indexOf('── .ts (2) ──');
+    expect(mdIdx).toBeLessThan(tsIdx);
+    expect(tsIdx).toBeLessThan(output.indexOf('--- /workspace/a.ts ---'));
+  });
+
+  it('appends import summary footer for TypeScript files', async () => {
+    const tool = new ReadGroupTool(
+      jianWithFiles({
+        '/workspace/a.ts': "import { foo } from './b';\nimport { bar } from './c';\n",
+        '/workspace/b.ts': 'export const foo = 1;\n',
+      }),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ paths: ['/workspace/a.ts', '/workspace/b.ts'] }),
+    );
+
+    const output = typeof result.output === 'string' ? result.output : '';
+    expect(output).toContain('Imports:');
+    expect(output).toContain('a.ts → ./b, ./c');
+  });
+
+  it('accepts up to 20 paths', async () => {
+    const files: Record<string, string> = {};
+    const paths: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      files[`/workspace/f${i}.ts`] = `content ${i}\n`;
+      paths.push(`/workspace/f${i}.ts`);
+    }
+
+    const tool = new ReadGroupTool(
+      jianWithFiles(files),
+      { workspaceDir: '/workspace', additionalDirs: [] },
+    );
+
+    const result = await executeTool(tool, context({ paths }));
+
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('rejects more than 20 paths at schema level', () => {
+    const paths: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      paths.push(`/workspace/f${i}.ts`);
+    }
+    const result = ReadGroupInputSchema.safeParse({ paths });
+    expect(result.success).toBe(false);
   });
 });

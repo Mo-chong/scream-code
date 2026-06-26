@@ -4,6 +4,7 @@ import type {
   ProviderConfig,
   PromptPart,
   ToolInputDisplay,
+  ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
 
 import type { NotificationsConfig } from './config';
@@ -72,6 +73,12 @@ export interface ToolResultBlockData {
   output: string;
   is_error?: boolean;
   synthetic?: boolean;
+  /**
+   * Structured payload for TUI renderers. When present, renderers prefer this
+   * over parsing `output`. Currently populated by Grep `content` mode as
+   * `search_results`.
+   */
+  display?: ToolResultDisplay;
 }
 
 export interface SubagentReplayToolCallData {

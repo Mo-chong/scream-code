@@ -277,6 +277,7 @@ export class SessionEventHandler {
           tool_call_id: `${subagentId}:${event.toolCallId}`,
           output: serializeToolResultOutput(event.output),
           is_error: event.isError,
+          display: event.display,
         });
         return true;
       case 'agent.status.updated': {
@@ -511,6 +512,7 @@ export class SessionEventHandler {
       output: serializeToolResultOutput(event.output),
       is_error: event.isError,
       synthetic: event.synthetic,
+      display: event.display,
     };
     const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {

@@ -65,6 +65,7 @@ export type {
   ApprovalScope,
   ApprovalResponse,
   ToolInputDisplay,
+  ToolResultDisplay,
 } from '@scream-code/agent-core';
 
 // Question reverse-RPC request and answer payloads.

@@ -19,7 +19,7 @@ import {
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
-import type { TokenUsage } from '@scream-code/scream-code-sdk';
+import type { TokenUsage, ToolResultDisplay } from '@scream-code/scream-code-sdk';
 import { appendStreamingArgsPreview } from '#/tui/utils/event-payload';
 import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 
@@ -44,6 +44,7 @@ interface FinishedSubCall {
   readonly args: Record<string, unknown>;
   readonly output: string;
   readonly isError: boolean;
+  readonly display?: ToolResultDisplay | undefined;
 }
 
 interface OngoingSubCall {
@@ -691,6 +692,7 @@ export class ToolCallComponent extends Container {
         args: call.args,
         output: call.result.output,
         isError: call.result.is_error ?? false,
+        display: call.result.display,
       });
       this.upsertSubToolActivity(
         call.id,
@@ -1161,6 +1163,7 @@ export class ToolCallComponent extends Container {
     tool_call_id: string;
     output: string;
     is_error?: boolean | undefined;
+    display?: ToolResultDisplay | undefined;
   }): void {
     const ongoing = this.ongoingSubCalls.get(result.tool_call_id);
     if (ongoing === undefined) return;
@@ -1170,6 +1173,7 @@ export class ToolCallComponent extends Container {
       args: ongoing.args,
       output: result.output,
       isError: result.is_error ?? false,
+      display: result.display,
     });
     this.upsertSubToolActivity(
       result.tool_call_id,

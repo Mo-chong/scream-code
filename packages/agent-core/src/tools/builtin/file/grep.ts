@@ -34,6 +34,7 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { ensureRgPath, rgUnavailableMessage } from '../../support/rg-locator';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { ToolResultBuilder } from '../../support/result-builder';
+import type { ToolResultDisplay } from '../../display';
 import type { WorkspaceConfig } from '../../support/workspace';
 import GREP_DESCRIPTION from './grep.md';
 
@@ -140,6 +141,10 @@ const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const RG_MAX_COLUMNS = 500;
 const DEFAULT_HEAD_LIMIT = 250;
 const MTIME_STAT_CONCURRENCY = 32;
+// Cap on matches propagated to the structured `search_results` display. The
+// text `output` already carries the full paginated view; this bound keeps the
+// side channel cheap to serialize and consume for TUI renderers.
+const MAX_DISPLAY_MATCHES = 100;
 const VCS_DIRECTORIES_TO_EXCLUDE = ['.git', '.svn', '.hg', '.bzr', '.jj', '.sl'] as const;
 // This is a conservative prefilter. The authoritative sensitive-file check
 // still happens on parsed rg records after execution.
@@ -348,7 +353,11 @@ export class GrepTool implements BuiltinTool<GrepInput> {
 
     const builder = new ToolResultBuilder();
     builder.write(combined);
-    return builder.ok(sideChannelMessages.join('\n'));
+    const result = builder.ok(sideChannelMessages.join('\n'));
+    const display = buildSearchResultsDisplay(args, limited, mode, contentIncludesLineNumbers);
+    if (display === undefined) return result;
+    if (result.isError === true) return result;
+    return { ...result, display };
   }
 
 }
@@ -361,6 +370,44 @@ interface RipgrepRunResult {
   readonly bufferTruncated: boolean;
   readonly stderrTruncated: boolean;
   readonly timedOut: boolean;
+}
+
+/**
+ * Build the structured `search_results` side channel for TUI renderers.
+ *
+ * Only `content` mode carries per-line `lineNum:text` payloads worth surfacing
+ * as structured matches; `files_with_matches` and `count_matches` modes have
+ * empty or count-only payloads and would mislead renderers that expect real
+ * line/text data. Returns `undefined` when there are no records to surface.
+ *
+ * Records are taken from the already-paginated `limited` view so the
+ * structured display mirrors what the text `output` shows.
+ */
+function buildSearchResultsDisplay(
+  args: GrepInput,
+  limited: readonly ParsedGrepLine[],
+  mode: GrepMode,
+  contentIncludesLineNumbers: boolean,
+): ToolResultDisplay | undefined {
+  if (mode !== 'content') return undefined;
+  const matches: Array<{ file: string; line: number; text: string }> = [];
+  for (const entry of limited) {
+    if (entry.kind !== 'record') continue;
+    const { filePath, payload } = entry;
+    if (contentIncludesLineNumbers) {
+      const m = /^(\d+)([:-])(.*)$/.exec(payload);
+      if (m !== null && m[1] !== undefined && m[3] !== undefined) {
+        matches.push({ file: filePath, line: Number.parseInt(m[1], 10), text: m[3] });
+      } else {
+        matches.push({ file: filePath, line: 0, text: payload });
+      }
+    } else {
+      matches.push({ file: filePath, line: 0, text: payload });
+    }
+    if (matches.length >= MAX_DISPLAY_MATCHES) break;
+  }
+  if (matches.length === 0) return undefined;
+  return { kind: 'search_results', query: args.pattern, matches };
 }
 
 type RipgrepRunOutcome =

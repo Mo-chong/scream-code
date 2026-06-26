@@ -12,7 +12,7 @@
 
 import type { ContentPart, Message, TokenUsage, Tool, ToolCall } from '@scream-code/ltod';
 
-import type { ToolInputDisplay } from '../tools/display';
+import type { ToolInputDisplay, ToolResultDisplay } from '../tools/display';
 import type { ToolAccesses } from './tool-access';
 import type { LLM } from './llm';
 
@@ -72,6 +72,14 @@ export interface ExecutableToolSuccessResult {
    * this to the user.
    */
   readonly message?: string | undefined;
+  /**
+   * Structured result metadata for TUI renderers. When present, renderers
+   * use this instead of parsing the text `output`. The model still sees
+   * `output`; this field is a side channel for the UI layer. Tools that
+   * produce structured data (e.g. Grep matches) fill this in; others
+   * leave it undefined and renderers fall back to text.
+   */
+  readonly display?: ToolResultDisplay | undefined;
 }
 
 export interface ExecutableToolErrorResult {

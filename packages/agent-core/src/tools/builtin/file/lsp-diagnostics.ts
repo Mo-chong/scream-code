@@ -32,9 +32,16 @@ export type DiagnosticsUnavailableReason =
 export interface DiagnosticsResult {
   readonly available: boolean;
   readonly diagnostics: readonly LspDiagnostic[];
+  /** True when any diagnostic has severity 1 (Error). Callers use this to flag the tool result as isError. */
+  readonly hasErrors: boolean;
   readonly reason?: DiagnosticsUnavailableReason;
   /** The server command name, when known — used to build the install hint. */
   readonly serverCommand?: string;
+}
+
+/** Returns true when any diagnostic is severity 1 (Error) per LSP spec. */
+export function hasErrors(diagnostics: readonly LspDiagnostic[]): boolean {
+  return diagnostics.some((d) => d.severity === 1);
 }
 
 /**
@@ -54,11 +61,11 @@ export async function fetchDiagnostics(
   workspaceRoot: string,
 ): Promise<DiagnosticsResult> {
   if (registry === undefined) {
-    return { available: false, diagnostics: [], reason: 'unsupported' };
+    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   const languageId = registry.languageIdForPath(path);
   if (languageId === undefined) {
-    return { available: false, diagnostics: [], reason: 'unsupported' };
+    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   const serverCommand = registry.commandForPath(path)?.[0];
   let client;
@@ -68,20 +75,21 @@ export async function fetchDiagnostics(
     return {
       available: false,
       diagnostics: [],
+      hasErrors: false,
       reason: 'server-missing',
       serverCommand,
     };
   }
   if (client === undefined) {
-    return { available: false, diagnostics: [], reason: 'unsupported' };
+    return { available: false, diagnostics: [], hasErrors: false, reason: 'unsupported' };
   }
   try {
     const content = await jian.readText(path);
     client.didOpen(path, content, languageId);
     const diags = await client.diagnostics(path, DIAGNOSTICS_TIMEOUT_MS);
-    return { available: true, diagnostics: diags };
+    return { available: true, diagnostics: diags, hasErrors: hasErrors(diags) };
   } catch {
-    return { available: true, diagnostics: [] };
+    return { available: true, diagnostics: [], hasErrors: false };
   }
 }
 

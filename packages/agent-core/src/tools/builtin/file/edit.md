@@ -9,3 +9,4 @@ Perform exact string replacements against the text view returned by Read.
 - For pure CRLF files, Read shows LF and Edit.old_string/new_string should use LF; Edit writes the file back with CRLF preserved.
 - For mixed line endings or lone carriage returns, Read displays carriage returns as \r; include actual \r escapes in old_string/new_string for those positions.
 - When Read returned an `Anchor:` value in its status block, pass it as `anchor` to verify the file has not changed since it was read. If the anchor does not match, re-read the file before editing.
+- Edit refuses if `old_string` lands inside an unresolved merge conflict block, or if `new_string` would introduce `<<<<<<<`/`=======`/`>>>>>>>` markers. To clean up a conflict, include the markers in `old_string` so Edit replaces them.
