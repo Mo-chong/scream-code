@@ -6,16 +6,13 @@ import { promptForInstallConfirmation } from '#/cli/update/prompt';
 import type * as PromptModule from '#/cli/update/prompt';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import type * as RefreshModule from '#/cli/update/refresh';
-import { detectInstallSource } from '#/cli/update/install-strategy';
 import { emptyUpdateCache, type UpdateCache } from '#/cli/update/types';
 
 const mocks = vi.hoisted(() => ({
   readUpdateCache: vi.fn(),
-  detectInstallSource: vi.fn(),
   installUpdate: vi.fn(),
   promptForInstallConfirmation: vi.fn(),
   refreshUpdateCache: vi.fn(),
-  spawn: vi.fn(),
 }));
 
 vi.mock('../../../src/cli/update/cache', () => ({
@@ -23,7 +20,6 @@ vi.mock('../../../src/cli/update/cache', () => ({
 }));
 
 vi.mock('../../../src/cli/update/install-strategy', () => ({
-  detectInstallSource: mocks.detectInstallSource,
   installUpdate: mocks.installUpdate,
   INSTALL_COMMAND_STRING:
     'cd ~/.scream-code && git pull mochong main && pnpm install && pnpm -r build',
@@ -89,23 +85,19 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
     expect(readUpdateCache).toHaveBeenCalledTimes(1);
     expect(refreshUpdateCache).toHaveBeenCalledTimes(1);
-    expect(detectInstallSource).not.toHaveBeenCalled();
   });
 
   it('skips when non-interactive', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     const { options } = captureOutput();
-    await expect(
-      runUpdatePreflight('0.4.0', { ...options, isTTY: false }),
+    await expect(runUpdatePreflight('0.4.0', { ...options, isTTY: false }),
     ).resolves.toBe('continue');
-    expect(detectInstallSource).not.toHaveBeenCalled();
   });
 
   it('source install: prompts and runs git pull + pnpm install + pnpm -r build', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mocks.installUpdate.mockResolvedValue(undefined);
     const { stdout, options } = captureOutput();
@@ -124,7 +116,6 @@ describe('runUpdatePreflight', () => {
   it('declined install continues without installUpdate', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(false);
     const { options } = captureOutput();
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
@@ -134,7 +125,6 @@ describe('runUpdatePreflight', () => {
   it('warns and continues when installUpdate rejects, without claiming success', async () => {
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
-    mocks.detectInstallSource.mockReturnValue('source');
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mocks.installUpdate.mockRejectedValue(new Error('git pull failed'));
     const { stdout, stderr, options } = captureOutput();
