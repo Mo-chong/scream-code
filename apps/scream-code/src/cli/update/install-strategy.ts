@@ -118,7 +118,7 @@ export async function installUpdate(): Promise<void> {
 
   for (const { cmd, args, cwd } of commands) {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(cmd, args, { cwd, stdio: 'inherit', shell: true });
+      const child = spawn(`${cmd} ${args.join(' ')}`, [], { cwd, stdio: 'inherit', shell: true });
       child.once('error', reject);
       child.once('exit', (code, signal) => {
         if (code === 0) {
