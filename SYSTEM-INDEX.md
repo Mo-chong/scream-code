@@ -25,11 +25,11 @@
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
-| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出 |
+| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ Observation Masking（遮蔽旧工具输出省 token）+ MicroCompaction 批次门控（BATCH_SIZE=8）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
 | **整体架构** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
-| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复等实踩记录 |
+| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、**v0.7 升级合并踩坑、策略层防御模式、merge SOP** |
 | **Phase14：可执行优化** 🆕 | `SYSTEM/Phase14-可执行优化.md` | afterStep 分段命名化 + 收敛条件数组化 + 跨回合标记 + 模块减肥 |
 | **Phase15：行为偏差拦截通道** 🆕 | `SYSTEM/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
 | **行为矫正方案** | `../DECISIONS/行为矫正系统-完整实战方案.md` | 融合 Guard + 记忆注入 + 收敛门的完整计划 |
@@ -89,6 +89,11 @@
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
 | 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |
 | Cherry-pick 后构建/bundle 不工作 | `SYSTEM/pitfalls.md` §pnpm install 是 cherry-pick 后的必修课 |
+| v0.7 新功能有哪些 | `SYSTEM/pitfalls.md` §v0.7 升级与合并 → 新功能总览 |
+| 合并上游 v0.8/v0.9 的标准流程 | `SYSTEM/pitfalls.md` §合并上游更新的标准操作流程 (SOP) |
+| 策略层防御模式（install-strategy.ts） | `SYSTEM/pitfalls.md` §策略层防御模式 |
+| 合并 v0.7 的真实冲突经验 | `SYSTEM/pitfalls.md` §合并上游 v0.7 的真实冲突复盘 |
+| installUpdate 签名不匹配 | `SYSTEM/pitfalls.md` §踩坑点总结 |
 | vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
 | 热冷升降触发条件 | store.ts §promote/demote/autoDemote/autoPromote |
 | ResNet 衰减因子 | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |

@@ -199,7 +199,9 @@ export class FullCompaction {
   async beforeStep(signal: AbortSignal): Promise<void> {
     // Stage 1: Run micro compaction first (free, no LLM call).
     // detect() advances the internal cutoff when token usage >= 50%.
-    this.agent.microCompaction.detect();
+    // force=true bypasses the batch gate so full compaction has an
+    // up-to-date picture of micro's savings before deciding.
+    this.agent.microCompaction.detect(true);
 
     // Stage 2: Check if full compaction is still needed, accounting for
     // the token savings micro compaction already provides.

@@ -79,8 +79,12 @@ function findSupersededPaths(
  *
  * Triggered automatically during context construction via {@link compact}.
  */
+/** Minimum steps between detect() evaluations to reduce cache-break churn. */
+const BATCH_SIZE = 8;
+
 export class MicroCompaction {
   private cutoff = 0;
+  private stepsSinceLastDetect = 0;
   readonly config: MicroCompactionConfig;
 
   constructor(
@@ -93,6 +97,7 @@ export class MicroCompaction {
   /** Reset the internal cutoff line (e.g. after a full compaction). */
   reset(maxCutoff = 0): void {
     this.cutoff = Math.min(this.cutoff, maxCutoff);
+    this.stepsSinceLastDetect = 0;
   }
 
   /** Advance the cutoff line and log the change. */
@@ -104,9 +109,18 @@ export class MicroCompaction {
     this.cutoff = cutoff;
   }
 
-  /** Check whether micro-compaction is warranted and advance the cutoff. */
-  detect(): void {
+  /** Check whether micro-compaction is warranted and advance the cutoff.
+   *
+   * Gated by a batch counter (BATCH_SIZE=8) so the cutoff line changes
+   * infrequently, preserving KV-cache continuity. The `force` parameter
+   * bypasses the gate for full-compaction-driven resets. */
+  detect(force?: boolean): void {
     if (!flags.enabled('micro-compaction')) return;
+
+    this.stepsSinceLastDetect++;
+    if (!force && this.stepsSinceLastDetect < BATCH_SIZE) return;
+    this.stepsSinceLastDetect = 0;
+
     const config = this.config;
     const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;

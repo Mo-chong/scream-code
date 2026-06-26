@@ -5,6 +5,7 @@ import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
 import { assertWireFormat, project } from './projector';
+import { stabilizePrefix } from './prefix-stabilizer';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -215,7 +216,11 @@ export class ContextMemory {
     // LLM call. Detect() is a no-op when the micro-compaction flag is
     // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
     this.agent.microCompaction.detect();
-    const result = project(this.agent.microCompaction.compact(this.history));
+    let msgs: readonly ContextMessage[] = this.agent.microCompaction.compact(this.history);
+    // Prefix stabilisation: replace volatile fields (timestamps, UUIDs)
+    // in system-role messages so the KV-cache prefix is stable across turns.
+    msgs = stabilizePrefix(msgs);
+    const result = project(msgs);
     assertWireFormat(result);
     return result;
   }
