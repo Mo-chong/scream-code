@@ -16,6 +16,16 @@ import type { SlashCommandHost } from './dispatch';
 // Per-step timeout (ms). The default Node.js spawn timeout is infinite.
 const INSTALL_TIMEOUT_MS = 300_000;
 
+/**
+ * Resolve the npm executable name for the current platform.
+ *
+ * On Windows, `npm` is `npm.cmd` — a batch file Node can spawn directly
+ * without `shell: true` (which would trigger DEP0190 when args are passed).
+ */
+function npmExecutable(): string {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
 const NETWORK_ERROR_PATTERNS = [
   /ETIMEDOUT/i,
   /ENOTFOUND/i,
@@ -51,7 +61,7 @@ async function runInstallStep(
   timeoutMs: number = INSTALL_TIMEOUT_MS,
 ): Promise<StepResult> {
   return new Promise<StepResult>((resolve) => {
-    const child = spawn(`${cmd} ${args.join(' ')}`, [], { cwd, stdio: 'pipe', shell: true });
+    const child = spawn(cmd, args, { cwd, stdio: 'pipe' });
     let stderr = '';
     let settled = false;
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
@@ -136,7 +146,7 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
 
   host.showStatus('正在通过 npm 安装最新版本...');
   const result = await runInstallStep(
-    'npm',
+    npmExecutable(),
     ['install', '-g', 'scream-code@latest'],
     undefined,
     '安装 scream-code',

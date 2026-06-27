@@ -74,7 +74,7 @@ describe('handleLoopCommand', () => {
   it('shows help when disabled and no args', async () => {
     const host = makeHost();
     await handleLoopCommand(host, '');
-    expect(host.showNotice).toHaveBeenCalledWith('/loop 命令说明', expect.any(String));
+    expect(host.showNotice).toHaveBeenCalledWith('/loop 循环模式', expect.any(String));
     expect(host.setAppState).not.toHaveBeenCalled();
   });
 

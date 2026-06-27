@@ -171,9 +171,10 @@ function buildOptions(
     for (const skill of skills) {
       const actionKeys: Record<string, () => void> = {};
       if (skill.pluginId !== undefined) {
+        const plugin = plugins.find((p) => p.id === skill.pluginId);
         actionKeys['d'] = () => {
           host.restoreEditor();
-          void uninstallByPluginId(host, skill.pluginId!);
+          void uninstallByPluginId(host, skill.pluginId!, plugin);
         };
       } else {
         actionKeys['d'] = () => {
@@ -184,7 +185,7 @@ function buildOptions(
       options.push({
         value: `activate:${skill.name}`,
         label: skill.name,
-        description: formatSkillDescription(skill),
+        description: formatSkillDescription(skill, plugins),
         actionKeys,
       });
     }
@@ -289,7 +290,7 @@ async function installInjectActivate(host: SlashCommandHost, source: string): Pr
       host.sendSkillActivation(session, first.name, '');
       return;
     }
-    await pickAndActivateSkill(host, pluginSkills);
+    await pickAndActivateSkill(host, pluginSkills, [summary]);
   } catch (error) {
     spinner.stop({ ok: false, label: '安装失败。' });
     host.showError(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -300,6 +301,7 @@ async function installInjectActivate(host: SlashCommandHost, source: string): Pr
 async function pickAndActivateSkill(
   host: SlashCommandHost,
   skills: readonly SkillSummary[],
+  plugins: readonly PluginSummary[] = [],
 ): Promise<void> {
   const session = host.session;
   if (!session) return;
@@ -307,7 +309,7 @@ async function pickAndActivateSkill(
   const options: ChoiceOption[] = skills.map((skill) => ({
     value: skill.name,
     label: skill.name,
-    description: formatSkillDescription(skill),
+    description: formatSkillDescription(skill, plugins),
   }));
 
   const picker = new ChoicePickerComponent({
@@ -329,23 +331,36 @@ async function pickAndActivateSkill(
   host.mountEditorReplacement(picker);
 }
 
-async function uninstallByPluginId(host: SlashCommandHost, pluginId: string): Promise<void> {
+async function uninstallByPluginId(
+  host: SlashCommandHost,
+  pluginId: string,
+  plugin?: PluginSummary,
+): Promise<void> {
   const session = host.session;
   if (!session) {
     host.showError('未连接到会话。请先创建或恢复一个会话。');
     return;
   }
 
-  let plugins: readonly PluginSummary[] = [];
-  try {
-    plugins = await session.listPlugins();
-  } catch {
-    // Proceed with id as label if plugin list is unavailable.
+  // 若调用处未带 plugin 信息，从 session 兜底拉一次。
+  if (plugin === undefined) {
+    try {
+      const plugins = await session.listPlugins();
+      plugin = plugins.find((p) => p.id === pluginId);
+    } catch {
+      // 忽略，下方用 pluginId 作 label。
+    }
   }
-  const plugin = plugins.find((p) => p.id === pluginId);
-  const label = plugin?.displayName ?? pluginId;
 
-  const confirmed = await confirmUninstall(host, label);
+  const label = plugin?.displayName ?? pluginId;
+  // plugin Skill 必须整包卸载（SDK 不支持单独删除），明确告知用户影响范围。
+  const skillCount = plugin?.skillCount;
+  const description =
+    skillCount !== undefined && skillCount > 0
+      ? `将卸载整个包（共 ${skillCount} 个 Skill），无法只删除单个 Skill`
+      : '将卸载整个 Skill 包';
+
+  const confirmed = await confirmUninstall(host, label, description);
   if (!confirmed) {
     await openSkillCenter(host);
     return;
@@ -424,13 +439,15 @@ async function confirmUninstall(
   });
 }
 
-function formatSkillDescription(skill: SkillSummary): string {
+function formatSkillDescription(skill: SkillSummary, plugins: readonly PluginSummary[] = []): string {
   const parts: string[] = [];
   if (skill.source) {
     parts.push(`来源: ${skill.source}`);
   }
   if (skill.pluginId !== undefined) {
-    parts.push(`插件: ${skill.pluginId}`);
+    const plugin = plugins.find((p) => p.id === skill.pluginId);
+    const label = plugin?.displayName ?? skill.pluginId;
+    parts.push(`插件: ${label}`);
   }
   if (skill.description) {
     parts.push(truncate(skill.description, SKILL_DESC_MAX));

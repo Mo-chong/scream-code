@@ -57,6 +57,7 @@ When delegating with the `Agent` tool, choose the appropriate `subagent_type`:
 - `plan` — Read-only implementation planning and architecture design. Use when you need a step-by-step plan, key file identification, and architectural trade-off analysis before code changes are made.
 - `verify` — Verification specialist. Runs build, test, and lint commands. Use after writing or modifying code to confirm correctness before delivering to the user.
 - `reviewer` — Code review specialist. Identifies bugs and API contract violations before merge.
+- `oracle` — Deep debugging, architecture decisions, and second opinions. Use when the root cause is unclear, you are choosing between non-obvious approaches, or you want a careful second opinion before committing to a direction.
 - `writer` — Content production and research specialist. Produces structured, data-driven reports, analyses, and Markdown documents.
 
 # When to Parallelize
@@ -72,6 +73,18 @@ To run multiple subagents in parallel, call the `Agent` tool multiple times in a
 - Tasks have dependencies (one needs the other's output)
 - Multiple tasks would write to the same file or directory
 - The task is simple enough for a single Agent call
+
+# WolfPack (`WolfPack` tool)
+
+When the user has toggled WolfPack mode on (`/wolfpack`), a second collaboration tool `WolfPack` becomes available. Use it instead of issuing many `Agent` calls when:
+
+- The same prompt shape applies to many independent items (e.g. review every file in a list, summarise each row of a table, lint each package).
+- All items should use the **same `subagent_type`**.
+- Items have no inter-dependency.
+
+`WolfPack` spawns every item in parallel with no concurrency cap, then aggregates the per-item results. Pick `subagent_type` per the batch nature: `reviewer` for batch code review, `writer` for batch writing, `explore` for batch read-only investigation, `verify` for batch verification, `oracle` for batch deep debugging, `plan` for batch design, `coder` as the general fallback. The full profile list is included in the tool description.
+
+If the user has not enabled WolfPack mode, calling `WolfPack` returns an error — fall back to multiple `Agent` calls instead, or ask the user to enable `/wolfpack`.
 
 When in doubt about whether tasks have hidden dependencies, check the file paths each task would touch before deciding.
 

@@ -14,7 +14,9 @@ import { ToolAccesses } from '../../../loop/tool-access';
 import { isAbortError } from '../../../loop/errors';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { SessionSubagentHost } from '../../../session/subagent-host';
+import type { ResolvedAgentProfile } from '../../../profile/types';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { buildSubagentDescriptions } from './agent';
 import WOLFPACK_DESCRIPTION from './wolfpack.md';
 
 // Unlimited subagent concurrency: spawn every item in parallel.
@@ -42,14 +44,25 @@ export type WolfPackToolInput = z.infer<typeof WolfPackToolInputSchema>;
 
 export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
   readonly name: string = 'WolfPack';
-  readonly description: string = WOLFPACK_DESCRIPTION;
+  readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WolfPackToolInputSchema);
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly isEnabled: () => boolean,
-    _options?: { log?: Logger },
-  ) {}
+    options?: {
+      subagents?: ResolvedAgentProfile['subagents'];
+      log?: Logger;
+    },
+  ) {
+    const typeLines = buildSubagentDescriptions(options?.subagents);
+    this.description = typeLines
+      ? `${WOLFPACK_DESCRIPTION}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
+      : WOLFPACK_DESCRIPTION;
+    this.log = options?.log;
+  }
+
+  private readonly log?: Logger;
 
   resolveExecution(args: WolfPackToolInput): ToolExecution {
     return {
@@ -74,13 +87,6 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
     if (!this.isEnabled()) {
       return {
         output: 'WolfPack 模式未开启。请输入 /wolfpack 打开后再试。',
-        isError: true,
-      };
-    }
-
-    if (args.items.length === 0) {
-      return {
-        output: 'WolfPack requires at least one item.',
         isError: true,
       };
     }

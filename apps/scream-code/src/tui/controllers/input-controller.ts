@@ -7,7 +7,6 @@ import type { Session } from '@scream-code/scream-code-sdk';
 import {
   dispatchInput,
   handlePlanCommand,
-  describeLoopStatus,
   type ScreamSlashCommand,
   type SlashCommandHost,
 } from '../commands';
@@ -89,20 +88,7 @@ export class InputController {
 
   setupAutocomplete(): void {
     const visible = this.host.getSlashCommands().filter((cmd) => !cmd.name.startsWith('skill:'));
-    const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => {
-      if (cmd.name === 'loop') {
-        const status = describeLoopStatus(
-          this.host.state.appState.loopModeEnabled,
-          this.host.state.appState.loopPrompt,
-          this.host.state.appState.loopLimit,
-        );
-        return {
-          ...cmd,
-          description: `${cmd.description} (${status})`,
-        };
-      }
-      return cmd;
-    });
+    const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => cmd);
     const { state } = this.host;
     const provider = new FileMentionProvider(
       slashCommands,

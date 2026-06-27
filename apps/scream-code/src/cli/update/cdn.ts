@@ -5,6 +5,21 @@ import { valid } from 'semver';
 const NPM_TIMEOUT_MS = 15_000;
 
 /**
+ * Resolve the npm executable name for the current platform.
+ *
+ * On Windows, `npm` is actually `npm.cmd` — a batch file. Node's child_process
+ * can execute `.cmd` files directly without `shell: true`, but only when the
+ * filename includes the `.cmd` extension. Using `'npm'` without `.cmd` would
+ * fail with ENOENT on Windows.
+ *
+ * We deliberately avoid `shell: true` because passing args alongside
+ * `shell: true` triggers Node's DEP0190 deprecation warning on every spawn.
+ */
+function npmExecutable(): string {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+/**
  * Query the latest published Scream Code version from the npm registry
  * via `npm view scream-code version`.
  *
@@ -20,9 +35,9 @@ export async function fetchLatestVersionFromNpm(
 ): Promise<string> {
   const execAsync = promisify(execFileImpl);
   const { stdout } = await execAsync(
-    'npm',
+    npmExecutable(),
     ['view', 'scream-code', 'version'],
-    { timeout: NPM_TIMEOUT_MS, maxBuffer: 1024, shell: true },
+    { timeout: NPM_TIMEOUT_MS, maxBuffer: 1024 },
   );
   const raw = stdout.trim();
   if (valid(raw) === null) {

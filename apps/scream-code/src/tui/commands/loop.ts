@@ -18,7 +18,30 @@ function makeVerifier(command: string) {
 }
 
 /**
- * 切换循环模式。开启后，提示词会在每次 Agent 完成一轮后自动重发。
+ * 循环模式不能每轮等用户审批，开启时若处于 manual 权限，自动切到 auto。
+ * 失败时不阻塞 loop 开启，仅静默跳过。
+ */
+async function ensureAutoPermission(host: SlashCommandHost): Promise<void> {
+  if (host.state.appState.permissionMode !== 'manual') return;
+  try {
+    await host.requireSession().setPermission('auto');
+    host.setAppState({ permissionMode: 'auto' });
+    host.showStatus('权限已切到 auto（循环期间不再弹审批）。');
+  } catch {
+    // 切权限失败不阻塞 loop 开启，用户可手动 /config permission 切换。
+  }
+}
+
+/**
+ * 循环模式（无状态重试）。
+ *
+ * 定位：自动重试机 + 客观验证门。每轮重发同一条 prompt，AI 不记得上一轮
+ * 的输出。适合配 `--verify` 验证命令，让客观 exit code 决定循环何时结束。
+ *
+ * 适合场景：任务与上次结果无关（等 CI、轮询健康检查、等服务起来、单次
+ * 可能失败需要重试几次的幂等任务）。
+ *
+ * 不适合：任务需要根据上次失败调整策略 → 用 /goal（AI 带工作笔记迭代）。
  *
  * 行为：
  * - /loop                （未开启）显示帮助
@@ -66,14 +89,17 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
   // 未开启时：无参数 → 显示帮助；有参数 → 开启。
   if (!trimmed) {
     host.showNotice(
-      '/loop 命令说明',
-      '用法：/loop [次数|时长] [提示词] [--verify "验证命令"]\n' +
+      '/loop 循环模式',
+      '无状态重试：每轮重发同一条 prompt，AI 不记得上一轮输出。' +
+        '配 --verify 验证命令，让客观 exit code 决定循环何时结束。\n\n' +
+        '用法：/loop [次数|时长] [提示词] [--verify "验证命令"]\n' +
         '· /loop 10 [提示词] — 限制 10 次迭代\n' +
         '· /loop 5m [提示词] — 限制 5 分钟\n' +
         '· /loop 1h30m [提示词] — 组合时长限制\n' +
-        '· /loop 10 修复 lint --verify "pnpm lint" — 每轮后跑验证，通过即停\n' +
-        '按 Esc 暂停当前迭代；再次输入 /loop 关闭循环。\n' +
-        '提示：没有可自动判断完成的验证命令时，慎用循环模式。',
+        '· /loop 10 修复 lint --verify "pnpm lint" — 每轮后跑验证，通过即停\n\n' +
+        '适合：等 CI 通过、轮询健康检查、单次可能失败需重试的幂等任务。\n' +
+        '不适合：需要根据上次失败调整策略 → 用 /goal（AI 带工作笔记迭代）。\n\n' +
+        '按 Esc 暂停当前迭代；再次输入 /loop 关闭循环。',
     );
     return;
   }
@@ -103,6 +129,8 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
     loopLastVerifyPassed: undefined,
   });
 
+  await ensureAutoPermission(host);
+
   const limitSuffix = parsed.limit ? ` 限制：${describeLoopLimit(parsed.limit)}。` : '';
   const remainingSuffix = loopLimit ? ` ${describeLoopLimitRuntime(loopLimit)}。` : '';
   const verifierSuffix = parsed.verifier
@@ -115,6 +143,8 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
   host.showNotice(
     '循环模式已开启',
     `${promptBehavior}${limitSuffix}${remainingSuffix}${verifierSuffix}\n\n` +
+      '提示：每轮重发同一条 prompt，AI 不记得上一轮输出。' +
+      '需要根据上次失败调整策略时，用 /goal 更合适。\n\n' +
       '/loop 命令说明：\n' +
       '· /loop — 切换循环开关\n' +
       '· /loop 10 [提示词] — 限制 10 次迭代\n' +

@@ -136,6 +136,43 @@ describe('handleSkillCommand', () => {
     expect(out).not.toContain('dream');
   });
 
+  it('shows plugin display name instead of plugin id in skill descriptions', async () => {
+    const session = makeSession({
+      listSkills: [
+        {
+          name: 'plugin-skill',
+          description: 'From plugin',
+          path: '/plugins/pack/plugin-skill/SKILL.md',
+          source: 'extra',
+          type: 'prompt',
+          pluginId: 'pack',
+        },
+      ],
+      listPlugins: [
+        {
+          id: 'pack',
+          displayName: 'My Pack',
+          enabled: true,
+          state: 'ok',
+          skillCount: 1,
+          skills: [],
+          mcpServerCount: 0,
+          enabledMcpServerCount: 0,
+          hasErrors: false,
+          source: 'github',
+        },
+      ],
+    });
+    const host = makeHost(session);
+    await handleSkillCommand(host, '');
+
+    const picker = getLastMountedPicker(host);
+    const out = rendered(picker);
+    // displayName 显示给用户，pluginId（'pack'）不直接出现在描述里。
+    expect(out).toContain('My Pack');
+    expect(out).not.toMatch(/插件: pack\b/);
+  });
+
   it('activates an installed skill on Enter', async () => {
     const session = makeSession({
       listSkills: [
@@ -204,6 +241,66 @@ describe('handleSkillCommand', () => {
     });
     const confirmPicker = getLastMountedPicker(host);
     expect(rendered(confirmPicker)).toContain('确认卸载 "My Pack"？');
+    // 必须明确告知用户：plugin Skill 只能整包卸载，无法单独删除。
+    expect(rendered(confirmPicker)).toContain('将卸载整个包');
+    expect(rendered(confirmPicker)).toContain('共 1 个 Skill');
+  });
+
+  it('warns about multi-skill impact when uninstalling a plugin with several skills', async () => {
+    const session = makeSession({
+      listSkills: [
+        {
+          name: 'skill-a',
+          description: 'A',
+          path: '/plugins/pack/skill-a/SKILL.md',
+          source: 'extra',
+          type: 'prompt',
+          pluginId: 'pack',
+        },
+        {
+          name: 'skill-b',
+          description: 'B',
+          path: '/plugins/pack/skill-b/SKILL.md',
+          source: 'extra',
+          type: 'prompt',
+          pluginId: 'pack',
+        },
+        {
+          name: 'skill-c',
+          description: 'C',
+          path: '/plugins/pack/skill-c/SKILL.md',
+          source: 'extra',
+          type: 'prompt',
+          pluginId: 'pack',
+        },
+      ],
+      listPlugins: [
+        {
+          id: 'pack',
+          displayName: 'Multi Pack',
+          enabled: true,
+          state: 'ok',
+          skillCount: 3,
+          skills: [],
+          mcpServerCount: 0,
+          enabledMcpServerCount: 0,
+          hasErrors: false,
+          source: 'github',
+        },
+      ],
+    });
+    const host = makeHost(session);
+    await handleSkillCommand(host, '');
+
+    const picker = getLastMountedPicker(host);
+    picker.handleInput(DOWN);
+    picker.handleInput('d');
+
+    await vi.waitFor(() => {
+      expect(rendered(getLastMountedPicker(host))).toContain('确认卸载 "Multi Pack"？');
+    });
+    const confirmPicker = getLastMountedPicker(host);
+    expect(rendered(confirmPicker)).toContain('共 3 个 Skill');
   });
 
   it('uninstalls a plugin when confirming the uninstall picker', async () => {
