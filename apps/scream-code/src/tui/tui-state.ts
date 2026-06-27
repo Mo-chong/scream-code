@@ -3,6 +3,8 @@ import {
   ProcessTerminal,
   TUI,
 } from '@earendil-works/pi-tui';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { getLogDir } from '#/utils/paths';
 
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
@@ -61,6 +63,17 @@ export interface TUIState {
   fdPath: string | null;
   gitLsFilesCache: GitLsFilesCache;
 }
+function logRenderError(error: unknown): void {
+  try {
+    const logDir = getLogDir();
+    mkdirSync(logDir, { recursive: true });
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    const line = `[${new Date().toISOString()}] TUI render error: ${message}\n`;
+    appendFileSync(`${logDir}/render-errors.log`, line, 'utf8');
+  } catch {
+    // Last-resort fallback: avoid recursion or further terminal corruption.
+  }
+}
 
 export function createTUIState(options: ScreamTUIOptions): TUIState {
   const initialAppState = options.initialAppState;
@@ -69,8 +82,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const terminal = new ProcessTerminal();
   const ui = new TUI(terminal);
   // Keep differential rendering when content shrinks (e.g. transcript commit,
-  // tool-call collapse). Without this, pi-tui 0.78.1 defaults to clearing the
-  // whole screen and recalculating the viewport, which causes visible jumps.
+  // tool-call collapse). Without this, pi-tui defaults to clearing the whole
+  // screen and recalculating the viewport, which causes visible jumps.
   ui.setClearOnShrink(false);
 
   // ── Render safety net ──────────────────────────────────────────────
@@ -83,13 +96,10 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   uiAny['doRender'] = (): void => {
     try {
       originalDoRender();
-    } catch {
-      // Swallow render errors to prevent a single bad component from crashing the
-      // whole TUI or corrupting terminal state. Logging here risks recursion or
-      // further terminal corruption, so we intentionally stay silent.
+    } catch (error) {
+      logRenderError(error);
     }
   };
-
   const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const activityContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);

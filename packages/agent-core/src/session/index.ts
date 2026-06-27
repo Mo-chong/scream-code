@@ -196,7 +196,9 @@ export class Session {
       const recap = main.sessionMemory.getSessionSummary();
       if (recap.length > 0) {
         this.metadata.custom = { ...this.metadata.custom, recap };
-        void this.writeMetadata();
+        this.writeMetadata().catch((error: unknown) => {
+          this.log.error('failed to write session recap metadata', error);
+        });
       }
     }
     try {
@@ -258,7 +260,9 @@ export class Session {
       type,
       parentAgentId: parentAgentId ?? null,
     };
-    void this.writeMetadata();
+    this.writeMetadata().catch((error: unknown) => {
+      this.log.error('failed to write session metadata after agent creation', error);
+    });
 
     return { id, agent };
   }
@@ -323,7 +327,7 @@ export class Session {
       await this.options.jian.mkdir(this.options.homedir, { parents: true, existOk: true });
       await this.options.jian.writeText(this.metadataPath, text);
     };
-    this.writeMetadataPromise = this.writeMetadataPromise.then(write, write);
+    this.writeMetadataPromise = this.writeMetadataPromise.then(() => write());
     return this.writeMetadataPromise;
   }
 
