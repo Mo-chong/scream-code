@@ -1,25 +1,32 @@
 import type {
   AutocompleteItem,
+  Component,
   SlashCommand,
 } from '@earendil-works/pi-tui';
 import type { Session } from '@scream-code/scream-code-sdk';
+import { writeFile } from 'node:fs/promises';
 
 import {
   dispatchInput,
+  handleFusionPlanCommand,
   handlePlanCommand,
   type ScreamSlashCommand,
   type SlashCommandHost,
 } from '../commands';
 import { FileMentionProvider } from '../components/editor/file-mention-provider';
+import { FusionPlanStatusComponent } from '../components/messages/fusion-plan-status';
 import { QueuePaneComponent } from '../components/panes/queue-pane';
 import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID } from '../constant/scream-tui';
 import type {
+  FusionPlanStatusData,
+  PlanModeState,
   QueuedMessage,
   SendMessageOptions,
   TranscriptEntry,
 } from '../types';
 import type { TUIState } from '../tui-state';
 import { formatErrorMessage } from '../utils/event-payload';
+import { runFusionPlan } from '../utils/fusion-plan';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
 import { consumeLoopLimitIteration } from '../utils/loop-limit';
@@ -71,7 +78,7 @@ export interface InputControllerHost extends SlashCommandHost {
   readonly imageStore: ImageAttachmentStore;
 
   stopMemoryIdleTimer(): void;
-  appendTranscriptEntry(entry: TranscriptEntry): void;
+  appendTranscriptEntry(entry: TranscriptEntry): Component | null;
   getSlashCommands(): readonly ScreamSlashCommand[];
   stopWelcomeBreathing(): void;
   updateQueueDisplay(): void;
@@ -83,6 +90,9 @@ export class InputController {
   private breatheFrame = 0;
   /** Once the user types, breathing stops permanently (same as welcome). */
   private breatheOnceStopped = false;
+  private fusionPlanComponent?: FusionPlanStatusComponent;
+  private fusionPlanEntry?: TranscriptEntry;
+  private isFusionPlanRunning = false;
 
   constructor(private readonly host: InputControllerHost) {}
 
@@ -102,7 +112,7 @@ export class InputController {
       this.#permanentlyStopBreathing();
     };
     // Start idle breathing immediately (editor is empty on mount).
-    if (!this.host.state.appState.planMode) {
+    if (this.host.state.appState.planMode === 'off') {
       this.#startBreathing();
     }
   }
@@ -117,25 +127,35 @@ export class InputController {
     this.host.stopMemoryIdleTimer();
   }
 
-  sendNormalUserInput(text: string): void {
+  async sendNormalUserInput(text: string): Promise<void> {
     if (this.host.state.appState.model.trim().length === 0) {
       this.host.showError(LLM_NOT_SET_MESSAGE);
       return;
     }
-    const extraction = extractMediaAttachments(text, this.host.imageStore);
-    if (!this.validateMediaCapabilities(extraction)) return;
     const session = this.host.session;
     if (session === undefined) {
       this.host.showError(LLM_NOT_SET_MESSAGE);
       return;
     }
 
+    if (this.host.state.appState.planMode === 'fusionplan') {
+      this.sendFusionPlanUserInput(text, session);
+      return;
+    }
+
+    this.dispatchUserInput(text, session);
+  }
+
+  private dispatchUserInput(text: string, session: Session): void {
     // When loop mode is waiting for its first prompt, capture it and reserve
     // one iteration from the budget.
     if (this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt) {
       this.host.setAppState({ loopPrompt: text });
       consumeLoopLimitIteration(this.host.state.appState.loopLimit);
     }
+
+    const extraction = extractMediaAttachments(text, this.host.imageStore);
+    if (!this.validateMediaCapabilities(extraction)) return;
 
     if (extraction.hasMedia) {
       this.sendMessage(session, text, {
@@ -148,6 +168,107 @@ export class InputController {
     }
     this.host.updateQueueDisplay();
     this.host.state.ui.requestRender();
+  }
+
+  private sendFusionPlanUserInput(text: string, session: Session): void {
+    if (this.isFusionPlanRunning) {
+      this.host.showError('已有融合计划正在运行，请等待完成。');
+      return;
+    }
+    this.isFusionPlanRunning = true;
+    this.fusionPlanEntry = undefined;
+    this.fusionPlanComponent = undefined;
+
+    runFusionPlan({
+      task: text,
+      cwd: this.host.state.appState.workDir,
+      model: this.host.state.appState.model,
+      thinkingLevel:
+        this.host.state.appState.thinkingLevel === 'off'
+          ? undefined
+          : this.host.state.appState.thinkingLevel,
+      onProgress: (event) => {
+        if (this.fusionPlanEntry === undefined) {
+          this.fusionPlanEntry = {
+            id: nextTranscriptId(),
+            kind: 'status',
+            renderMode: 'plain',
+            content: '融合计划',
+            fusionPlanStatus: event,
+          };
+          const component = this.host.appendTranscriptEntry(this.fusionPlanEntry);
+          this.fusionPlanComponent =
+            component instanceof FusionPlanStatusComponent ? component : undefined;
+          return;
+        }
+        this.fusionPlanEntry.fusionPlanStatus = event;
+        this.fusionPlanComponent?.setData(event);
+      },
+    })
+      .then(async (result) => {
+        if (!result.ok) {
+          const details = result.workerResults
+            .map((r, i) => {
+              if (r.ok) return `worker ${i + 1}: ok`;
+              if (r.timedOut) return `worker ${i + 1}: timed out`;
+              const reason = r.exitCode !== null ? `exit ${r.exitCode}` : r.stderr.trim() || 'no output';
+              const commandHint = r.command ? ` [${r.command}]` : '';
+              return `worker ${i + 1}: failed (${reason})${commandHint}`;
+            })
+            .join('; ');
+          this.updateFusionPlanStatus({ phase: 'failed', detail: details });
+          this.host.showError(`融合计划生成失败 (${details})`);
+          return;
+        }
+
+        try {
+          const status = await session.getStatus().catch(() => null);
+          const currentAgentPlanMode = status?.planMode ?? false;
+          if (!currentAgentPlanMode) {
+            await session.setPlanMode(true);
+          }
+          const plan = await session.getPlan();
+          if (plan?.path) {
+            await writeFile(plan.path, result.plan, 'utf8');
+          } else {
+            this.updateFusionPlanStatus({ phase: 'failed', detail: '无法定位计划文件路径' });
+            this.host.showError('无法定位计划文件路径');
+            return;
+          }
+        } catch (error) {
+          const message = formatErrorMessage(error);
+          this.updateFusionPlanStatus({ phase: 'failed', detail: message });
+          this.host.showError(`写入计划文件失败：${message}`);
+          return;
+        }
+
+        this.host.setAppState({ planMode: 'plan' });
+        this.host.showStatus('融合计划已生成，进入计划审批', this.host.state.theme.colors.success);
+        this.dispatchUserInput(text, session);
+      })
+      .catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.updateFusionPlanStatus({ phase: 'failed', detail: message });
+        this.host.showError(`融合计划异常：${message}`);
+      })
+      .finally(() => {
+        this.isFusionPlanRunning = false;
+        this.fusionPlanComponent = undefined;
+        this.fusionPlanEntry = undefined;
+      });
+  }
+
+  private updateFusionPlanStatus(patch: { phase: 'failed'; detail?: string }): void {
+    if (this.fusionPlanEntry === undefined || this.fusionPlanComponent === undefined) return;
+    const current = this.fusionPlanEntry.fusionPlanStatus;
+    if (current === undefined) return;
+    const updated: FusionPlanStatusData = {
+      ...current,
+      phase: patch.phase,
+      detail: patch.detail,
+    };
+    this.fusionPlanEntry.fusionPlanStatus = updated;
+    this.fusionPlanComponent.setData(updated);
   }
 
   steerMessage(session: Session, input: string[]): void {
@@ -180,14 +301,19 @@ export class InputController {
       this.host.showError(`引导失败：${message}`);
     });
   }
-
-  handlePlanToggle(next: boolean): void {
-    void handlePlanCommand(this.host, next ? 'on' : 'off');
+  handlePlanModeStateChange(state: PlanModeState): void {
+    if (state === 'off') {
+      void handlePlanCommand(this.host, 'off');
+    } else if (state === 'plan') {
+      void handlePlanCommand(this.host, 'on');
+    } else {
+      void handleFusionPlanCommand(this.host, 'on');
+    }
   }
-
   updateEditorBorderHighlight(text?: string): void {
     const trimmed = (text ?? this.host.state.editor.getText()).trimStart();
-    const isPlan = this.host.state.appState.planMode;
+    const planMode = this.host.state.appState.planMode;
+    const isPlan = planMode !== 'off';
     const isEmpty = trimmed.length === 0;
 
     if (isEmpty && !isPlan && !this.breatheOnceStopped) {
@@ -195,7 +321,9 @@ export class InputController {
     } else {
       this.#stopBreathing();
       const colorToken = isPlan
-        ? this.host.state.theme.colors.planMode
+        ? planMode === 'fusionplan'
+          ? this.host.state.theme.colors.fusionPlanMode
+          : this.host.state.theme.colors.planMode
         : this.host.state.theme.colors.primary;
       this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
       this.host.state.ui.requestRender();

@@ -371,7 +371,10 @@ export const SCREAM_ERROR_INFO = {
     title: 'Compaction failed',
     retryable: false,
     public: true,
-    action: 'Inspect logs and consider increasing compaction limits.',
+    action:
+      'The model returned an empty or invalid compaction summary. ' +
+      'Common causes: max output tokens too low, an incompatible model, or a provider/proxy dropping the stream. ' +
+      'Try /compact again, switch to a different model, or check your provider configuration.',
   },
   'compaction.unable': {
     title: 'Unable to compact',

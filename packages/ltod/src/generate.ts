@@ -180,7 +180,11 @@ export async function generate(
   }
   if (message.content.length === 0 && message.toolCalls.length === 0) {
     throw new APIEmptyResponseError(
-      `The API returned an empty response (no content, no tool calls). Provider: ${provider.name}, model: ${provider.modelName}`,
+      `The API returned an empty response (no content, no tool calls). ` +
+        `Provider: ${provider.name}, model: ${provider.modelName}. ` +
+        `Common causes: the model's max output tokens are set too low, ` +
+        `the model does not support this request format, or the provider/proxy ` +
+        `returned an empty stream. Try again, switch models, or check provider settings.`,
     );
   }
 
@@ -194,7 +198,8 @@ export async function generate(
       'The API returned a response containing only thinking content ' +
         'without any text or tool calls. This usually indicates the ' +
         'stream was interrupted or the output token budget was exhausted ' +
-        `during reasoning. Provider: ${provider.name}, model: ${provider.modelName}`,
+        `during reasoning. Provider: ${provider.name}, model: ${provider.modelName}. ` +
+        `If this persists, reduce reasoning effort or switch to a model with a larger output budget.`,
     );
   }
 

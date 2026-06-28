@@ -41,12 +41,14 @@ export type LoopLimitRuntime =
       deadlineMs: number;
     };
 
+export type PlanModeState = 'off' | 'plan' | 'fusionplan';
+
 export interface AppState {
   model: string;
   workDir: string;
   sessionId: string;
   permissionMode: PermissionMode;
-  planMode: boolean;
+  planMode: PlanModeState;
   thinkingLevel: ThinkingEffort;
   contextUsage: number;
   contextTokens: number;
@@ -134,6 +136,24 @@ export interface BackgroundAgentMetadata {
 
 export type BackgroundAgentStatusPhase = 'started' | 'completed' | 'failed';
 
+export type FusionPlanPhase = 'planning' | 'synthesis' | 'completed' | 'failed';
+
+export interface FusionPlanWorkerProgress {
+  readonly index: number;
+  readonly status: 'pending' | 'running' | 'completed' | 'failed';
+  readonly angle: string;
+  readonly label: string;
+}
+
+export interface FusionPlanStatusData {
+  readonly phase: FusionPlanPhase;
+  readonly completedWorkers: number;
+  readonly totalWorkers: number;
+  readonly failedWorkers: number;
+  readonly workers: readonly FusionPlanWorkerProgress[];
+  readonly detail?: string;
+}
+
 export interface BackgroundAgentStatusData {
   readonly phase: BackgroundAgentStatusPhase;
   readonly headline: string;
@@ -175,6 +195,7 @@ export interface TranscriptEntry {
   detail?: string;
   toolCallData?: ToolCallBlockData;
   backgroundAgentStatus?: BackgroundAgentStatusData;
+  fusionPlanStatus?: FusionPlanStatusData;
   compactionData?: CompactionTranscriptData;
   cronData?: CronTranscriptData;
   imageAttachmentIds?: readonly number[];

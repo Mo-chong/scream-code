@@ -6,10 +6,10 @@ import type {
   ApprovalRequest,
   ApprovalResponse,
   BackgroundTaskInfo,
-  ScreamHarness,
   PermissionMode,
   Session,
 } from '@scream-code/scream-code-sdk';
+import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import type { CLIOptions } from '#/cli/options';
 
 import {
@@ -51,6 +51,7 @@ import {
   INITIAL_LIVE_PANE,
   type AppState,
   type LoginProgressSpinnerHandle,
+  type PlanModeState,
   type ScreamTUIOptions,
   type LivePaneState,
   type QueuedMessage,
@@ -96,7 +97,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     workDir: input.workDir,
     sessionId: '',
     permissionMode: startupPermission,
-    planMode: input.cliOptions.plan,
+    planMode: input.cliOptions.plan ? 'plan' : 'off',
     thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
@@ -392,7 +393,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   sendNormalUserInput(text: string): void {
-    this.inputController.sendNormalUserInput(text);
+    void this.inputController.sendNormalUserInput(text);
   }
   onTurnCompleted(): void {
     this.lifecycleController.onTurnCompleted();
@@ -438,9 +439,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
   // Input Dispatch (delegated to InputController)
   // =========================================================================
-
-  handlePlanToggle(next: boolean): void {
-    this.inputController.handlePlanToggle(next);
+  handlePlanModeStateChange(state: PlanModeState): void {
+    this.inputController.handlePlanModeStateChange(state);
   }
 
   steerMessage(session: Session, input: string[]): void {
@@ -690,8 +690,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.transcriptController.stopWelcomeBreathing();
   }
 
-  appendTranscriptEntry(entry: TranscriptEntry): void {
-    this.transcriptController.appendEntry(entry);
+  appendTranscriptEntry(entry: TranscriptEntry): Component | null {
+    return this.transcriptController.appendEntry(entry);
   }
 
   appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void {

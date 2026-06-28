@@ -605,7 +605,19 @@ export class SessionEventHandler {
     if (event.contextUsage !== undefined) patch.contextUsage = event.contextUsage;
     if (event.contextTokens !== undefined) patch.contextTokens = event.contextTokens;
     if (event.maxContextTokens !== undefined) patch.maxContextTokens = event.maxContextTokens;
-    if (event.planMode !== undefined) patch.planMode = event.planMode;
+    if (event.planMode !== undefined) {
+      // Agent-core reports planMode as a boolean and planStrategy as 'normal' | 'fusion'.
+      // Respect the strategy so that LLM-initiated fusion plan requests switch the TUI
+      // into fusionplan mode, while preserving the local state when the agent only signals
+      // that plan mode is active.
+      patch.planMode = event.planMode
+        ? event.planStrategy === 'fusion'
+          ? 'fusionplan'
+          : this.host.state.appState.planMode === 'fusionplan'
+            ? 'fusionplan'
+            : 'plan'
+        : 'off';
+    }
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }

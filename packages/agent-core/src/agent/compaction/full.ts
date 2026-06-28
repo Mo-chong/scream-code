@@ -324,11 +324,10 @@ export class FullCompaction {
   ): Promise<void> {
     const originalHistory = [...this.agent.context.history];
     const tokensBefore = estimateTokensForMessages(originalHistory);
+    const model = this.agent.config.model;
     let retryCount = 0;
     try {
       await this.triggerPreCompactHook(data, tokensBefore, signal);
-
-      const model = this.agent.config.model;
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
       let usage: TokenUsage | null;
@@ -362,8 +361,7 @@ export class FullCompaction {
             throw new TruncatedError();
           }
           usage = response.usage;
-          summary = extractCompactionSummary(response);
-          summary = this.postProcessSummary(summary);
+          summary = extractCompactionSummary(response, model);
           break;
         } catch (error) {
           if (error instanceof APIContextOverflowError || error instanceof TruncatedError) {
@@ -431,13 +429,18 @@ export class FullCompaction {
         this.agent.log.error('compaction failed', {
           code: isScreamError(error) ? error.code : undefined,
           error,
+          model,
+          retryCount,
+          compactedCount,
+          tokensBefore,
         });
         this.markCanceled();
         if (!blockedByTurn) {
+          const details: Record<string, unknown> = { model, retryCount };
           const payload =
             isScreamError(error) && error.code === ErrorCodes.AUTH_LOGIN_REQUIRED
               ? toScreamErrorPayload(error)
-              : makeErrorPayload(ErrorCodes.COMPACTION_FAILED, String(error));
+              : makeErrorPayload(ErrorCodes.COMPACTION_FAILED, String(error), { details });
           this.agent.emitEvent({
             type: 'error',
             ...payload,
@@ -549,8 +552,7 @@ export class FullCompaction {
     return `${summary.trim()}\n\n${todoMarkdown}`;
   }
 }
-
-function extractCompactionSummary(response: GenerateResult): string {
+function extractCompactionSummary(response: GenerateResult, model: string): string {
   const summary =
     typeof response.message.content === 'string'
       ? response.message.content
@@ -558,7 +560,11 @@ function extractCompactionSummary(response: GenerateResult): string {
 
   if (summary.trim().length === 0) {
     throw new APIEmptyResponseError(
-      'The compaction response did not contain a non-empty summary.',
+      `The compaction response did not contain a non-empty summary. ` +
+        `Model "${model}" returned empty content. ` +
+        `Common causes: output token limit set too low, an incompatible model, ` +
+        `or a provider/proxy that dropped the stream. ` +
+        `Try /compact again, switch models, or check your provider configuration.`,
     );
   }
   return summary;
