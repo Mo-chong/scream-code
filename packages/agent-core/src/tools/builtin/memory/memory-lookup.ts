@@ -262,7 +262,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
             : undefined;
           lines.push(
             `**${i + 1}. ${memo.userNeed}${source}**`,
-            `  Score: ${score.toFixed(3)}`,
+            `  Score: ${score.toFixed(3)}  |  Recalls: ${memo.recallCount ?? 0}`,
             ...(project !== undefined ? [`  ${project}`] : []),
             ...(tags !== undefined ? [`  ${tags}`] : []),
             `  Approach: ${memo.approach}`,

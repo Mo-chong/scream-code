@@ -24,18 +24,6 @@ export interface RunUpdatePreflightOptions {
   readonly isTTY?: boolean;
 }
 
-const INSTALL_TIMEOUT_MS = 300_000;
-
-/**
- * Resolve the npm executable name for the current platform.
- *
- * On Windows, `npm` is `npm.cmd` — a batch file Node can spawn directly
- * without `shell: true` (which would trigger DEP0190 when args are passed).
- */
-function npmExecutable(): string {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-}
-
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -65,27 +53,6 @@ async function promptInstall(
   return promptForInstallConfirmation(options);
 }
 
-async function installUpdate(): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(npmExecutable(), ['install', '-g', 'scream-code@latest'], { stdio: 'inherit' });
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('npm install 超时'));
-    }, INSTALL_TIMEOUT_MS);
-    child.once('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.once('exit', (code, signal) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`npm install 失败（exit ${code ?? signal}）`));
-    });
-  });
-}
 export function decideUpdateAction(
   target: UpdateTarget | null,
   isInteractive: boolean,

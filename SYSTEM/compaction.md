@@ -53,9 +53,18 @@ v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销*
 
 ### B. Observation Masking（P1 — 省 attention 省 token）
 
-**位置**：`turn-step.ts:73-77` — `buildMessages()` → `maskToolObservations()` → `llm.chat()`
+**位置**：
+- 正常路径：`turn-step.ts:73-77` — `buildMessages()` → `maskToolObservations()` → `llm.chat()`
+- 压缩路径：`full.ts:compactionWorker` — project() → `maskToolObservations(projected, 1)` → LLM
 
-**原理**：旧工具输出（read_file 返回的几百行代码）对当前轮次的推理几乎无用，但仍占据 attention 窗口。将旧 tool result 替换为固定占位符 `[Old tool output: obscured — tool may be re-invoked if needed]`，保留最近 3 条。
+**原理**：旧工具输出（read_file 返回的几百行代码）对当前轮次的推理几乎无用，但仍占据 attention 窗口。将旧 tool result 替换为固定占位符 `[Old tool output: obscured — tool may be re-invoked if needed]`。
+
+**两种路径的行为差异**：
+
+| 路径 | 位置 | keepLastN | 目的 |
+|------|------|-----------|------|
+| 正常对话 | turn-step.ts | 3（最近 3 条不遮） | 当前轮仍需参考最近的 tool 结果 |
+| FullCompaction | full.ts | 1（最近 1 条不遮） | 被裁的老历史不需要完整 tool 原文，LLM 只用作格式参考 |
 
 **关键设计决策**：
 - **无 polling**：旧方案（三合一融合）假设遮蔽会破坏缓存，加了每 15 步刷新一次的 polling。KV-cache 深研发现这是错的——缓存前缀在断点前，遮蔽在断点后，完全不重叠。polling 是在解决不存在的问题。

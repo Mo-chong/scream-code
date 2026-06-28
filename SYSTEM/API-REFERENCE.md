@@ -1,6 +1,8 @@
 # Turn Module API Reference
 
 > AI-readable interface reference — organized by action flow, not by file structure.
+>
+> 📖 系统说明书 & 踩坑记录 → `D:/AI/ScreamCode/SYSTEM-INDEX.md` → `SYSTEM/*.md`；`SYSTEM/pitfalls.md`
 
 ---
 

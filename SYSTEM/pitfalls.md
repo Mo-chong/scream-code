@@ -252,6 +252,49 @@ const mergedTags = await processTags(
 
 **教训**：bundle 模式下，依赖包的 dist 只是编译检查凭证，不是运行时加载的文件。最终 bundle 一步到位。
 
+### 踩坑 #4：保护名单漏了 `ding` 标签（2026-06-27）
+
+**症状**：带 `ding` 标签的记忆在热层容量裁剪时可能被降级（误删）
+
+**根因**：`enforceHotTierCap()` / `demote()` / `autoDemoteIfNeeded()` 的保护名单只列了 `baohu/chundu/yongjiu`，漏了 `ding`。4 种"免死金牌"标签只保护了 3 种。
+
+**修复**：补全 6 处的 `.includes('ding')`：
+- `demote()` L1162
+- `autoDemoteIfNeeded()` L1198 / L1218
+- `enforceHotTierCap()` L1243 / L1264
+- `listAll()` PROTECTED_TAGS L1630
+
+**教训**：保护标签列表定义在一处（如 `tags.ts` 或常量数组），不要散落在各处手写条件。新增标签时用 `grep -rn` 搜索所有 `.includes('yongjiu')` 确认全覆盖。
+
+### 踩坑 #5：业务验收报告误把缺项名写错（2026-06-27）
+
+**症状**：验收报告说 `hermit` 标签漏了，实际漏的是 `ding`
+
+**根因**：写报告时没去读实际代码也没读方案文档，凭记忆写了 `hermit`。方案文档写的是 4 个保护标签（`baohu/ding/yongjiu/chundu`），"隐修"不是方案里的内容。
+
+**教训**：验收报告每条结论必须 from Read/Grep/LSP 的事实，不能从"我感觉"出发。
+
+### 踩坑 #6：连续 Edit 未查 LSP References 触发偏差链（2026-06-27）
+
+**症状**：连续 6 次 Edit 修改 .includes() 条件，被 Guard Rule 6 拦住要求查 references
+
+**根因**：虽然每个 Edit 只是改字符串字面量（无方法签名变化），但批量 Edit 触发了"连续编辑未查 references"的偏差检测规则。
+
+**教训**：
+- 小改动（只改方法体内部字符串）改完后用一次 LSP.references 确认调用方不受影响
+- 批量 Edit 后必须加验证步骤：Read 确认 + LSP.diagnostics + LSP.references
+
+### 踩坑 #7：多个 Edit 到同一文件时锚点过期（2026-06-27）
+
+**症状**：第 2 个及后续 Edit 因第一个 Edit 改了锚点而失败
+
+**根因**：Edit 依赖 Read 返回的 Anchor 校验文件未变。第一个 Edit 成功后文件变了，后续 Edit 的 old_string 要找的内容已经被第一个编辑覆盖。
+
+**教训**：
+- 同一文件的多个 Edit 串行发，每改一处后 Read 确认新锚点再改下一处
+- 或者一次 Edit 改全部（替换大块内容），减少锚点竞争
+- 不要并行发同一个文件的多个 Edit——写锁虽然串行但锚点预测会失效
+
 ---
 
 ## 回合控制
@@ -1158,3 +1201,48 @@ export async function installUpdate(): Promise<void>;  // 无参，自解析 res
 ```
 
 **教训**：当上游改动 fork 核心差异点时，建一个上游不存在的文件做「策略层」，把所有 fork 特有逻辑抽进去。以后 merge 时只有 import 行可能冲突，一次解决永久解决。这个文件永远只增不改，保持零冲突。`install-strategy.ts` 是 Scream Code 的专属文件，上游永远不会有。
+
+### FullCompaction 缺少 Observation Masking（2026-06-27）
+
+**问题**：FullCompaction 发消息给 LLM 做压缩时，跳过 `maskToolObservations`，把全部 tool 输出原文（数千行/条）发给 API。满员 ~100 条消息时，实际 token 达到 557k，远超 262k 限制，API 返回 400。
+
+**根因**：`c170167` 引入 `maskToolObservations` 给正常对话路径遮 tool 输出（turn-step.ts），但压缩路径（full.ts:compactionWorker）直接从 `originalHistory.slice()` 拿原始消息，经过 `project()` 后未遮蔽就发给 LLM。
+
+**正反馈循环**：压缩失败 → 历史不缩反增 → 下次压缩更大 → 更容易超限。
+
+**修复**：`full.ts:compactionWorker` 在 `project()` 之后、发给 LLM 之前加 `maskToolObservations(projected, 1)`，与正常路径保持一致。keepLastN=1 因为压缩的是被裁老消息，不需要完整 tool 原文。
+
+**教训**：给正常对话加过滤/遮蔽逻辑时，必须同步检查压缩路径是否也有同样的处理。两端走不同的代码路径，很容易漏一端。
+
+**关键文件**：`packages/agent-core/src/agent/compaction/full.ts` line 342-343
+
+### v0.7.2 合并复盘（2026-06-27）
+
+**上游改动**（v0.7.0 → v0.7.2，9 个提交）：
+- `feat(wolfpack)` — 暴露 subagent profiles
+- `feat(cc)` — scream cc 添加 uninstall 选项
+- `fix(loop,skill,update)` — 交互 UX 打磨
+- `fix(update)` — 消除 Windows 上 `spawn` 的 DEP0190 弃用警告：`spawn(npm, [...], { stdio })` 替代 `spawn(cmd.join(' '), [], { shell: true })`
+- `fix(stream-json)` — 接受 `--append-system-prompt-file` 和 `--plugin-dir`
+
+**冲突分析**：
+- `apps/scream-code/src/tui/commands/update.ts`（update-tui）：上游去掉 `shell: true`，我们用字符串参数 + `shell: true` → **同一行冲突**，取上游数组参数方案
+- `apps/scream-code/src/cli/update/preflight.ts`：上游新增 `npmExecutable()` + `installUpdate()` → 我们的 `install-strategy.ts` 已在，上游副本删掉（保留 `npmExecutable` 优化）
+- `root package.json` 和 `apps/scream-code/package.json`（版本号变更）→ 自动合并无冲突
+- README 类文件 → 自动合并无冲突
+
+**解决思路**：上游新增的 `installUpdate()` 与我们的 `install-strategy.ts` 功能重复。合并后删掉上游副本，保留 `install-strategy.ts`。上游的 `npmExecutable()` 优化（防 DEP0190）通过 `update.ts` 的 `spawn` 参数改造接入。
+
+**验证流程**：
+1. `git merge v0.7.2 --log`
+2. 解决 2 个文件冲突（preflight.ts + update.ts）
+3. `git add` → `git merge --continue`
+4. `tsc --noEmit` 通过（0 errors）
+5. LSP.diagnostics 确认所有调用方文件（dispatch.ts、from-source.ts、测试文件）均 0 错误
+
+**关键经验**：
+1. **策略层模式验证成功**：`install-strategy.ts` 在 v0.7.2 merge 中零冲突，import 行自动合并。证明"上游不存在的专有文件做策略层"策略有效
+2. **先合并再删重复**：上游新增的函数与我们的策略层功能重叠时，先接受 merge 冲突，再删除上游副本。不反向修改 merge 过程
+3. **DEP0190 修复单独验证**：`spawn(cmd, args)` 数组参数模式在 Windows 消除弃用警告，但新版本 Node 才支持。确认 CI Node 版本后决定是否采用
+4. **build guard hook**：merge 提交被 guard hook（`npm run build`）拦截，需先 rebuild bundle 再提交。流程：merge → build → commit
+

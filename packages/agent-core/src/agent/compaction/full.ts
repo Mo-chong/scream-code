@@ -25,6 +25,7 @@ import {
   estimateTokens,
   estimateTokensForMessages,
 } from '../../utils/tokens';
+import { maskToolObservations } from '../../utils/mask-tool-observations';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
 import { renderMessagesToText } from './render-messages';
@@ -56,7 +57,8 @@ const COMPACTION_SYSTEM_PROMPT =
   'Output text only. DO NOT CALL ANY TOOLS. ' +
   'Follow the compaction instruction in the last user message exactly. ' +
   'Pay special attention to the Memory Memo Extraction section — ' +
-  'you MUST output memory-memo blocks for every completed task loop.';
+  'you MUST output memory-memo blocks for every completed task loop. ' +
+  'Write memory-memo content in the SAME LANGUAGE as the conversation.';
 
 export class FullCompaction {
   protected compactionCountInTurn = 0;
@@ -337,8 +339,10 @@ export class FullCompaction {
       let summary: string;
       while (true) {
         const messagesToCompact = originalHistory.slice(0, compactedCount);
+        const projected = project(messagesToCompact);
+        const masked = maskToolObservations(projected, 1);
         const messages = [
-          ...project(messagesToCompact),
+          ...masked,
           {
             role: 'user',
             content: [

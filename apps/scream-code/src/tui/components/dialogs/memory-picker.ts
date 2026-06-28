@@ -41,7 +41,7 @@ function applyPrioritySort(memos: MemoryMemoSummary[]): MemoryMemoSummary[] {
     const aPrio = a.tags?.some((t) => PRIORITY_TAGS.has(t)) ?? false;
     const bPrio = b.tags?.some((t) => PRIORITY_TAGS.has(t)) ?? false;
     if (aPrio !== bPrio) return aPrio ? -1 : 1;
-    return b.recordedAt - a.recordedAt;
+    return (b.recallCount ?? 0) - (a.recallCount ?? 0) || b.recordedAt - a.recordedAt;
   });
 }
 
@@ -436,7 +436,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const badges = memoBadges(memo.tags);
     const score = computeHeatScore(memo);
     const scoreStr = score < 1 ? score.toFixed(2) : '1.00';
-    const trailingParts = [badges, scoreStr, time, src].filter((p) => p.length > 0);
+    const recallStr = `召回${String(memo.recallCount ?? 0)}`;
+    const trailingParts = [badges, scoreStr, recallStr, time, src].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1;
@@ -526,6 +527,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(`${indent}ID: ${memo.id}`, width, ELLIPSIS),
+    ));
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}召回: ${String(memo.recallCount ?? 0)} 次`, width, ELLIPSIS),
     ));
     lines.push('');
 

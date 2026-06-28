@@ -73,7 +73,7 @@ export class MemoryEditTool implements BuiltinTool<MemoryEditInput> {
         if (updates.outcome !== undefined) patch.outcome = updates.outcome;
         if (updates.whatFailed !== undefined) patch.whatFailed = updates.whatFailed;
         if (updates.whatWorked !== undefined) patch.whatWorked = updates.whatWorked;
-        if (updates.tags !== undefined) patch.tags = normalizeTags(updates.tags);
+        if (updates.tags !== undefined) patch.tags = normalizeTags(updates.tags, 999);
 
         if (Object.keys(patch).length === 0) {
           return { isError: true, output: 'No updates provided.' };

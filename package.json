@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
+    "build:dev": "bash scripts/build-dev.sh",
     "build:packages": "pnpm -r --filter './packages/*' run build",
     "dev:cli": "pnpm -C apps/scream-code run dev",
     "typecheck": "pnpm run build:packages && pnpm -r --filter './packages/*' run typecheck && pnpm --filter scream-code run typecheck",

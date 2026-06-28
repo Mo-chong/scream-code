@@ -187,7 +187,25 @@ export class MemoryMemoStore {
     const rows = (
       projectDir === undefined ? stmt.all(ftsQuery, limit) : stmt.all(ftsQuery, projectDir, limit)
     ) as Array<Record<string, unknown>>;
-    return rows.map(rowToMemo);
+    const memos = rows.map(rowToMemo);
+    // Re-rank: relevance × 0.7 + heatScore × 0.3
+    const now = Date.now();
+    memos.forEach((memo) => {
+      const daysSinceRecall = memo.lastRecalledAt ? (now - memo.lastRecalledAt) / 86400000 : 365;
+      const tagLambda = memo.tags?.some((t) => t === 'yongjiu' || t === 'chundu') ? 0
+        : memo.tags?.some((t) => t === 'baohu' || t === 'ding') ? 0.001
+        : 0.02;
+      const decayFactor = Math.exp(-tagLambda * daysSinceRecall);
+      const recallBoost = (memo.recallCount ?? 0) > 0 ? Math.log(1 + (memo.recallCount ?? 0)) : 0;
+      const heatScore = Math.min(decayFactor * (1 - Math.exp(-recallBoost / 5)), 1);
+      (memo as any).__blendScore = (rows.length > 1 ? 1 : 1.0) * 0.7 + heatScore * 0.3;
+    });
+    memos.sort((a, b) => ((b as any).__blendScore ?? 0) - ((a as any).__blendScore ?? 0));
+    // Fire-and-forget: record recall event for each matched memo
+    for (const memo of memos) {
+      this.recordRecall(memo.id).catch(() => {});
+    }
+    return memos;
   }
 
   /** List memos with optional full-text search and pagination. */
@@ -364,7 +382,9 @@ export class MemoryMemoStore {
         extraction_source TEXT NOT NULL CHECK(extraction_source IN ('compaction', 'exit', 'manual')),
         recorded_at INTEGER NOT NULL,
         project_dir TEXT NOT NULL DEFAULT '',
-        tags TEXT NOT NULL DEFAULT '[]'
+        tags TEXT NOT NULL DEFAULT '[]',
+        recall_count INTEGER NOT NULL DEFAULT 0,
+        last_recalled_at INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
@@ -417,11 +437,25 @@ export class MemoryMemoStore {
         archived_at INTEGER NOT NULL,
         hit_count INTEGER NOT NULL DEFAULT 0,
         last_hit_at INTEGER NOT NULL DEFAULT 0,
-        embedding_json TEXT
+        embedding_json TEXT,
+        recall_count INTEGER NOT NULL DEFAULT 0,
+        last_recalled_at INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS idx_archive_archived_at ON memos_archive(archived_at DESC);
       CREATE INDEX IF NOT EXISTS idx_archive_project_dir ON memos_archive(project_dir);
+
+      -- recall_log: audit trail for recall/demote/promote operations
+      CREATE TABLE IF NOT EXISTS recall_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memo_id TEXT NOT NULL,
+        op TEXT NOT NULL CHECK(op IN ('recall', 'demote', 'promote', 'archive_hit')),
+        old_recall_count INTEGER DEFAULT 0,
+        new_recall_count INTEGER DEFAULT 0,
+        timestamp INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_recall_log_memo_id ON recall_log(memo_id);
+      CREATE INDEX IF NOT EXISTS idx_recall_log_timestamp ON recall_log(timestamp);
     `);
     this.migrateSchema();
   }
@@ -441,6 +475,18 @@ export class MemoryMemoStore {
     const hasTags = info.some((col) => col.name === 'tags');
     if (!hasTags) {
       this.db.exec("ALTER TABLE memos ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
+    }
+    const hasRecallCount = info.some((col) => col.name === 'recall_count');
+    if (!hasRecallCount) {
+      this.db.exec("ALTER TABLE memos ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0");
+      this.db.exec("ALTER TABLE memos ADD COLUMN last_recalled_at INTEGER NOT NULL DEFAULT 0");
+    }
+    // Align memos_archive (freshly created with new columns, or legacy)
+    const archiveInfo = this.db.prepare('PRAGMA table_info(memos_archive)').all() as Array<{ name: string }>;
+    const archiveHasRecallCount = archiveInfo.some((col) => col.name === 'recall_count');
+    if (!archiveHasRecallCount) {
+      this.db.exec("ALTER TABLE memos_archive ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0");
+      this.db.exec("ALTER TABLE memos_archive ADD COLUMN last_recalled_at INTEGER NOT NULL DEFAULT 0");
     }
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
@@ -947,10 +993,15 @@ export class MemoryMemoStore {
         memo_id: string;
         distance: number;
       }>;
-      return rows.map((r) => ({
+      const results = rows.map((r) => ({
         memo_id: r.memo_id,
         similarity: 1 / (1 + r.distance),
       }));
+      // Fire-and-forget record recall for each returned memo
+      for (const r of results) {
+        this.recordRecall(r.memo_id).catch(() => {});
+      }
+      return results;
     } catch {
       return [];
     }
@@ -965,8 +1016,9 @@ export class MemoryMemoStore {
         `INSERT INTO memos_archive (
           id, source_session_id, source_session_title, user_need, approach,
           outcome, what_failed, what_worked, extraction_source, recorded_at,
-          project_dir, tags, archived_at, hit_count, last_hit_at, embedding_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          project_dir, tags, archived_at, hit_count, last_hit_at, embedding_json,
+          recall_count, last_recalled_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.id,
@@ -985,10 +1037,12 @@ export class MemoryMemoStore {
         entry.hitCount,
         entry.lastHitAt,
         entry.embeddingJson ?? null,
+        entry.recallCount ?? entry.hitCount ?? 0,
+        entry.lastRecalledAt ?? entry.lastHitAt ?? 0,
       );
   }
 
-  private async getArchived(id: string): Promise<(MemoryMemo & { archivedAt: number; hitCount: number; lastHitAt: number; embeddingJson?: string }) | undefined> {
+  private async getArchived(id: string): Promise<(MemoryMemo & { archivedAt: number; hitCount: number; lastHitAt: number; recallCount: number; lastRecalledAt: number; embeddingJson?: string }) | undefined> {
     if (this.db === undefined) return undefined;
     const row = this.db.prepare('SELECT * FROM memos_archive WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     if (row === undefined) return undefined;
@@ -998,6 +1052,8 @@ export class MemoryMemoStore {
       archivedAt: Number(row['archived_at']),
       hitCount: Number(row['hit_count']),
       lastHitAt: Number(row['last_hit_at']),
+      recallCount: typeof row['recall_count'] === 'number' ? Number(row['recall_count']) : Number(row['hit_count']),
+      lastRecalledAt: typeof row['last_recalled_at'] === 'number' ? Number(row['last_recalled_at']) : Number(row['last_hit_at']) || 0,
       embeddingJson: typeof ej === 'string' && ej.length > 0 ? ej : undefined,
     };
   }
@@ -1010,6 +1066,36 @@ export class MemoryMemoStore {
   private async updateArchiveHitCount(id: string, count: number, lastHitAt: number): Promise<void> {
     if (this.db === undefined) return;
     this.db.prepare('UPDATE memos_archive SET hit_count = ?, last_hit_at = ? WHERE id = ?').run(count, lastHitAt, id);
+  }
+
+  /** Record a recall event: bump recall_count + last_recalled_at on both hot and cold tiers, fire-and-forget. */
+  async recordRecall(id: string): Promise<void> {
+    await this.init();
+    if (this.db === undefined) return;
+    const now = Date.now();
+    // hot tier
+    const hot = this.db.prepare('UPDATE memos SET recall_count = recall_count + 1, last_recalled_at = ? WHERE id = ?').run(now, id);
+    if (hot.changes === 0) {
+      // cold tier
+      const cold = this.db.prepare('UPDATE memos_archive SET recall_count = recall_count + 1, last_recalled_at = ? WHERE id = ?').run(now, id);
+      if (cold.changes > 0) {
+        this.logRecall(id, 'archive_hit', undefined, (cold.changes as unknown as number));
+      }
+    }
+    if (hot.changes > 0) {
+      this.logRecall(id, 'recall', undefined, undefined);
+    }
+  }
+
+  /** Append a row to recall_log. Fire-and-forget — never throws. */
+  private logRecall(memoId: string, op: string, oldCount?: number, newCount?: number): void {
+    try {
+      this.db?.prepare(
+        'INSERT INTO recall_log (memo_id, op, old_recall_count, new_recall_count, timestamp) VALUES (?, ?, ?, ?, ?)'
+      ).run(memoId, op, oldCount ?? 0, newCount ?? 0, Date.now());
+    } catch {
+      // silently ignore log failures
+    }
   }
 
   private async hotMemoCount(): Promise<number> {
@@ -1045,6 +1131,8 @@ export class MemoryMemoStore {
       recordedAt: archived.recordedAt,
       projectDir: archived.projectDir,
       tags: archived.tags,
+      recallCount: archived.recallCount ?? archived.hitCount,
+      lastRecalledAt: archived.lastRecalledAt ?? archived.lastHitAt,
     };
     await this.appendInternal(memo);
     await this.deleteFromArchive(id);
@@ -1061,6 +1149,7 @@ export class MemoryMemoStore {
         .run(id, archived.embeddingJson, 'bge-small-zh-v1.5', Date.now());
     }
     this.updateVec0Tier(id, 'HOT');
+    this.logRecall(id, 'promote');
     return true;
   }
 
@@ -1070,7 +1159,7 @@ export class MemoryMemoStore {
       await this.init();
       if (this.db === undefined) return false;
       const memo = await this.get(id);
-      if (memo === undefined || (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu')))) return false;
+      if (memo === undefined || (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('ding') || memo.tags.includes('yongjiu')))) return false;
 
       // Save embedding before deleteInternal removes the memo (and its vec0 entry).
       const embRow = this.db
@@ -1093,12 +1182,11 @@ export class MemoryMemoStore {
         const vec = new Float32Array(JSON.parse(embeddingJson) as number[]);
         this.upsertVec0(id, vec, memo, 'ARCHIVED');
       }
+      this.logRecall(id, 'demote');
 
       return true;
     });
   }
-
-  /** Auto-demote: scan hot tier, demote cold entries. */
   async autoDemoteIfNeeded(): Promise<number> {
     await this.init();
     if (this.db === undefined) return 0;
@@ -1107,7 +1195,7 @@ export class MemoryMemoStore {
     const hotMemos = await this.getAllHotMemos();
 
     for (const memo of hotMemos) {
-      if (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('yongjiu'))) continue;
+      if (Array.isArray(memo.tags) && (memo.tags.includes('baohu') || memo.tags.includes('chundu') || memo.tags.includes('ding') || memo.tags.includes('yongjiu'))) continue;
 
       const tags = new Set(memo.tags ?? []);
       const D = tags.has('baohu') ? 0.99 : tags.has('ding') ? 0.95 : tags.has('chundu') ? 1 : tags.has('yongjiu') ? 1 : 0.85;
@@ -1121,12 +1209,12 @@ export class MemoryMemoStore {
       }
     }
 
-    // Cap hot tier size — evict lowest recorded_at first
+    // Cap hot tier size — evict lowest recall_count first, then oldest
     const currentCount = await this.hotMemoCount();
     if (currentCount > HOT_MAX_SIZE) {
       const remaining = hotMemos
-        .filter((m) => !(Array.isArray(m.tags) && (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('yongjiu'))))
-        .sort((a, b) => a.recordedAt - b.recordedAt) // oldest first
+        .filter((m) => !(Array.isArray(m.tags) && (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('ding') || m.tags.includes('yongjiu'))))
+        .sort((a, b) => (a.recallCount ?? 0) - (b.recallCount ?? 0) || a.recordedAt - b.recordedAt)
         .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
       for (const memo of remaining) {
         if (demoted >= DEMOTE_BATCH_SIZE) break;
@@ -1152,10 +1240,10 @@ export class MemoryMemoStore {
     const hotMemos = await this.getAllHotMemos();
     const unprotected = hotMemos.filter(
       (m) => !(Array.isArray(m.tags) &&
-        (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('yongjiu')))
+        (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('ding') || m.tags.includes('yongjiu')))
     );
     const evictTargets = unprotected
-      .sort((a, b) => a.recordedAt - b.recordedAt) // oldest first
+      .sort((a, b) => (a.recallCount ?? 0) - (b.recallCount ?? 0) || a.recordedAt - b.recordedAt)
       .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
 
     let demoted = 0;
@@ -1461,6 +1549,63 @@ export class MemoryMemoStore {
     };
   }
 
+  /**
+   * Recalculate recall_count for every memo by replaying recall_log.
+   * Resets memos.recall_count = count of 'recall' ops for that memo,
+   * and memos.last_recalled_at = max timestamp of those ops.
+   * Only touches memos that have entries in recall_log.
+   */
+  async recalcRecallCountFromLog(): Promise<{ updated: number; totalLogEntries: number }> {
+    if (this.db === undefined) return { updated: 0, totalLogEntries: 0 };
+    const logCount = this.db.prepare("SELECT COUNT(*) as c FROM recall_log WHERE op = 'recall'").get() as {
+      c: number;
+    };
+    if (logCount.c === 0) return { updated: 0, totalLogEntries: 0 };
+
+    // Rebuild recall_count from recall_log
+    const stats = this.db
+      .prepare(
+        `SELECT memo_id, COUNT(*) as cnt, MAX(timestamp) as last_at
+         FROM recall_log WHERE op = 'recall' GROUP BY memo_id`,
+      )
+      .all() as { memo_id: string; cnt: number; last_at: number }[];
+
+    const updateMemo = this.db.prepare(
+      'UPDATE memos SET recall_count = ?, last_recalled_at = ? WHERE id = ?',
+    );
+    const updateArchive = this.db.prepare(
+      'UPDATE memos_archive SET recall_count = ?, last_recalled_at = ? WHERE id = ?',
+    );
+    const tx = this.db.transaction(() => {
+      for (const row of stats) {
+        updateMemo.run(row.cnt, row.last_at, row.memo_id);
+        updateArchive.run(row.cnt, row.last_at, row.memo_id);
+      }
+    });
+    tx();
+
+    return { updated: stats.length, totalLogEntries: logCount.c };
+  }
+
+  /**
+   * Aggregate memory store statistics for diagnostics.
+   */
+  getMemoryStats(): {
+    totalMemos: number;
+    hotMemos: number;
+    coldMemos: number;
+    recallLogEntries: number;
+    totalRecalls: number;
+  } {
+    if (this.db === undefined) return { totalMemos: 0, hotMemos: 0, coldMemos: 0, recallLogEntries: 0, totalRecalls: 0 };
+    const total = (this.db.prepare('SELECT COUNT(*) as c FROM memos').get() as { c: number }).c;
+    const hot = (this.db.prepare('SELECT COUNT(*) as c FROM memos WHERE recall_count > 0').get() as { c: number }).c;
+    const cold = (this.db.prepare('SELECT COUNT(*) as c FROM memos WHERE recall_count = 0').get() as { c: number }).c;
+    const logTotal = (this.db.prepare('SELECT COUNT(*) as c FROM recall_log').get() as { c: number }).c;
+    const recTotal = (this.db.prepare("SELECT COUNT(*) as c FROM recall_log WHERE op = 'recall'").get() as { c: number }).c;
+    return { totalMemos: total, hotMemos: hot, coldMemos: cold, recallLogEntries: logTotal, totalRecalls: recTotal };
+  }
+
   private listAll(limit: number, offset: number, projectDir?: string): { rows: MemoryMemo[]; total: number } {
     if (this.db === undefined) return { rows: [], total: 0 };
     const countStmt =
@@ -1473,14 +1618,23 @@ export class MemoryMemoStore {
     const total = countRow?.total ?? 0;
     const stmt =
       projectDir === undefined
-        ? this.db.prepare('SELECT * FROM memos ORDER BY recorded_at DESC LIMIT ? OFFSET ?')
+        ? this.db.prepare('SELECT * FROM memos ORDER BY recall_count DESC, recorded_at DESC LIMIT ? OFFSET ?')
         : this.db.prepare(
-            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recall_count DESC, recorded_at DESC LIMIT ? OFFSET ?",
           );
     const rows = (
       projectDir === undefined ? stmt.all(limit, offset) : stmt.all(projectDir, limit, offset)
     ) as Array<Record<string, unknown>>;
-    return { rows: rows.map(rowToMemo), total };
+    const memos = rows.map(rowToMemo);
+    // Sort: protected tags pinned to top, then by recall_count DESC
+    const PROTECTED_TAGS = new Set(['baohu', 'chundu', 'ding', 'yongjiu']);
+    memos.sort((a, b) => {
+      const aProtected = a.tags?.some((t) => PROTECTED_TAGS.has(t)) ?? false;
+      const bProtected = b.tags?.some((t) => PROTECTED_TAGS.has(t)) ?? false;
+      if (aProtected !== bProtected) return aProtected ? -1 : 1;
+      return (b.recallCount ?? 0) - (a.recallCount ?? 0) || b.recordedAt - a.recordedAt;
+    });
+    return { rows: memos, total };
   }
 
   private async ensureDir(): Promise<void> {
@@ -1511,6 +1665,8 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     recordedAt: Number(row['recorded_at']),
     projectDir: typeof projectDir === 'string' ? projectDir : '',
     tags: parseTags(row['tags']),
+    recallCount: typeof row['recall_count'] === 'number' ? row['recall_count'] : (row['hit_count'] as number | undefined),
+    lastRecalledAt: typeof row['last_recalled_at'] === 'number' ? row['last_recalled_at'] : (row['last_hit_at'] as number | undefined) || undefined,
   };
 }
 

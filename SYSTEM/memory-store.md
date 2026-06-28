@@ -765,3 +765,50 @@ await this.agent.memoStore.search("query");
 | `test/consolidator.test.ts` | 5 | 重复合并 / 过期判断 / baohu 免疫 |
 | `test/memos-fts.test.ts` | ~5 | FTS5 索引完整性 |
 | `test/tools/memory-lookup.test.ts` | 13 | 端到端 vec0 搜索 / 冷热 fallback / autoPromote / ResNet 衰减 |
+
+---
+
+## 十四、调用计数 (recallCount) 增强 — v3 精简版
+
+> 实现 PR: 记忆系统-调用计数增强-v3精简版（验收 + 修复）
+> 源码: `packages/memory/src/store.ts` L1082-1125 (recordRecall), L1243-1264 (enforceHotTierCap), L1558-1607 (运维工具)
+
+### 14.1 字段
+
+- `memos.recall_count` — 每条记忆被召回次数（默认 0）
+- `memos.last_recalled_at` — 最近一次召回时间戳
+- `recall_log` 表 — `(id, memo_id, op, old_recall_count, new_recall_count, timestamp)` 流水
+
+### 14.2 核心路径
+
+1. **`recordRecall()`** (L1082): 搜索命中后 fire-and-forget 更新热层 + 冷层 `recall_count++` + `last_recalled_at=now()`，并写入 `recall_log`
+2. **`rowToMemo()`** (L1048): SQL 行 → 对象，映射 `recall_count` → `recallCount`，兼容旧库 `hit_count`
+3. **`listAll()`** (L1563): `ORDER BY recall_count DESC, recorded_at DESC`
+4. **`search()` blend** (L247): `finalScore = relevance×0.7 + heatScore×0.3`，其中 `heatScore = D × decayFactor × (1 − exp(−recallBoost/5))`
+5. **`enforceHotTierCap()` 降级** (L1254): 按 `recallCount` 升序排序，低的优先降级，跳过 `baohu/chundu/ding/yongjiu` 标签
+
+### 14.3 保护标签（降级/热层裁剪时跳过）
+
+| 标签 | 位置 | 检查位置 |
+|------|------|----------|
+| `baohu` | `demote()` L1162, `autoDemoteIfNeeded()` L1198/L1218, `enforceHotTierCap()` L1243/L1264, `listAll()` L1630 | 全部 6 处 |
+| `ding` | 同上 | ✅ **已补全**（初版只列了 baohu/chundu/yongjiu，遗忘 ding，后者修复）|
+| `yongjiu` | 同上 | ✅ |
+| `chundu` | 同上 | ✅ |
+
+### 14.4 运维工具
+
+| 方法 | 行号 | 功能 |
+|------|------|------|
+| `recalcRecallCountFromLog()` | L1558 | 从 `recall_log` 重放 `op='recall'` 重建 `recall_count` + `last_recalled_at`，同时更新 `memos` 和 `memos_archive` |
+| `getMemoryStats()` | L1593 | 返回 `{totalMemos, hotMemos, coldMemos, recallLogEntries, totalRecalls}` 诊断数据 |
+
+### 14.5 TUI 显示
+
+- 列表行: `memory-picker.ts` L439 无条件显示 `召回N`
+- 详情页: `memory-picker.ts` L532 显示 `召回: N 次`
+
+### 14.6 已知限制
+
+- `hermit` 标签未加入保护名单（如有需要可补）
+- 无对外暴露的 `recalcRecallCountFromLog()` 的 CLI/API 调用入口（需手动调 `store.recalcRecallCountFromLog()`）

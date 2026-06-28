@@ -604,3 +604,17 @@ The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps
 - Optional object properties do not need to additionally allow `undefined` in the type.
 - Internal methods with only a single parameter should not be turned into options objects just for stylistic uniformity.
 - Except for a package's own `index.ts`, other `index.ts` files should prefer `export * from './module'`.
+
+## Development Build
+
+二开 fork 保留源码编译（alwaysBundle），上游发 npm 包。
+
+| 命令/脚本 | 用途 | 说明 |
+|-----------|------|------|
+| `bash scripts/build-dev.sh` | 构建所有改动的包 | 硬编码 node 路径，绕过 pnpm lifecycle |
+| `pnpm build:dev` | 同上 | 等价于 bash scripts/build-dev.sh |
+| `pnpm build --filter @scream-code/agent-core` | 单包构建 | 需 node 在 PATH（~/.bashrc 已配置） |
+
+**构建链**：agent-core → scream-code(alwaysBundle 打包)，改 agent-core 源码后必须重建两段。
+
+**githooks 前置检查**：`.git/hooks/pre-commit` → `check-all.sh` → 4 个 guard（pnpm env、bundle stale、config build、alwaysBundle 完整性）

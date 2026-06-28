@@ -27,6 +27,10 @@ export interface MemoryMemo {
   projectDir: string;
   /** Semantic tags summarizing the task domain (3-5 items). */
   tags?: string[];
+  /** Number of times this memo has been recalled (0 = never, undefined = legacy). */
+  recallCount?: number;
+  /** Unix ms timestamp of the most recent recall. */
+  lastRecalledAt?: number;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -50,6 +54,8 @@ export interface MemoryMemoSummary {
   recordedAt: number;
   projectDir: string;
   tags?: string[];
+  recallCount?: number;
+  lastRecalledAt?: number;
 }
 
 /** Result of listing/filtering memos. */
@@ -107,5 +113,7 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     recordedAt: memo.recordedAt,
     projectDir: memo.projectDir,
     tags: memo.tags,
+    recallCount: memo.recallCount,
+    lastRecalledAt: memo.lastRecalledAt,
   };
 }
