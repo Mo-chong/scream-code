@@ -32,9 +32,9 @@ export interface ContentArchiveEntry {
 }
 
 export interface ContentArchiveConfig {
-  /** 单条存活时间（ms），默认 300_000（5 分钟） */
+  /** 单条存活时间（ms），默认 1_800_000（30 分钟） */
   readonly ttlMs?: number;
-  /** 全局条目上限，默认 50 */
+  /** 全局条目上限，默认 2000 */
   readonly maxEntries?: number;
 }
 

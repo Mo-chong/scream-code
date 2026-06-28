@@ -717,6 +717,18 @@ node _verify.mjs  # → 13 passed, 0 failed
 
 **教训**：新功能在设计时就要确定 default true/false。需要 IO 或有副作用的 feature 默认 false。把 flag 的 env 变量名（`SCREAM_CODE_EXPERIMENTAL_FILE_ACTION_AUDIT`）也写进文档，方便用户排查。
 
+### ArchiveRecover 从 MCP 改为内置工具 — MCP 不适合 Agent 内部工具（2026-06-27）
+
+**场景**：Phase 3 原计划用 MCP `registerUserTool`（RPC 前端通道）暴露 archive_recover，但调研发现 `archive_recover` 是 Agent 内部工具（读取 ContentArchive 实例），不应走 MCP 路由。
+
+**教训**：MCP 通道的本质是**前后端分离的 RPC**：前端注册 → 后端 via `agent.getTool()` 分发，路径长、有序列化开销。内置工具是**硬性注入**（构造函数传入 ContentArchive 实例），路径短、无序列化、代码可见性高。判断标准：工具需要读取 Agent 内部状态/实例 → 内置工具；工具是外部服务/数据库 → MCP。参考 `MemoryLookupTool` 的 constructor + `&&` 守卫模式。
+
+### ContentArchive 加权淘汰 — NO_EVICTABLE_ENTRY 守卫防无限制膨胀（2026-06-27）
+
+**场景**：ContentArchive 的 `evictOne()` 在所有条目 priority < 0.1 时可能无限循环，因为淘汰条件 `entry.priority < 0.1` 正好是硬约束淘汰类——如果全部条目都是 < 0.1，每次循环检查第一个条目→ condition 命中→ return，不会死循环。但为防未来评分公式变化引入的死循环风险，加了 `for (let attempt = 0; attempt < 3; attempt++)` + break 保护 + `throw ContentArchiveError('NO_EVICTABLE_ENTRY')` 兜底守卫。
+
+**教训**：淘汰类算法一定要同时考虑：（1）找不到可淘汰项时的退化路径（throw Error 而非静默失败），（2）循环保护（for+break 而非 while(true)），（3）调用方对 NO_EVICTABLE_ENTRY 的预期处理。
+
 ---
 
 ## 调试教训

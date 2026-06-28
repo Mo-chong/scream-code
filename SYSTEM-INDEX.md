@@ -44,6 +44,7 @@
 |------|-------------|
 | ContentArchive 扩容与加权淘汰 | `SYSTEM/API-REFERENCE.md` §18 |
 | FileActionAudit 文件审计日志 | `SYSTEM/API-REFERENCE.md` §19 |
+| ArchiveRecoverTool 内容存档恢复 | `SYSTEM/API-REFERENCE.md` §20 |
 | content-archive / file-action-audit flag | `flags/registry.ts` |
 | 记忆存在哪里/怎么搜 | `SYSTEM/memory-store.md` |
 | FTS5 索引了什么字段 | `SYSTEM/memory-store.md` §FTS5 |
@@ -117,6 +118,7 @@
 | `DECISIONS/Guard规则引擎-实战执行方案.md` | Guard 执行细节 |
 | `DECISIONS/分析-长期记忆系统外挂方案-开源调查与适配分析.md` 🆕 | 12 方案全面分析，结论：无需外挂，缺沉淀策略 |
 | `DECISIONS/扩展方向-架构进化路线-行为学习与闭环.md` | 未来方向：P0反馈/P1学习/P2沙盒 |
+| `DECISIONS/分析-ContentArchive-参数优化与FileActionAudit融合计划-最终执行方案.md` 🆕 | ContentArchive v2 升级+FileActionAudit+ArchiveRecoverTool 三阶段实现 |
 
 ---
 

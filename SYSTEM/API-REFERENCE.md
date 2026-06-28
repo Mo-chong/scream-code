@@ -1069,7 +1069,7 @@ Point C (full.ts):          (comment only — FullCompact rewrites messages via 
 
 ### Recovery path
 
-The `recover(key)` method reads an entry by key while refreshing its TTL and boosting priority (+0.1). Expired or missing keys return `undefined`. The companion `archive_recover` MCP tool (stage 2, not yet implemented) will wrap this for model-facing access.\r
+The `recover(key)` method reads an entry by key while refreshing its TTL and boosting priority (+0.1). Expired or missing keys return `undefined`. The companion `ArchiveRecoverTool` (§20) wraps this as a built-in agent tool for model-facing access.\r
 \r
 ### v2.0 changes (2026-06)\r
 \r
