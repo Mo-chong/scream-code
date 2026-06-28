@@ -26,6 +26,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
       theme: 'dark',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
+      like: {},
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-signals',

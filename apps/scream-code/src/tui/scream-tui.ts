@@ -113,6 +113,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     latestVersion: null,
     editorCommand: input.tuiConfig.editorCommand,
     notifications: input.tuiConfig.notifications,
+    like: input.tuiConfig.like,
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,

@@ -28,6 +28,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     latestVersion: null,
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
+    like: {},
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,

@@ -25,6 +25,13 @@ export const NotificationsConfigSchema = z.object({
   enabled: z.boolean(),
   condition: NotificationConditionSchema,
 });
+export const TuiLikePreferencesSchema = z.object({
+  nickname: z.string().optional(),
+  tone: z.string().optional(),
+  other: z.string().optional(),
+});
+
+export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;
 
 export const TuiConfigFileSchema = z.object({
   theme: TuiThemeSchema.optional(),
@@ -39,12 +46,14 @@ export const TuiConfigFileSchema = z.object({
       notification_condition: NotificationConditionSchema.optional(),
     })
     .optional(),
+  like: TuiLikePreferencesSchema.optional(),
 });
 
 export const TuiConfigSchema = z.object({
   theme: TuiThemeSchema,
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
+  like: TuiLikePreferencesSchema,
 });
 
 export type TuiConfigFileShape = z.infer<typeof TuiConfigFileSchema>;
@@ -55,11 +64,11 @@ export const DEFAULT_NOTIFICATIONS_CONFIG: NotificationsConfig = {
   enabled: true,
   condition: 'unfocused',
 };
-
 export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   theme: 'auto',
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
+  like: {},
 });
 
 /**
@@ -114,6 +123,7 @@ export async function saveTuiConfig(
 
 export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
   const command = config.editor?.command?.trim();
+  const like = config.like ?? {};
   return TuiConfigSchema.parse({
     theme: config.theme ?? DEFAULT_TUI_CONFIG.theme,
     editorCommand: command === undefined || command.length === 0 ? null : command,
@@ -122,10 +132,23 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       condition:
         config.notifications?.notification_condition ?? DEFAULT_NOTIFICATIONS_CONFIG.condition,
     },
+    like: {
+      nickname: normalizeOptionalString(like.nickname),
+      tone: normalizeOptionalString(like.tone),
+      other: normalizeOptionalString(like.other),
+    },
   });
 }
 
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
 export function renderTuiConfig(config: TuiConfig): string {
+  const nickname = escapeTomlBasicString(config.like.nickname ?? '');
+  const tone = escapeTomlBasicString(config.like.tone ?? '');
+  const other = escapeTomlBasicString(config.like.other ?? '');
   return `# ~/.scream-code/tui.toml
 # Terminal UI preferences for scream-code.
 # Agent/runtime settings stay in ~/.scream-code/config.toml.
@@ -138,6 +161,11 @@ command = "${escapeTomlBasicString(config.editorCommand ?? '')}" # Empty uses $V
 [notifications]
 enabled = ${String(config.notifications.enabled)} # true | false
 notification_condition = "${config.notifications.condition}" # "unfocused" | "always"
+
+[like]
+nickname = "${nickname}"
+tone = "${tone}"
+other = "${other}"
 `;
 }
 

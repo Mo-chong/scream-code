@@ -43,6 +43,7 @@ function makeStartupInput(
       theme: "dark",
       editorCommand: null,
       notifications: { enabled: true, condition: "unfocused" },
+      like: {},
       ...tuiConfig,
     },
     version: "0.0.0-test",

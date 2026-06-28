@@ -54,6 +54,7 @@ import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 import { handleLoopCommand } from './loop';
+import { handleLikeCommand } from './like';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -251,6 +252,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'settings':
       showSettingsSelector(host);
+      return;
+    case 'like':
+      await handleLikeCommand(host);
       return;
     case 'usage':
       showUsage(host).catch((error: unknown) => {

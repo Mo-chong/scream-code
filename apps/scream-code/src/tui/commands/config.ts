@@ -290,6 +290,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
       theme: host.state.appState.theme,
       editorCommand,
       notifications: host.state.appState.notifications,
+      like: host.state.appState.like,
     });
   } catch (error) {
     host.showStatus(
@@ -429,6 +430,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
       theme,
       editorCommand: host.state.appState.editorCommand,
       notifications: host.state.appState.notifications,
+      like: host.state.appState.like,
     });
   } catch (error) {
     host.showStatus(

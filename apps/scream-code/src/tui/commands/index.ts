@@ -20,6 +20,7 @@ export {
   showPermissionPicker,
   showSettingsSelector,
 } from './config';
+export { handleLikeCommand } from './like';
 export { handleLoopCommand, describeLoopStatus } from './loop';
 export {
   showMcpServers,

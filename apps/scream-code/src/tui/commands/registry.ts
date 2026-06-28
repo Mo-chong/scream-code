@@ -137,6 +137,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 113,
     availability: 'always',
   },
+  {
+    name: 'like',
+    aliases: [],
+    description: '设置你的偏好（昵称、语气、其他偏好）',
+    priority: 113,
+    availability: 'always',
+  },
 
   // ── 集成 ──
   {
