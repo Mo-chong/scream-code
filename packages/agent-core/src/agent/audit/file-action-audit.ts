@@ -83,7 +83,8 @@ export abstract class FlushBuffer<T> {
    * 用于会话结束前的兜底 flush。
    */
   async flush(): Promise<void> {
-    this.throwIfError();
+    // 重置前次错误标记，给最后一次 flush 机会（退出兜底路径需要重试）
+    this.error = null;
     while (this.pendingEntries.length > 0 || this.flushPromise !== null) {
       await this.ensureFlush();
       this.throwIfError();
