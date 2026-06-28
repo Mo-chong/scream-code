@@ -1069,4 +1069,89 @@ Point C (full.ts):          (comment only — FullCompact rewrites messages via 
 
 ### Recovery path
 
-The `recover(key)` method reads an entry by key while refreshing its TTL (LRU semantics). Expired or missing keys return `undefined`. The companion `archive_recover` MCP tool (stage 2, not yet implemented) will wrap this for model-facing access.
+The `recover(key)` method reads an entry by key while refreshing its TTL and boosting priority (+0.1). Expired or missing keys return `undefined`. The companion `archive_recover` MCP tool (stage 2, not yet implemented) will wrap this for model-facing access.\r
+\r
+### v2.0 changes (2026-06)\r
+\r
+| Change | Before | After |\r
+|--------|--------|-------|\r
+| Max entries | 50 | 2000 |\r
+| TTL | 5 min | 30 min |\r
+| Eviction | FIFO (oldest) | Weighted scoring (`priority × decay × accessBoost`) |\r
+| Archive signature | `archive(key, content, source?)` | `archive(key, content, options?)` |\r
+| Options arg | bare `source` string | `{ priority?, source? }` |\r
+| Priority floor | none | `< 0.1` hard-skip from eviction |\r
+| Protection | none | `priority >= 100` protected from eviction |\r
+| Dead-loop guard | none | `for (attempt < 3)` + break |\r
+| Error boundary | none | `throw ContentArchiveError('NO_EVICTABLE_ENTRY')` |\r
+| Consolation bonus | none | `priority += 0.5` for survivors |\r
+| Scoring formula | — | `score = priority × Math.exp(-ageMs/TTL) × (1 - ageFactor × 0.5)` |\r
+\r
+**Scoring notes:**\r
+- `decay` uses full TTL ratio, not discrete buckets\r
+- `accessBoost` = `1 - ageFactor × 0.5` where `ageFactor` = time since last access / TTL, clamped to [0, 1]\r
+- Survivors get `priority += 0.5` after `evictOne()`\r
+\r
+**Flag:** `content-archive` (default: true) unchanged.\r
+\r
+---\r
+\r
+## 19. FileActionAudit — 文件修改审计日志\r
+\r
+**Files:**\r
+- `agent/audit/file-action-audit.ts` — FileActionAudit 类（FlushBuffer 子类，熔断+日切）\r
+- `agent/index.ts:16/97/174/586` — import、属性声明、构造初始化、退出兜底 flush\r
+- `agent/turn/index.ts:1210-1233` — B 组工具结果处理段（Edit/Write 成功后 push）\r
+- `flags/registry.ts:31-35` — `file-action-audit` flag（default: false）\r
+\r
+### API\r
+\r
+```typescript\r
+interface FileActionAuditEntry {\r
+  action: 'edit' | 'write'\r
+  toolCallId: string\r
+  timestamp: number\r
+  resultPreview: string\r
+  success: boolean\r
+  durationMs: number\r
+}\r
+\r
+abstract class FlushBuffer<T> {\r
+  constructor(maxBufferSize?: number)     // default 50\r
+  push(entry: T): void\r
+  flush(): Promise<void>                  // 前置重置 error，退出路径可重试\r
+  protected abstract drainBatch(): Promise<void>\r
+}\r
+\r
+class FileActionAudit extends FlushBuffer<FileActionAuditEntry> {\r
+  // 熔断: 连续 5 次失败 → circuitOpen = true → 跳过刷盘\r
+  // 防抖: 两次 flush 间隔 < 30s 直接 return\r
+  // 日切: 追加写入 <screamHome>/audit/YYYY-MM-DD.jsonl\r
+}\r
+```\r
+\r
+### Key design\r
+\r
+| Property | Value | Rationale |\r
+|----------|-------|-----------|\r
+| Flag default | false | 审计日志不是所有场景必需，有 IO 开销 |\r
+| Buffer | 50 entries | Accumulates entries before flush |\r
+| Debounce | 30_000 ms | Prevents too-frequent disk writes |\r
+| Circuit breaker | 5 consecutive failures | Prevents audit failures from impacting agent |\r
+| Day rotation | `.jsonl` per calendar day | Simple rotation, easy to grep/archive |\r
+| Exit flush | `fileActionAudit.flush()` in `extractMemoriesOnExit` finally | Best-effort drain on session end |\r
+| Reset on flush | `this.error = null` before `ensureFlush()` | Exit path gets a retry chance |\r
+\r
+### Integration flow\r
+\r
+```\r
+B 组工具结果处理 (turn/index.ts)\r
+  └─ Edit/Write 成功 → FileActionAudit.push(entry)\r
+     └─ shouldFlush() → 熔断检查 → 防抖检查\r
+        └─ scheduleFlush() / flush()\r
+           └─ drainBatch() → append to <screamHome>/audit/YYYY-MM-DD.jsonl\r
+\r
+Agent 退出 (agent/index.ts)\r
+  └─ extractMemoriesOnExit()\r
+     └─ finally → fileActionAudit.flush() .catch(log)\r
+```

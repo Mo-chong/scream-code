@@ -42,6 +42,9 @@
 
 | 问题 | 先查这个文件 |
 |------|-------------|
+| ContentArchive 扩容与加权淘汰 | `SYSTEM/API-REFERENCE.md` §18 |
+| FileActionAudit 文件审计日志 | `SYSTEM/API-REFERENCE.md` §19 |
+| content-archive / file-action-audit flag | `flags/registry.ts` |
 | 记忆存在哪里/怎么搜 | `SYSTEM/memory-store.md` |
 | FTS5 索引了什么字段 | `SYSTEM/memory-store.md` §FTS5 |
 | 能不能按 tag 过滤 | `SYSTEM/memory-store.md` §Tags |

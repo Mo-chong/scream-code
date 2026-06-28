@@ -693,6 +693,32 @@ node _verify.mjs  # → 13 passed, 0 failed
 
 ---
 
+## 实施教训
+
+### ContentArchive 加权淘汰实现 — API 变更必须同时更新所有调用方（2026-06-26）
+
+**场景**：ContentArchive 的 `archive()` 签名从 `(key, content, source?)` 改为 `(key, content, options?)`。
+
+**教训**：改 API 签名后不能只改定义。必须用 `Grep` 或 `LSP.references` 找出所有 `.archive(` 调用点并逐个更新。本轮涉及 2 个调用方：
+- `agent/context/index.ts:276-285` — `contentArchive.archive(ctxKey, content, { priority, source })`
+- `agent/compaction/micro.ts:156-171` — `contentArchive.archive(key, content, { priority })`
+
+**额外注意**：`LSP.references` 对通过 `agentContext.contentArchive` 间接引用的类可能返回空。此时用 `Grep` 以 `contentArchive.archive` 或 `\.archive\(` 为模式搜索。
+
+### FlushBuffer.flush() 前置重置 error 标记让退出路径可重试（2026-06-27）
+
+**场景**：`FlushBuffer.flush()` 在 `ensureFlush()` 前调用 `throwIfError()`，如果 `ensureFlush()` 曾经失败过，`this.error` 保留着上次的异常，导致后续 `flush()` 直接抛出不重试。
+
+**教训**：设计了熔断机制的类，其 `flush()` 公共方法应重置 `this.error = null` 在前，让调用方（尤其是退出兜底路径 `agent/index.ts:586`）有机会重试最后一次刷盘。不能因为之前失败就永远跳过。
+
+### registry.ts 的 flag 默认值与效果（2026-06-27）
+
+**场景**：`file-action-audit` flag 的 id 是 `'file-action-audit'`，default 是 `false`（关闭）。编译和测试中不体现默认值效果，需要运行时才可见。
+
+**教训**：新功能在设计时就要确定 default true/false。需要 IO 或有副作用的 feature 默认 false。把 flag 的 env 变量名（`SCREAM_CODE_EXPERIMENTAL_FILE_ACTION_AUDIT`）也写进文档，方便用户排查。
+
+---
+
 ## 调试教训
 
 ### MCP 连接失败全复盘 — 同一个现象背后是 2 个独立 bug 的链式叠加（2026-06-25）
