@@ -114,7 +114,7 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
     apiKey,
     models,
     selectedModelId: selection.model.id,
-    thinking: selection.thinking,
+    thinkingLevel: selection.thinkingLevel,
   });
 
   await host.harness.setConfig({
@@ -201,9 +201,9 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   if (maxContextStr === undefined) return;
   const maxContextTokens = parseInt(maxContextStr, 10) || 131_072;
 
-  // Step 6 — thinking mode
-  const thinking = await promptThinkingMode(host);
-  if (thinking === undefined) return;
+  // Step 6 — thinking level
+  const thinkingLevel = await promptThinkingMode(host);
+  if (thinkingLevel === undefined) return;
 
   // Build a provider ID from the model name
   const providerId = `custom-${modelId.replaceAll(/[^A-Za-z0-9._-]/g, '-')}`;
@@ -217,7 +217,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
       image_in: false,
       video_in: false,
       audio_in: false,
-      thinking,
+      thinking: thinkingLevel !== 'off',
       tool_use: true,
     },
     reasoningKey: wire === 'anthropic' ? 'thinking' : undefined,
@@ -241,13 +241,15 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   models[`${providerId}/${modelId}`] = catalogModelToAlias(providerId, catalogModel);
   config.models = models;
   config.defaultModel = `${providerId}/${modelId}`;
-  config.defaultThinking = thinking;
+  config.defaultThinking = thinkingLevel !== 'off';
+  config.thinking = { ...config.thinking, mode: thinkingLevel === 'off' ? 'off' : 'on', effort: thinkingLevel };
 
   await host.harness.setConfig({
     providers: config.providers,
     models: config.models,
     defaultModel: config.defaultModel,
     defaultThinking: config.defaultThinking,
+    thinking: config.thinking,
   });
 
   await host.authFlow.refreshConfigAfterLogin();

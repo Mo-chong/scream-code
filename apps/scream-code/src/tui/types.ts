@@ -3,6 +3,7 @@ import type {
   PermissionMode,
   ProviderConfig,
   PromptPart,
+  ThinkingEffort,
   ToolInputDisplay,
   ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
@@ -46,7 +47,7 @@ export interface AppState {
   sessionId: string;
   permissionMode: PermissionMode;
   planMode: boolean;
-  thinking: boolean;
+  thinkingLevel: ThinkingEffort;
   contextUsage: number;
   contextTokens: number;
   maxContextTokens: number;

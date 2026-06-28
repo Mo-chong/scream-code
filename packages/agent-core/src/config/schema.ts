@@ -35,6 +35,8 @@ export const ProviderConfigSchema = z.object({
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+const ThinkingEffortSchema = z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+
 export const ModelAliasSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -47,6 +49,9 @@ export const ModelAliasSchema = z.object({
   // model-name version inference. Needed for custom-named Anthropic endpoints
   // whose model name does not encode a parseable Claude version.
   adaptiveThinking: z.boolean().optional(),
+  // Levels this model supports for explicit thinking effort. If omitted the
+  // UI falls back to [off, low, medium, high].
+  thinkingLevels: z.array(ThinkingEffortSchema).optional(),
 });
 
 export type ModelAlias = z.infer<typeof ModelAliasSchema>;

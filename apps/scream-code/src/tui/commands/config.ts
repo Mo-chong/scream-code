@@ -1,4 +1,4 @@
-import type { PermissionMode, Session } from '@scream-code/scream-code-sdk';
+import type { PermissionMode, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
@@ -295,12 +295,12 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
       models: host.state.appState.availableModels,
       currentValue: host.state.appState.model,
       selectedValue,
-      currentThinking: host.state.appState.thinking,
+      currentThinkingLevel: host.state.appState.thinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
-      onSelect: ({ alias, thinking }) => {
+      onSelect: ({ alias, thinkingLevel }) => {
         host.restoreEditor();
-        void performModelSwitch(host, alias, thinking);
+        void performModelSwitch(host, alias, thinkingLevel);
       },
       onCancel: () => {
         host.restoreEditor();
@@ -309,27 +309,26 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
   );
 }
 
-async function performModelSwitch(host: SlashCommandHost, alias: string, thinking: boolean): Promise<void> {
+async function performModelSwitch(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort): Promise<void> {
   if (host.state.appState.streamingPhase !== 'idle') {
     host.showError('Cannot switch models while streaming — press Esc or Ctrl-C first.');
     return;
   }
 
-  const level = thinking ? 'on' : 'off';
   const prevModel = host.state.appState.model;
-  const prevThinking = host.state.appState.thinking;
-  const runtimeChanged = alias !== prevModel || thinking !== prevThinking;
+  const prevThinkingLevel = host.state.appState.thinkingLevel;
+  const runtimeChanged = alias !== prevModel || thinkingLevel !== prevThinkingLevel;
 
   const session = host.session;
   try {
     if (session === undefined && runtimeChanged) {
-      await host.authFlow.activateModelAfterLogin(alias, thinking);
+      await host.authFlow.activateModelAfterLogin(alias, thinkingLevel);
     } else if (session !== undefined) {
       if (alias !== prevModel) {
         await session.setModel(alias);
       }
-      if (thinking !== prevThinking) {
-        await session.setThinking(level);
+      if (thinkingLevel !== prevThinkingLevel) {
+        await session.setThinking(thinkingLevel);
       }
     }
   } catch (error) {
@@ -338,12 +337,12 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     return;
   }
 
-  host.setAppState({ model: alias, thinking });
+  host.setAppState({ model: alias, thinkingLevel });
 
   let persisted = false;
 
   try {
-    persisted = await persistModelSelection(host, alias, thinking);
+    persisted = await persistModelSelection(host, alias, thinkingLevel);
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Switched to ${alias}, but failed to save default: ${msg}`);
@@ -351,21 +350,27 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   }
 
   const status = runtimeChanged
-    ? `Switched to ${alias} with thinking ${level}.`
+    ? `Switched to ${alias} with thinking ${thinkingLevel}.`
     : persisted
-      ? `Saved ${alias} with thinking ${level} as default.`
-      : `Already using ${alias} with thinking ${level}.`;
+      ? `Saved ${alias} with thinking ${thinkingLevel} as default.`
+      : `Already using ${alias} with thinking ${thinkingLevel}.`;
   host.showStatus(status, host.state.theme.colors.success);
 }
 
-async function persistModelSelection(host: SlashCommandHost, alias: string, thinking: boolean): Promise<boolean> {
+async function persistModelSelection(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort): Promise<boolean> {
   const config = await host.harness.getConfig({ reload: true });
-  if (config.defaultModel === alias && config.defaultThinking === thinking) {
-    return false;
-  }
+  const effectiveThinking = thinkingLevel !== 'off';
+  const existingEffort = config.thinking?.effort;
+  const newEffort = effectiveThinking ? thinkingLevel : existingEffort;
+  const unchanged =
+    config.defaultModel === alias &&
+    config.defaultThinking === effectiveThinking &&
+    existingEffort === newEffort;
+  if (unchanged) return false;
   await host.harness.setConfig({
     defaultModel: alias,
-    defaultThinking: thinking,
+    defaultThinking: effectiveThinking,
+    thinking: { ...config.thinking, mode: effectiveThinking ? 'on' : 'off', effort: newEffort },
   });
   return true;
 }

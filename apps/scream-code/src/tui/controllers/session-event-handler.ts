@@ -610,6 +610,9 @@ export class SessionEventHandler {
       patch.permissionMode = event.permission;
     }
     if (event.model !== undefined) patch.model = event.model;
+    if (event.thinkingLevel !== undefined) {
+      patch.thinkingLevel = event.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort;
+    }
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
   }
 

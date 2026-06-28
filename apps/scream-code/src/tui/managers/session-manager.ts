@@ -144,7 +144,7 @@ export class SessionManager {
     this.host.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
-      thinking: status.thinkingLevel !== 'off',
+      thinkingLevel: status.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort,
       permissionMode: status.permission,
       planMode: status.planMode,
       contextTokens: status.contextTokens,
@@ -326,9 +326,9 @@ export class SessionManager {
       thinking:
         this.host.session === undefined
           ? undefined
-          : this.host.state.appState.thinking
-            ? 'on'
-            : 'off',
+          : this.host.state.appState.thinkingLevel === 'off'
+            ? 'off'
+            : this.host.state.appState.thinkingLevel,
       permission: this.host.state.appState.permissionMode,
       planMode: this.host.state.appState.planMode ? true : undefined,
     });

@@ -97,7 +97,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     sessionId: '',
     permissionMode: startupPermission,
     planMode: input.cliOptions.plan,
-    thinking: false,
+    thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
@@ -580,8 +580,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
-    if ('thinking' in patch) {
-      this.state.editor.thinking = patch.thinking ?? false;
+    if ('thinkingLevel' in patch) {
+      this.state.editor.thinking = patch.thinkingLevel !== 'off';
+      this.state.editor.thinkingLevel = patch.thinkingLevel ?? 'off';
     }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing

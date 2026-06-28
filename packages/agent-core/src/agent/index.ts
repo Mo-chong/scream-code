@@ -648,6 +648,7 @@ export class Agent {
     this.emitEvent({
       type: 'agent.status.updated',
       model,
+      thinkingLevel: this.config.thinkingLevel,
       contextTokens,
       maxContextTokens,
       contextUsage,

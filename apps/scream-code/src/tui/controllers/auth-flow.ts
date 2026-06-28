@@ -1,6 +1,6 @@
-import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
+import type { ScreamHarness, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import type { ScreamConfig } from '@scream-code/agent-core';
 import type { SkillListSession } from '../commands';
-
 
 import type { SessionEventHandler } from './session-event-handler';
 import type { AppState, ScreamTUIOptions } from '../types';
@@ -36,9 +36,9 @@ export class AuthFlowController {
     });
   }
 
-  async activateModelAfterLogin(model: string, thinking?: boolean): Promise<void> {
+  async activateModelAfterLogin(model: string, thinkingLevel?: ThinkingEffort): Promise<void> {
     const { host } = this;
-    const level = thinking === undefined ? undefined : thinking ? 'on' : 'off';
+    const level = thinkingLevel === undefined ? undefined : thinkingLevel === 'off' ? 'off' : thinkingLevel;
     if (host.session !== undefined) {
       await host.session.setModel(model);
       if (level !== undefined) {
@@ -94,16 +94,14 @@ export class AuthFlowController {
       return;
     }
 
-    await this.activateModelAfterLogin(defaultModel, config.defaultThinking);
+    await this.activateModelAfterLogin(defaultModel, resolveDefaultThinkingLevel(config));
     const appStatePatch: Partial<AppState> = {
       availableModels,
       availableProviders,
       model: defaultModel,
       maxContextTokens: selected.maxContextSize,
+      thinkingLevel: resolveDefaultThinkingLevel(config),
     };
-    if (config.defaultThinking !== undefined) {
-      appStatePatch.thinking = config.defaultThinking;
-    }
     host.setAppState(appStatePatch);
   }
 
@@ -113,10 +111,19 @@ export class AuthFlowController {
       availableModels: config.models ?? {},
       availableProviders: config.providers ?? {},
       model: '',
-      thinking: false,
+      thinkingLevel: 'off',
       maxContextTokens: 0,
       contextUsage: 0,
       contextTokens: 0,
     });
   }
+}
+
+function resolveDefaultThinkingLevel(config: ScreamConfig): ThinkingEffort {
+  if (config.thinking?.mode === 'off' || config.defaultThinking === false) return 'off';
+  const effort = config.thinking?.effort;
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh' || effort === 'max') {
+    return effort;
+  }
+  return config.defaultThinking === true ? 'medium' : 'off';
 }

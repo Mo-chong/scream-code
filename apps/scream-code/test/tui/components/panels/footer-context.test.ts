@@ -25,7 +25,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     sessionId: 'sess_1',
     permissionMode: 'manual',
     planMode: false,
-    thinking: false,
+    thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
@@ -100,7 +100,7 @@ describe('FooterComponent — context NaN resilience', () => {
   });
 
   it('does not show a thinking label in the footer', () => {
-    const on = makeFooter(baseState({ model: 'k2', thinking: true }));
+    const on = makeFooter(baseState({ model: 'k2', thinkingLevel: 'high' }));
 
     expect(strip(on.render(120)[0]!)).not.toContain('思考中');
   });

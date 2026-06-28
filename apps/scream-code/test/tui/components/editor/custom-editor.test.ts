@@ -220,6 +220,16 @@ describe('CustomEditor think label', () => {
     // No longer uses box corners in the two-line flat design.
   });
 
+  it('shows the thinking level next to the think label', () => {
+    const editor = makeEditor();
+    editor.thinking = true;
+    editor.thinkingLevel = 'high';
+
+    const out = editor.render(40).join('\n');
+
+    expect(out).toContain('─ Think high ─');
+  });
+
   it('hides the think label when thinking is disabled', () => {
     const editor = makeEditor();
     editor.thinking = false;

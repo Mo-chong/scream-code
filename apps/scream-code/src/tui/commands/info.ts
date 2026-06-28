@@ -53,7 +53,7 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
     workDir: appState.workDir,
     sessionId: appState.sessionId,
     sessionTitle: appState.sessionTitle,
-    thinking: appState.thinking,
+    thinkingLevel: appState.thinkingLevel,
     permissionMode: appState.permissionMode,
     planMode: appState.planMode,
     contextUsage: appState.contextUsage,

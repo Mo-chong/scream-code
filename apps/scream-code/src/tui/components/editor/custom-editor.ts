@@ -3,6 +3,7 @@
  */
 
 import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@earendil-works/pi-tui';
+import type { ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -135,6 +136,8 @@ export class CustomEditor extends Editor {
 
   /** Whether the active model has thinking enabled. When true, a small "think" label is embedded in the top-right of the input box border. */
   thinking = false;
+  /** Current thinking effort level (e.g. low, medium, high). Used to annotate the think label. */
+  thinkingLevel: ThinkingEffort = 'off';
 
   private consumingPaste = false;
   private consumeBuffer = '';
@@ -220,7 +223,7 @@ export class CustomEditor extends Editor {
       }
     }
     if (this.thinking) {
-      injectThinkLabel(lines, width, this.borderColor ?? ((s: string) => s));
+      injectThinkLabel(lines, width, this.thinkingLevel, this.borderColor ?? ((s: string) => s));
     }
     return lines;
   }
@@ -442,6 +445,7 @@ const THINK_LABEL_MIN_WIDTH = 14;
 function injectThinkLabel(
   lines: string[],
   width: number,
+  thinkingLevel: ThinkingEffort,
   paint: (s: string) => string,
 ): void {
   if (width < THINK_LABEL_MIN_WIDTH) return;
@@ -451,7 +455,8 @@ function injectThinkLabel(
   });
   if (topIdx === -1) return;
 
-  const labelBlock = `─${THINK_LABEL}─`;
+  const label = thinkingLevel !== 'off' ? ` Think ${thinkingLevel} ` : THINK_LABEL;
+  const labelBlock = `─${label}─`;
   const labelVis = visibleWidth(labelBlock);
   const leftDashCount = width - 1 - labelVis;
   if (leftDashCount < 1) return;

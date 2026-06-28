@@ -5,7 +5,7 @@
  * separate from the TUI orchestration layer.
  */
 
-import type { ModelAlias, PermissionMode, SessionStatus } from '@scream-code/scream-code-sdk';
+import type { ModelAlias, PermissionMode, SessionStatus, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
 import { PRODUCT_NAME } from '#/constant/app';
@@ -32,7 +32,7 @@ export interface StatusReportOptions {
   readonly workDir: string;
   readonly sessionId: string;
   readonly sessionTitle: string | null;
-  readonly thinking: boolean;
+  readonly thinkingLevel: ThinkingEffort;
   readonly permissionMode: PermissionMode;
   readonly planMode: boolean;
   readonly contextUsage: number;
@@ -56,9 +56,8 @@ function formatModelStatus(options: StatusReportOptions): string {
   const model = options.status?.model ?? options.model;
   if (model.trim().length === 0) return '未设置';
 
-  const thinking = (options.status?.thinkingLevel ?? (options.thinking ? 'on' : 'off')) === 'off'
-    ? 'off'
-    : 'on';
+  const level = options.status?.thinkingLevel ?? options.thinkingLevel;
+  const thinking = level === 'off' ? 'off' : 'on';
   return `${displayModelName(model, options.availableModels)} (thinking ${thinking})`;
 }
 

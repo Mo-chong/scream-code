@@ -1,4 +1,4 @@
-import type { ModelAlias } from '@scream-code/scream-code-sdk';
+import type { ModelAlias, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ChoicePickerComponent } from '#/tui/components/dialogs/choice-picker';
@@ -67,7 +67,7 @@ describe('ChoicePickerComponent', () => {
         },
       },
       currentValue: 'scream',
-      currentThinking: true,
+      currentThinkingLevel: 'high',
       colors: darkColors,
       onSelect,
       onCancel,
@@ -75,7 +75,7 @@ describe('ChoicePickerComponent', () => {
     const modelOutput = model.render(120).map(strip);
     expect(modelOutput).toContain('  ❯ Scream K2 (Scream Code) ← current');
     expect(modelOutput).toContain(' Thinking');
-    expect(modelOutput).toContain('  [ On ]    Off  ');
+    expect(modelOutput).toContain('  off  low  medium  [ high ]');
 
     const theme = new ThemeSelectorComponent({
       currentValue: 'light',
@@ -116,7 +116,7 @@ describe('ChoicePickerComponent', () => {
         },
       },
       currentValue: 'scream',
-      currentThinking: true,
+      currentThinkingLevel: 'high',
       colors: darkColors,
       onSelect,
       onCancel: vi.fn(),
@@ -125,7 +125,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinking: false });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off' });
   });
 
   it('forces always-thinking models on and unsupported models off', () => {
@@ -148,22 +148,22 @@ describe('ChoicePickerComponent', () => {
         },
       },
       currentValue: 'always',
-      currentThinking: false,
+      currentThinkingLevel: 'off',
       colors: darkColors,
       onSelect,
       onCancel: vi.fn(),
     });
 
-    expect(picker.render(120).map(strip)).toContain('  [ Always on ]');
+    expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high');
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinking: true });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium' });
 
     picker.handleInput('\u001B[B');
-    expect(picker.render(120).map(strip)).toContain('  [ Off ] unsupported');
+    expect(picker.render(120).map(strip)).toContain('  [ off ] unsupported');
     picker.handleInput('\u001B[D');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinking: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off' });
   });
 
   it('treats adaptiveThinking models as thinking-capable without a thinking capability', () => {
@@ -178,7 +178,7 @@ describe('ChoicePickerComponent', () => {
         },
       },
       currentValue: 'okapi',
-      currentThinking: true,
+      currentThinkingLevel: 'high',
       colors: darkColors,
       onSelect,
       onCancel: vi.fn(),
@@ -187,12 +187,12 @@ describe('ChoicePickerComponent', () => {
     // adaptiveThinking makes the alias togglable (not 'unsupported'): the current
     // thinking state is preserved on select instead of being forced off.
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinking: true });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'high' });
 
-    // Right (ESC[C) toggles thinking off, proving it is an interactive toggle.
+    // Right (ESC[C) cycles to the next thinking level, proving it is an interactive control.
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinking: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off' });
   });
 
   it('keeps the thinking draft when moving across models', () => {
@@ -215,7 +215,7 @@ describe('ChoicePickerComponent', () => {
         },
       },
       currentValue: 'plain',
-      currentThinking: false,
+      currentThinkingLevel: 'off',
       colors: darkColors,
       onSelect,
       onCancel: vi.fn(),
@@ -227,7 +227,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[B');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinking: true });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high' });
   });
 });
 
@@ -414,14 +414,14 @@ describe('ModelSelectorComponent search and pagination', () => {
     return models;
   }
 
-  function makeSelector(models: Record<string, ModelAlias>, currentThinking = true) {
+  function makeSelector(models: Record<string, ModelAlias>, currentThinkingLevel: ThinkingEffort = 'high') {
     const onSelect = vi.fn();
     const onCancel = vi.fn();
     const firstAlias = Object.keys(models)[0] ?? '';
     const selector = new ModelSelectorComponent({
       models,
       currentValue: firstAlias,
-      currentThinking,
+      currentThinkingLevel,
       colors: darkColors,
       searchable: true,
       onSelect,
@@ -455,16 +455,15 @@ describe('ModelSelectorComponent search and pagination', () => {
     expect(rendered(selector)).toContain('Page 2/3');
     expect(rendered(selector)).toContain('model08 (prov)');
 
-    // Right toggles thinking off and must NOT change the page.
+    // Right cycles thinking to the next level and must NOT change the page.
     selector.handleInput(RIGHT);
     expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('[ Off ]');
+    expect(rendered(selector)).toContain('[ off ]');
 
-    // Left toggles thinking back on, page still unchanged.
+    // Left cycles thinking back, page still unchanged.
     selector.handleInput(LEFT);
     expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('[ On ]');
-
+    expect(rendered(selector)).toContain('[ high ]');
     selector.handleInput(PAGE_UP);
     expect(rendered(selector)).toContain('Page 1/3');
   });

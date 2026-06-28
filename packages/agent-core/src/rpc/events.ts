@@ -44,6 +44,7 @@ export type TurnEndReason = 'completed' | 'cancelled' | 'failed';
 export interface AgentStatusUpdatedEvent {
   readonly type: 'agent.status.updated';
   readonly model?: string | undefined;
+  readonly thinkingLevel?: string | undefined;
   readonly contextTokens?: number | undefined;
   readonly maxContextTokens?: number | undefined;
   readonly contextUsage?: number | undefined;
