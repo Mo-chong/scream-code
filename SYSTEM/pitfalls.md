@@ -1214,6 +1214,8 @@ export async function installUpdate(): Promise<void>;  // 无参，自解析 res
 
 **教训**：给正常对话加过滤/遮蔽逻辑时，必须同步检查压缩路径是否也有同样的处理。两端走不同的代码路径，很容易漏一端。
 
+**注意**：此坑与 MicroCompact 的 BATCH_SIZE 完全无关（BATCH_SIZE 只控制每 8 步检测一次的频率，不参与压缩 worker 的数据流）。
+
 **关键文件**：`packages/agent-core/src/agent/compaction/full.ts` line 342-343
 
 ### v0.7.2 合并复盘（2026-06-27）

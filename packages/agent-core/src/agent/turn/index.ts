@@ -1221,6 +1221,20 @@ export class TurnFlow {
                   const writePath = (ctx.args as { path?: string }).path ?? '';
                   if (writePath) this.recentlyModifiedPathsThisTurn.add(writePath);
                 }
+
+                // 🆕 FileActionAudit: 记录成功的文件操作
+                if ((ctx.toolCall.name === 'Edit' || ctx.toolCall.name === 'Write') && ctx.toolCall.id) {
+                  const filePath = (ctx.args as { path?: string }).path ?? '';
+                  const actionType = ctx.toolCall.name === 'Edit' ? 'edit' : 'write';
+                  this.agent.fileActionAudit.push({
+                    toolCallId: ctx.toolCall.id,
+                    action: `${actionType}:${filePath}`,
+                    timestamp: Date.now(),
+                    resultPreview: filePath,
+                    success: true,
+                    durationMs: 0,
+                  });
+                }
               }
               // Track LSP.references specifically for C1 upgrade detection
               if (ctx.toolCall.name === 'LSP') {

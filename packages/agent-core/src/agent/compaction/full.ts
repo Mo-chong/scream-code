@@ -321,6 +321,18 @@ export class FullCompaction {
     }
   }
 
+  /**
+   * Point C（ContentArchive docs-only）:
+   *
+   * FullCompact 不存档原始工具结果。原因：
+   * compactionWorker 把原始消息传给 LLM 做语义重写（总结/合并），
+   * 重写后原始 token 已被 LLM 消解而非简单截断，
+   * 恢复原始内容的价值极低。
+   *
+   * 需要完整上下文的场景应在 Point A（toolResultOutputForModel 截断前）
+   * 或 Point B（MicroCompact 合并前）存档，这两个点保存的是
+   * 未经 LLM 改写的原始输出。
+   */
   private async compactionWorker(
     signal: AbortSignal,
     data: Readonly<CompactionBeginData>,

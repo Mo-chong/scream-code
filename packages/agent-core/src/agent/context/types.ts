@@ -93,4 +93,6 @@ export interface SystemReminderRecord {
 export interface AgentContextData {
   history: readonly ContextMessage[];
   tokenCount: number;
+  /** Reference to the ContentArchive instance, if one is attached to the Agent. */
+  readonly contentArchive?: import('./content-archive').ContentArchive | undefined;
 }

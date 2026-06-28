@@ -1576,7 +1576,8 @@ export class MemoryMemoStore {
     const updateArchive = this.db.prepare(
       'UPDATE memos_archive SET recall_count = ?, last_recalled_at = ? WHERE id = ?',
     );
-    const tx = this.db.transaction(() => {
+    // Node 22 DatabaseSync 类型缺少 transaction，先用 any 绕过类型缺失
+    const tx = (this.db as any).transaction(() => {
       for (const row of stats) {
         updateMemo.run(row.cnt, row.last_at, row.memo_id);
         updateArchive.run(row.cnt, row.last_at, row.memo_id);

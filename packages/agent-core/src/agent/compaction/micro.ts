@@ -153,6 +153,21 @@ export class MicroCompaction {
         msg.toolCallId !== undefined &&
         estimateTokensForMessages([msg]) >= config.minContentTokens
       ) {
+        // Point B: 存档原始工具结果（截断前保留完整内容）
+        // gated by content-archive flag (default: true)
+        if (flags.enabled('content-archive')) {
+          const textContent =
+            typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? msg.content.map((p) => ('text' in p ? p.text : '')).join('\n')
+                : '';
+          this.agent.contentArchive?.archive(
+            `micro:${msg.toolCallId}`,
+            textContent,
+            { source: 'microCompact' },
+          );
+        }
         const marker =
           msg.toolCallId !== undefined && superseded.has(msg.toolCallId)
             ? `[Superseded by a newer read of ${superseded.get(msg.toolCallId)}]`

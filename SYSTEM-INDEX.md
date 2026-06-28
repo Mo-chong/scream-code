@@ -94,7 +94,10 @@
 | 策略层防御模式（install-strategy.ts） | `SYSTEM/pitfalls.md` §策略层防御模式 |
 | 合并 v0.7 的真实冲突经验 | `SYSTEM/pitfalls.md` §合并上游 v0.7 的真实冲突复盘 |
 | installUpdate 签名不匹配 | `SYSTEM/pitfalls.md` §踩坑点总结 |
-| 构建卡 prepare 脚本（node 不在 PATH） | `SYSTEM/pitfalls.md` §构建卡在 prepare 脚本 |\n| 开发构建怎么跑 | `scripts/build-dev.sh` |\n| FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |\n| vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
+| 构建卡 prepare 脚本（node 不在 PATH） | `SYSTEM/pitfalls.md` §构建卡在 prepare 脚本 |
+| 开发构建怎么跑 | `scripts/build-dev.sh` |
+| FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
+| vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
 | 热冷升降触发条件 | store.ts §promote/demote/autoDemote/autoPromote |
 | ResNet 衰减因子 | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |
 | sqlite-vec 初始化 | store.ts §_doInit + `@photostructure/sqlite-vec` |

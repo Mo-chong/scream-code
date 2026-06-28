@@ -1018,3 +1018,55 @@ log.info('llm cache metrics', {
 Pure functions (`stabilizePrefix`, `maskToolObservations`, `BATCH_SIZE`) can be verified without importing the dist bundle, which fails due to `neverBundle` external deps (`ltod`, `jian`). Verification method: inline-copy the pure function logic (zero external deps) into a test script and assert against known inputs. 13/13 assertions pass (prefix regex replacement, tool masking at various keepLastN values, batch gate edge cases).
 
 All 8 new/exported symbols confirmed present in `dist/index.mjs` via regex scan. Both agent-core (1.46 MB, tsdown 6.0s) and scream-code (10.92 MB, tsdown 6.5s) bundles rebuilt successfully. Source timestamps verified ≤ bundle timestamp for all 6 modified + 2 new files.
+
+---
+
+## 18. ContentArchive — 保留缓冲区 (v1.0)
+
+**Files:**
+- `agent/context/content-archive.ts` — ContentArchive 类（纯内存 LRU+TTL，零外部依赖）
+- `agent/context/types.ts:97` — 类型声明 `contentArchive?: ContentArchive`
+- `agent/index.ts:45/129/171` — import、属性声明、构造初始化
+- `agent/context/index.ts:276-285` — Point A: `pushToolEvent` 截断前存档工具输出
+- `agent/compaction/micro.ts:156-171` — Point B: `compact()` 截断前存档原始工具结果
+- `agent/compaction/full.ts:324-335` — Point C: docs-only（设计上不做 archive，注释说明理由）
+- `flags/registry.ts:27-31` — `content-archive` flag（default: true）
+
+### API
+
+```typescript
+class ContentArchive {
+  constructor(config?: { ttlMs?: number; maxEntries?: number })
+  archive(key: string, content: string | ContentPart[], source?: string): ArchiveResult
+  recover(key: string): string | ContentPart[] | undefined
+  list(): string[]
+  get size(): number
+  prune(): number
+  clear(): void
+}
+```
+
+### Key design
+
+| Property | Value | Rationale |
+|----------|-------|-----------|
+| Default TTL | 300_000 ms (5 min) | Covers typical multi-turn recovery window |
+| Max entries | 50 | Soft ceiling — oldest evicted on overflow |
+| Key format | `{source}:{toolCallId}` | Caller prefix avoids key collision |
+| Integration points | 2 (A+B) + 1 docs-only (C) | All gated by `content-archive` flag |
+
+### Integration order
+
+```
+Point A (context/index.ts): pushToolEvent → archive() → truncateLoopEvents()
+Point B (micro.ts):         compact() → archive() → trimTailApplyWindow()
+Point C (full.ts):          (comment only — FullCompact rewrites messages via LLM, raw recovery not useful)
+```
+
+### Flag gate
+
+`flags.enabled('content-archive')` controls all integration points. Default `true` — pure memory buffer with zero external deps is safe to keep enabled. Disable via `SCREAM_CODE_EXPERIMENTAL_CONTENT_ARCHIVE=false` env var.
+
+### Recovery path
+
+The `recover(key)` method reads an entry by key while refreshing its TTL (LRU semantics). Expired or missing keys return `undefined`. The companion `archive_recover` MCP tool (stage 2, not yet implemented) will wrap this for model-facing access.

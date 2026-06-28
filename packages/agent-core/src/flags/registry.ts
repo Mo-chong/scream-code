@@ -23,7 +23,19 @@ export const FLAG_DEFINITIONS = [
     default: false,
     surface: 'both',
   },
+  {
+    id: 'content-archive',
+    env: 'SCREAM_CODE_EXPERIMENTAL_CONTENT_ARCHIVE',
+    default: true,
+    surface: 'both',
+  },
+  {
+    id: 'file-action-audit',
+    env: 'SCREAM_CODE_EXPERIMENTAL_FILE_ACTION_AUDIT',
+    default: false,
+    surface: 'both',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
-/** Literal union of registered flag ids (currently none → `never`). */
+/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit */
 export type FlagId = (typeof FLAG_DEFINITIONS)[number]['id'];

@@ -16,6 +16,7 @@ import {
 import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
+import { FileActionAudit } from './audit/file-action-audit';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -31,6 +32,7 @@ import { FullCompaction, MicroCompaction, type CompactionStrategy } from './comp
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
+import { ContentArchive } from './context/content-archive';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
@@ -125,10 +127,12 @@ export class Agent {
   readonly cron: CronManager | null;
   readonly goal: GoalMode;
   readonly memoStore: MemoryMemoStore | undefined;
+  readonly contentArchive: ContentArchive;
   readonly sessionMemory: SessionMemory;
   readonly workingSet: WorkingSet;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
+  readonly fileActionAudit: FileActionAudit;
 
   private lastLlmConfigLogSignature?: string;
 
@@ -166,6 +170,8 @@ export class Agent {
     this.fullCompaction = new FullCompaction(this, options.compactionStrategy);
     this.microCompaction = new MicroCompaction(this);
     this.context = new ContextMemory(this);
+    this.contentArchive = new ContentArchive();
+    this.fileActionAudit = new FileActionAudit();
     this.config = new ConfigState(this);
     this.turn = new TurnFlow(this);
     this.injection = new InjectionManager(this);
@@ -577,9 +583,11 @@ export class Agent {
         sessionId,
       });
       return stored;
-    } catch (error) {
-      this.log.warn('Exit memory extraction failed', { error: String(error) });
-      throw error;
+    } finally {
+      // 兜底刷盘：会话结束时确保 FileActionAudit 落盘
+      this.fileActionAudit.flush().catch((err) => {
+        this.log.warn('FileActionAudit final flush failed', { error: String(err) });
+      });
     }
   }
 

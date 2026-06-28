@@ -6,6 +6,7 @@ import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
 import { assertWireFormat, project } from './projector';
 import { stabilizePrefix } from './prefix-stabilizer';
+import { flags } from '../../flags';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -275,6 +276,15 @@ export class ContextMemory {
         return;
       }
       case 'tool.result': {
+        // Point A: 存档原始工具输出（截断/压缩前保留完整内容）
+        // gated by content-archive flag (default: true)
+        if (flags.enabled('content-archive')) {
+          this.agent.contentArchive?.archive(
+            `tool:${event.toolCallId}`,
+            event.result.output,
+            { source: 'toolResult' },
+          );
+        }
         const message = createToolMessage(event.toolCallId, toolResultOutputForModel(event.result));
         this.pushHistory({
           ...message,
