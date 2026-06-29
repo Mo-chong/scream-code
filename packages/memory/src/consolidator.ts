@@ -1,7 +1,7 @@
 import type { MemoryMemo, MemoryMemoSummary } from './models.js';
 import { createMemoryMemo, toSummary } from './models.js';
 import type { MemoryMemoStore } from './store.js';
-import { STOP_WORDS, computeKeywordSimilarity } from './scoring.js';
+import { STOP_WORDS, isDuplicate } from './scoring.js';
 import { normalizeTags, processTags, RESERVED_TAGS, TAG_CONFIG } from './tags.js';
 
 /**
@@ -77,7 +77,6 @@ export interface ConsolidationPlan {
 /** Tags that immunize a memo from all consolidation (merge, delete, archive). */
 const PROTECTED_TAGS = ['baohu', 'chundu', 'ding', 'yongjiu'];
 
-const SIMILARITY_THRESHOLD = 0.45;
 const STALE_DAYS = 30;
 
 /**
@@ -88,11 +87,17 @@ const STALE_DAYS = 30;
  */
 export async function buildConsolidationPlan(
   store: MemoryMemoStore,
-  options?: { projectDir?: string },
+  options?: { projectDir?: string; includeArchive?: boolean },
 ): Promise<ConsolidationPlan> {
   const allMemos: MemoryMemo[] = [];
   for await (const memo of store.read(options)) {
     allMemos.push(memo);
+  }
+  // If includeArchive is set, also scan cold-tier memos for dedup/stale
+  if (options?.includeArchive) {
+    for await (const memo of store.readArchived(options)) {
+      allMemos.push(memo);
+    }
   }
 
   // Protected memos (tagged 'baohu' or 'chundu') are immune from merge/delete/stale.
@@ -257,14 +262,8 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
       const candidate = memos[j];
       if (!candidate || used.has(candidate.id)) continue;
 
-      // Check similarity against all memos already in the cluster
-      const isSimilar = cluster.some((m) => {
-        const score = computeKeywordSimilarity(
-          candidate,
-          `${m.userNeed} ${m.approach}`,
-        );
-        return score >= SIMILARITY_THRESHOLD;
-      });
+      // Weighted multi-field dedup with userNeed short-circuit and synonym expansion
+      const isSimilar = cluster.some((m) => isDuplicate(m, candidate));
 
       if (isSimilar) {
         cluster.push(candidate);
@@ -282,14 +281,15 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
 
 /**
  * Split a whatFailed / whatWorked field into individual claims.
- * Handles both `;` and `；` separators.
+ * Handles multiple Chinese/English delimiters for real-world sentence patterns.
  */
 function splitClaims(text: string): string[] {
   if (!text || text === 'none' || text === '无') return [];
+  // 🛠️ P1-4: Split on Chinese/English sentence delimiters including Chinese comma
   return text
-    .split(/[;；]/)
+    .split(/[;；。.!！?？，,\n\r]+/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length >= 2);
 }
 
 /**
@@ -315,13 +315,17 @@ function extractSignificantWords(text: string): string[] {
  * Check whether `claim` overlaps with any claim in `against`.
  * 2+ shared significant words = overlap; 1 word is enough for single-word claims.
  */
+// 🛠️ P3-12: minimum word matches to consider a claims overlap (was hardcoded 2)
+const CLAIMS_OVERLAP_MIN_MATCH = 2;
+
 function claimsOverlap(claim: string, against: Set<string>): boolean {
   const words = extractSignificantWords(claim);
-  if (words.length === 0) return false;
+  // Single word never counts as overlap — too ambiguous
+  if (words.length <= 1) return false;
   for (const other of against) {
     const otherLower = other.toLowerCase();
-    const matched = words.filter((w) => otherLower.includes(w)).length;
-    if (matched >= 2 || (matched >= 1 && words.length === 1)) return true;
+    const matched = words.filter((w) => otherLower.includes(w.toLowerCase())).length;
+    if (matched >= CLAIMS_OVERLAP_MIN_MATCH) return true;
   }
   return false;
 }
@@ -369,7 +373,7 @@ function buildDuplicateGroup(cluster: MemoryMemoSummary[]): DuplicateGroup {
       whatFailed: failures.size > 0 ? [...failures].join('; ') : 'none',
       whatWorked: successes.size > 0 ? [...successes].join('; ') : 'none',
     },
-    reason: `发现 ${cluster.length} 条相似记录（关键词重叠 > ${Math.round(SIMILARITY_THRESHOLD * 100)}%）`,
+    reason: `发现 ${cluster.length} 条相似记录（多字段加权相似度 >= 45%）`,
   };
 }
 

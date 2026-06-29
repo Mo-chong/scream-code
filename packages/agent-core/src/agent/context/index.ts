@@ -47,8 +47,20 @@ export class ContextMemory {
   private openSteps: Map<string, ContextMessage> = new Map();
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
+  /** Number of turns where micro-compaction actually reduced messages. Exposed via getMetrics(). */
+  private _microCompactCount = 0;
+  /** Number of turns where prefix stabilizer did not need to mutate the prefix. Exposed via getMetrics(). */
+  private _stabilizeHitCount = 0;
 
   constructor(protected readonly agent: Agent) {}
+
+  /** Returns runtime pipeline counters (micro-compact, prefix-stabilize) for observability. */
+  getMetrics(): { microCompactCount: number; stabilizeHitCount: number } {
+    return {
+      microCompactCount: this._microCompactCount,
+      stabilizeHitCount: this._stabilizeHitCount,
+    };
+  }
 
   snapshot(): ContextMemorySnapshot {
     return {
@@ -100,6 +112,8 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this._microCompactCount = 0;
+    this._stabilizeHitCount = 0;
     this.agent.injection.onContextClear();
     this.agent.emitStatusUpdated();
   }
@@ -215,12 +229,21 @@ export class ContextMemory {
     // Apply micro-compaction before projecting: old tool results are
     // truncated to a short marker, freeing context tokens without an
     // LLM call. Detect() is a no-op when the micro-compaction flag is
-    // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
+    // off (SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0) or when the
+    // BATCH_SIZE gate has not been reached
+    // (registry numDefault=8, override via SCREAM_CODE_MICRO_BATCH_SIZE).
     this.agent.microCompaction.detect();
+    const lenBeforeCompact = this.history.length;
     let msgs: readonly ContextMessage[] = this.agent.microCompaction.compact(this.history);
+    if (msgs.length < lenBeforeCompact) ++this._microCompactCount;
     // Prefix stabilisation: replace volatile fields (timestamps, UUIDs)
     // in system-role messages so the KV-cache prefix is stable across turns.
+    // Compare serialized form — stabilizePrefix never changes array length
+    // (it operates on message content, not structure), so a length check
+    // would always increment and provide no signal.
+    const serializedBeforeStab = JSON.stringify(msgs);
     msgs = stabilizePrefix(msgs);
+    if (JSON.stringify(msgs) === serializedBeforeStab) ++this._stabilizeHitCount;
     const result = project(msgs);
     assertWireFormat(result);
     return result;

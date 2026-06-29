@@ -49,7 +49,8 @@ CREATE TABLE memos (
   extraction_source TEXT NOT NULL,
   recorded_at INTEGER NOT NULL,
   project_dir TEXT NOT NULL DEFAULT '',
-  tags TEXT NOT NULL DEFAULT '[]'
+  tags TEXT NOT NULL DEFAULT '[]',
+  value_tier TEXT NOT NULL DEFAULT 'normal'  -- 2026-06-28 新增：critical/valuable/normal/low
 );
 ```
 
@@ -808,7 +809,55 @@ await this.agent.memoStore.search("query");
 - 列表行: `memory-picker.ts` L439 无条件显示 `召回N`
 - 详情页: `memory-picker.ts` L532 显示 `召回: N 次`
 
-### 14.6 已知限制
+### 14.6 自动价值分类（`value_tier`）
+
+每次写入时，`appendInternal()` 自动调用 `classifyValueTier()` 和 `inferCategoryTags()`。
+
+**决策依据**（`buildMemoClassifyText()` 拼接 userNeed + approach + outcome + whatWorked, 跳过 `none`/`n/a`）：
+
+| 层级 | 规则关键词 | 特性 |
+|------|-----------|------|
+| `critical` | bug/fix/crash/break/hotfix/rollback/root cause/填坑/踩坑 | 高优先级，硬故障 |
+| `valuable` | learned/security/performance/实现/经验/方案/总结/设计/架构/优化/最佳实践/auth/config | 知识沉淀 |
+| `low` | checklist/meeting/review/todo/log/午休/日志/例会/计划/安排 | 工具性/临时性 |
+| `normal` | 无匹配且 ≥ 30 字 | 默认值 |
+
+- 优先级：critical > valuable > low > normal
+- 文本 < 30 字且无匹配 → fallback `low`
+- 用户显式设置的 `valueTier` 不会被覆盖（只覆盖 `'normal'` 或未设置的）
+- 分类器抛异常不会阻塞写入
+
+### 14.7 分层施冷
+
+`demote()` 根据 `valueTier` 使用不同的降级/归档阈值：
+
+| valueTier | ResNet 阈值 | 无召回保留期 |
+|-----------|------------|------------|
+| `critical` | 0.1 | 365 天 |
+| `valuable` | 0.2 | 90 天 |
+| `normal` | 0.3 | 30 天 |
+| `low` | 0.5 | 3 天 |
+
+### 14.8 自动标签推断
+
+`inferCategoryTags()` 在写入时自动补充分类标签（不覆盖用户标签）：
+
+| 标签 | 匹配关键词 |
+|------|-----------|
+| bug-fix/修复 | bug/fix/漏/错误/异常/崩溃 |
+| test/测试 | test/spec/ci/cd |
+| deploy/部署 | deploy/部署/setup/配置 |
+| dream/整理 | dream/consolidate/整理 |
+| api/接口 | api/endpoint/route |
+| db/数据库 | db/sql/数据库 |
+| ui/界面 | ui/前端/interface |
+| search/搜索 | search/query/检索/搜索 |
+| migration/迁移 | upgrade/migrate/迁移/升级 |
+| cli/命令行 | cli/bash/命令行 |
+| prompt/指令 | prompt/inject/指令 |
+| tags/标签 | tags/classify/tag/标签 |
+
+### 14.9 已知限制
 
 - `hermit` 标签未加入保护名单（如有需要可补）
 - 无对外暴露的 `recalcRecallCountFromLog()` 的 CLI/API 调用入口（需手动调 `store.recalcRecallCountFromLog()`）

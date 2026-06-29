@@ -953,9 +953,25 @@ Behavior feedback (`behavior_feedback`) is meta-log only — never injected, nev
 
 **Files:**
 - `agent/context/prefix-stabilizer.ts` — Phase A: regex-based volatile-field replacement (ISO timestamps → `[timestamp]`, UUIDs → `[uuid]`)
+
+### prefix-stabilizer.ts
+
+Pure function module. Exports two functions:
+
+| Function | Input | Returns | Purpose |
+|----------|-------|---------|---------|
+| `stabilizePrefix` | `readonly ContextMessage[]` | `ContextMessage[]` | Maps over messages; replaces timestamps (`TIMESTAMP_RE`) and UUIDs (`UUID_RE`) in system-role `text` parts only. Returns unchanged reference when no mutation needed. |
+| `stabilizeSystemPrompt` | `string` | `string` | Same replacement on a standalone system prompt string (for Anthropic-style APIs with separate system param). |
+
+**Regex patterns:** `TIMESTAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g`, `UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi`. Both target machine-generated output only — low false-positive risk on user-authored content.
+
+**Integration point:** called from `compact()` → `stabilizePrefix()` → `project()` chain in `context/index.ts`.
+
+**Pipeline counter:** `_stabilizeHitCount` increments when `JSON.stringify(msgs)` is identical before/after stabilization (prefix was already stable). See `getMetrics()` below.
+
 - `utils/mask-tool-observations.ts` — Phase B: old tool result masking (keeps last 3, pure function)
-- `agent/compaction/micro.ts` — Phase C: batch-gated detect() (BATCH_SIZE=8)
-- `agent/context/index.ts` — integration point: `compact() → stabilizePrefix() → project()`
+- `agent/compaction/micro.ts` — Phase C: batch-gated detect() (BATCH_SIZE=8, configurable via `flags.asNumber('micro.batchSize')` / env `SCREAM_CODE_MICRO_BATCH_SIZE`)
+- `agent/context/index.ts` — integration point: `compact() → stabilizePrefix() → project()`, with pipeline counters (`getMetrics() → { microCompactCount, stabilizeHitCount }`)
 - `loop/turn-step.ts` — integration point: `buildMessages() → maskToolObservations() → llm.chat()`
 
 ### Pipeline order
@@ -984,9 +1000,20 @@ Pure function. Finds all `role === 'tool'` messages, keeps the last N (default 3
 
 **KV-cache note:** Masking the tool-result tail does NOT affect cache hit rate. The cache prefix ends at the `cache_control` breakpoint (on system prompt). The masked tail is post-breakpoint and was never cached to begin with. The value of O-Mask is purely token reduction (~5-15% fewer input tokens in long sessions).
 
+### Pipeline counters (getMetrics)
+
+`AgentContextRegister.getMetrics()` returns:
+
+| Counter | Meaning |
+|---------|---------|
+| `microCompactCount` | Number of turns where micro-compaction actually reduced messages (fewer msgs after compact than before). |
+| `stabilizeHitCount` | Number of turns where prefix stabilizer produced no mutations (= JSON.stringify is identical before/after). A **hit** indicates the prefix is already stable and the KV-cache was reused without invalidation. |
+
+**`stabilizeHitCount` implementation note:** `stabilizePrefix()` never changes the messages array length — a length-only comparison would always increment on every turn and provide no signal. Instead the counter uses `JSON.stringify()` comparison of the full message list, which correctly detects whether any volatile field (timestamp, UUID) was actually replaced.
+
 ### Phase C — Batch-gated MicroCompaction detect()
 
-`MicroCompaction.detect()` increments `stepsSinceLastDetect` on each call. It only evaluates the context window when the counter reaches `BATCH_SIZE=8`. Before returning, it resets the counter to 0.
+`MicroCompaction.detect()` increments `stepsSinceLastDetect` on each call. It only evaluates the context window when the counter reaches `BATCH_SIZE` (default 8; configurable via `SCREAM_CODE_MICRO_BATCH_SIZE` env or `flags.asNumber('micro.batchSize')`). Before returning, it resets the counter to 0.
 
 **Why BATCH_SIZE=8:** MicroCompaction's detect() advances the cutoff line whenever context usage > 50%. Before this gate, the cutoff could move every step, changing the message array structure. On providers with implicit prefix matching (OpenAI, Gemini), any structural change in the messages array invalidates the cache — even if the content is semantically identical. Batching to 8 steps means the cutoff line moves at most 1× per 8 steps instead of up to 8× in the same window.
 

@@ -2,6 +2,9 @@ import { normalizeTags } from './tags.js';
 
 /** Memory memo types — structured task experience records extracted from conversations. */
 
+/** Value tier classification for memory quality filtering and layered demotion. */
+export type MemoValueTier = 'critical' | 'valuable' | 'normal' | 'low';
+
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
   id: string;
@@ -31,6 +34,8 @@ export interface MemoryMemo {
   recallCount?: number;
   /** Unix ms timestamp of the most recent recall. */
   lastRecalledAt?: number;
+  /** Value tier for quality-based demotion and filtering. Default 'normal'. */
+  valueTier?: MemoValueTier;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -56,6 +61,7 @@ export interface MemoryMemoSummary {
   tags?: string[];
   recallCount?: number;
   lastRecalledAt?: number;
+  valueTier?: MemoValueTier;
 }
 
 /** Result of listing/filtering memos. */
@@ -91,6 +97,7 @@ export function createMemoryMemo(
     recordedAt: partial.recordedAt ?? Date.now(),
     projectDir: partial.projectDir ?? '',
     tags: normalizedTags(partial.tags),
+    valueTier: partial.valueTier,
   };
 }
 
@@ -115,5 +122,6 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     tags: memo.tags,
     recallCount: memo.recallCount,
     lastRecalledAt: memo.lastRecalledAt,
+    valueTier: memo.valueTier,
   };
 }

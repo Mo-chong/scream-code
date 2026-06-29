@@ -59,7 +59,7 @@ export function smartTags(
     existingCorpus?: string[];
   },
 ): string[] {
-  const { maxConcepts = 10, maxTotal = 20, existingCorpus } = options ?? {};
+  const { maxConcepts = TAG_CONFIG.SMARTTAGS_MAX_CONCEPTS, maxTotal = TAG_CONFIG.SMARTTAGS_MAX_TOTAL, existingCorpus } = options ?? {};
 
   // Phase 1: filter stopwords/blacklist, separate concepts from shorts
   const concepts: string[] = [];
@@ -113,7 +113,7 @@ export async function processTags(
   context: ProcessTagsContext = {},
 ): Promise<string[]> {
   // Step 1: basic sanitize (lowercase, trim, dedup) — use large cap, smartTags handles real limiting
-  const sanitized = normalizeTags(rawTags, 999);
+  const sanitized = normalizeTags(rawTags, TAG_CONFIG.PROCESSTAGS_INITIAL_CAP);
 
   // Fallback: LLM didn't provide tags — return empty. Algorithm-generated tags are harmful.
   if (sanitized.length === 0) {
@@ -228,6 +228,13 @@ export const TAG_CONFIG = {
   QUALITY_BLACKLIST_PENALTY: -0.3,
   QUALITY_PROJECT_SPECIFIC_BONUS: 0.1,
   QUALITY_SINGLE_TAG_PENALTY: -0.2,
+
+  // 🛠️ P2-3: smartTags budget limits — formerly hardcoded default params
+  SMARTTAGS_MAX_CONCEPTS: 10,
+  SMARTTAGS_MAX_TOTAL: 20,
+
+  // 🛠️ P2-3: processTags large cap for normalizeTags pass-through
+  PROCESSTAGS_INITIAL_CAP: 999,
 } as const;
 
 // ── Phase 2: Dynamic Tag Budget ─────────────────────────────────────

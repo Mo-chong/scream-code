@@ -1,8 +1,14 @@
-export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListResult } from './models.js';
+export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListResult, MemoValueTier } from './models.js';
 export { createMemoryMemo, toSummary } from './models.js';
 export { MemoryMemoStore, type MemoryMemoStoreLogger } from './store.js';
 export { parseMemoryMemos, buildExitExtractionPrompt, EXIT_EXTRACTION_SYSTEM_PROMPT } from './extractor.js';
-export { computeRelevanceScore, rankMemos, extractKeywords, buildProjectTagCloud, detectQueryIntent, type ScoredMemo, type QueryIntent } from './scoring.js';
+export {
+  computeRelevanceScore, rankMemos, extractKeywords, buildProjectTagCloud, detectQueryIntent,
+  computeMultiFieldSimilarity, isDuplicate, expandWithSynonyms,
+  type ScoredMemo, type QueryIntent,
+} from './scoring.js';
+export { classifyValueTier, buildMemoClassifyText, inferCategoryTags } from './classifiers/index.js';
+export type { CategoryRule } from './classifiers/index.js';
 export {
   normalizeTags, generateTags, processTags, recommendTagsFromEmbedding,
   computeTagBudget, computeJaccardSimilarity, deduplicateAgainstCorpus,

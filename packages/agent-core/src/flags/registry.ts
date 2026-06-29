@@ -35,7 +35,14 @@ export const FLAG_DEFINITIONS = [
     default: false,
     surface: 'both',
   },
+  {
+    id: 'micro.batchSize',
+    env: 'SCREAM_CODE_MICRO_BATCH_SIZE',
+    default: true,
+    numDefault: 8,
+    surface: 'internal',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
-/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit */
+/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit | micro.batchSize */
 export type FlagId = (typeof FLAG_DEFINITIONS)[number]['id'];

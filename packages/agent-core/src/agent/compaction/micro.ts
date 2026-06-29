@@ -80,7 +80,7 @@ function findSupersededPaths(
  * Triggered automatically during context construction via {@link compact}.
  */
 /** Minimum steps between detect() evaluations to reduce cache-break churn. */
-const BATCH_SIZE = 8;
+const BATCH_SIZE = flags.asNumber('micro.batchSize');
 
 export class MicroCompaction {
   private cutoff = 0;
@@ -111,7 +111,8 @@ export class MicroCompaction {
 
   /** Check whether micro-compaction is warranted and advance the cutoff.
    *
-   * Gated by a batch counter (BATCH_SIZE=8) so the cutoff line changes
+   * Gated by a batch counter (BATCH_SIZE, registry default 8, configurable via
+   * SCREAM_CODE_MICRO_BATCH_SIZE) so the cutoff line changes
    * infrequently, preserving KV-cache continuity. The `force` parameter
    * bypasses the gate for full-compaction-driven resets. */
   detect(force?: boolean): void {

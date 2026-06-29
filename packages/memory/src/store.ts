@@ -9,6 +9,8 @@ import type { MemoryMemo, MemoryMemoListResult } from './models.js';
 import { toSummary } from './models.js';
 import { buildEmbeddingText, type EmbeddingEngine } from './embeddings.js';
 import { computeTagSetQuality, TAG_CONFIG } from './tags.js';
+import { classifyValueTier, buildMemoClassifyText } from './classifiers/value-classifier.js';
+import { inferCategoryTags } from './classifiers/category-tagger.js';
 
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
@@ -18,12 +20,20 @@ const VEC0_MIGRATION_MARKER = '.migrated-vec0';
 // --- vec0 / hot-cold tier constants ---
 const VEC0_DIMS = 512;
 const HOT_MAX_SIZE = 100;
-const DEMOTE_RESNET_THRESHOLD = 0.3;
-const DEMOTE_DAYS_NO_HIT = 30;
 const PROMOTE_HIT_COUNT = 2;
 const PROMOTE_RESERVE_SPACE = 10;
 const DEMOTE_BATCH_SIZE = 5;
 
+/** Per-value-tier demotion configuration. Defaults to 'normal' when valueTier is unset. */
+const TIERED_DEMOTION = {
+  critical: { resNetThreshold: 0.1, daysNoHit: 365 },
+  valuable: { resNetThreshold: 0.2, daysNoHit: 90 },
+  normal:   { resNetThreshold: 0.3, daysNoHit: 30 },
+  low:      { resNetThreshold: 0.5, daysNoHit: 3 },
+} as const;
+
+/** Tier priority for hot cap eviction — higher rank = more protected. */
+const TIER_RANK: Record<string, number> = { vital: 5, high: 4, normal: 3, low: 2, archive: 1, critical: 6 };
 
 export interface MemoryMemoStoreLogger {
   debug?: (message: string, ...args: unknown[]) => void;
@@ -111,6 +121,7 @@ export class MemoryMemoStore {
   }
 
   /** Iterate all memos from the database, newest first. Optionally filter by project directory. */
+  /** Read all hot-tier memos. */
   async *read(options?: { projectDir?: string }): AsyncIterable<MemoryMemo> {
     await this.init();
     if (this.db === undefined) return;
@@ -126,6 +137,25 @@ export class MemoryMemoStore {
           );
     // NOTE: stmt.all() materializes the entire result set. For large stores
     // this loads all rows into memory. Use paginated list() for bounded reads.
+    const rows = (
+      projectDir === undefined ? stmt.all() : stmt.all(projectDir)
+    ) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      yield rowToMemo(row);
+    }
+  }
+
+  /** Read all cold-tier (archived) memos. Used by Dream with includeArchive option. */
+  async *readArchived(options?: { projectDir?: string }): AsyncIterable<MemoryMemo> {
+    await this.init();
+    if (this.db === undefined) return;
+    const projectDir = options?.projectDir;
+    const stmt =
+      projectDir === undefined
+        ? this.db.prepare('SELECT * FROM memos_archive ORDER BY recorded_at DESC')
+        : this.db.prepare(
+            "SELECT * FROM memos_archive WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC",
+          );
     const rows = (
       projectDir === undefined ? stmt.all() : stmt.all(projectDir)
     ) as Array<Record<string, unknown>>;
@@ -150,7 +180,10 @@ export class MemoryMemoStore {
     if (this.db === undefined) return undefined;
     const stmt = this.db.prepare('SELECT * FROM memos WHERE id = ?');
     const row = stmt.get(id) as Record<string, unknown> | undefined;
-    return row !== undefined ? rowToMemo(row) : undefined;
+    if (row === undefined) return undefined;
+    // 🛠️ P1-7: fire-and-forget recall event so direct get() calls also bump recallCount
+    this.recordRecall(id).catch(() => {});
+    return rowToMemo(row);
   }
 
   /**
@@ -162,7 +195,7 @@ export class MemoryMemoStore {
    */
   async search(
     query: string,
-    options?: { candidateLimit?: number; projectDir?: string },
+    options?: { candidateLimit?: number; projectDir?: string; scope?: 'project' | 'all' },
   ): Promise<MemoryMemo[]> {
     await this.init();
     if (this.db === undefined) return [];
@@ -170,8 +203,10 @@ export class MemoryMemoStore {
     if (ftsQuery === undefined) return [];
     const limit = options?.candidateLimit ?? 200;
     const projectDir = options?.projectDir;
+    // 🛠️ P3-6: scope:all bypasses projectDir filter
+    const scopeAll = options?.scope === 'all';
     const stmt =
-      projectDir === undefined
+      projectDir === undefined || scopeAll
         ? this.db.prepare(
             `SELECT m.* FROM memos m
          JOIN memos_fts f ON m.rowid = f.rowid
@@ -185,7 +220,7 @@ export class MemoryMemoStore {
          ORDER BY m.recorded_at DESC LIMIT ?`,
           );
     const rows = (
-      projectDir === undefined ? stmt.all(ftsQuery, limit) : stmt.all(ftsQuery, projectDir, limit)
+      projectDir === undefined || scopeAll ? stmt.all(ftsQuery, limit) : stmt.all(ftsQuery, projectDir, limit)
     ) as Array<Record<string, unknown>>;
     const memos = rows.map(rowToMemo);
     // Re-rank: relevance × 0.7 + heatScore × 0.3
@@ -384,7 +419,8 @@ export class MemoryMemoStore {
         project_dir TEXT NOT NULL DEFAULT '',
         tags TEXT NOT NULL DEFAULT '[]',
         recall_count INTEGER NOT NULL DEFAULT 0,
-        last_recalled_at INTEGER NOT NULL DEFAULT 0
+        last_recalled_at INTEGER NOT NULL DEFAULT 0,
+        value_tier TEXT NOT NULL DEFAULT 'normal'
       );
 
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
@@ -439,7 +475,8 @@ export class MemoryMemoStore {
         last_hit_at INTEGER NOT NULL DEFAULT 0,
         embedding_json TEXT,
         recall_count INTEGER NOT NULL DEFAULT 0,
-        last_recalled_at INTEGER NOT NULL DEFAULT 0
+        last_recalled_at INTEGER NOT NULL DEFAULT 0,
+        value_tier TEXT NOT NULL DEFAULT 'normal'
       );
 
       CREATE INDEX IF NOT EXISTS idx_archive_archived_at ON memos_archive(archived_at DESC);
@@ -487,6 +524,16 @@ export class MemoryMemoStore {
     if (!archiveHasRecallCount) {
       this.db.exec("ALTER TABLE memos_archive ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0");
       this.db.exec("ALTER TABLE memos_archive ADD COLUMN last_recalled_at INTEGER NOT NULL DEFAULT 0");
+    }
+    // Add value_tier column to memos
+    const hasValueTier = info.some((col) => col.name === 'value_tier');
+    if (!hasValueTier) {
+      this.db.exec("ALTER TABLE memos ADD COLUMN value_tier TEXT NOT NULL DEFAULT 'normal'");
+    }
+    // Add value_tier column to memos_archive
+    const archiveHasValueTier = archiveInfo.some((col) => col.name === 'value_tier');
+    if (!archiveHasValueTier) {
+      this.db.exec("ALTER TABLE memos_archive ADD COLUMN value_tier TEXT NOT NULL DEFAULT 'normal'");
     }
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
@@ -692,8 +739,8 @@ export class MemoryMemoStore {
     const insert = this.db.prepare(
       `INSERT INTO memos (
         id, source_session_id, source_session_title, user_need, approach,
-        outcome, what_failed, what_worked, extraction_source, recorded_at, project_dir, tags
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        outcome, what_failed, what_worked, extraction_source, recorded_at, project_dir, tags, value_tier
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING rowid`,
     );
     const insertFts = this.db.prepare(
@@ -702,6 +749,26 @@ export class MemoryMemoStore {
     );
     this.db.exec('BEGIN TRANSACTION');
     try {
+      // --- Auto value classification (writes only, not overwrites) ---
+      if (!entry.valueTier || entry.valueTier === 'normal') {
+        try {
+          const classifyText = buildMemoClassifyText(entry);
+          entry = { ...entry, valueTier: classifyValueTier(classifyText) };
+        } catch {
+          // classifier failure must not block the write
+        }
+      }
+      // --- Auto category tag inference (supplementary, not overriding) ---
+      try {
+        const inferredTags = inferCategoryTags(entry);
+        if (inferredTags.length > 0) {
+          const mergedTags = [...new Set([...(entry.tags ?? []), ...inferredTags])];
+          entry = { ...entry, tags: mergedTags.length > 0 ? mergedTags : undefined };
+        }
+      } catch {
+        // tag inference failure must not block the write
+      }
+
       const row = insert.get(
         entry.id,
         entry.sourceSessionId,
@@ -715,6 +782,7 @@ export class MemoryMemoStore {
         entry.recordedAt,
         entry.projectDir ?? '',
         JSON.stringify(entry.tags ?? []),
+        entry.valueTier ?? 'normal',
       ) as { rowid: number };
       insertFts.run(
         row.rowid,
@@ -776,7 +844,8 @@ export class MemoryMemoStore {
         extraction_source = ?,
         recorded_at = ?,
         project_dir = ?,
-        tags = ?
+        tags = ?,
+        value_tier = ?
       WHERE id = ?
       RETURNING rowid`,
     );
@@ -806,6 +875,7 @@ export class MemoryMemoStore {
         updated.recordedAt,
         updated.projectDir ?? '',
         JSON.stringify(updated.tags ?? []),
+        updated.valueTier ?? null,
         id,
       ) as { rowid: number } | undefined;
       if (row === undefined) {
@@ -863,7 +933,12 @@ export class MemoryMemoStore {
     const row = this.db.prepare('SELECT COUNT(*) as count FROM memory_embeddings').get() as
       | { count: number }
       | undefined;
-    return (row?.count ?? 0) > 0;
+    // 🛠️ P2-11: warn when vector store is empty but vec0 exists
+    const count = row?.count ?? 0;
+    if (count === 0 && this.hasVec0()) {
+      console.warn('[memory] memory_embeddings table empty but vec0 has entries - embeddings drift detected');
+    }
+    return count > 0;
   }
 
   /** Access the embedding engine (may be undefined if not configured). */
@@ -1017,8 +1092,8 @@ export class MemoryMemoStore {
           id, source_session_id, source_session_title, user_need, approach,
           outcome, what_failed, what_worked, extraction_source, recorded_at,
           project_dir, tags, archived_at, hit_count, last_hit_at, embedding_json,
-          recall_count, last_recalled_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          recall_count, last_recalled_at, value_tier
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.id,
@@ -1039,6 +1114,7 @@ export class MemoryMemoStore {
         entry.embeddingJson ?? null,
         entry.recallCount ?? entry.hitCount ?? 0,
         entry.lastRecalledAt ?? entry.lastHitAt ?? 0,
+        entry.valueTier ?? 'normal',
       );
   }
 
@@ -1131,8 +1207,10 @@ export class MemoryMemoStore {
       recordedAt: archived.recordedAt,
       projectDir: archived.projectDir,
       tags: archived.tags,
-      recallCount: archived.recallCount ?? archived.hitCount,
-      lastRecalledAt: archived.lastRecalledAt ?? archived.lastHitAt,
+      // 🛠️ Reset recallCount/recalledAt on promote to avoid double-counting
+      // with the logRecall call below, and to give promoted memos a fair start.
+      recallCount: 0,
+      lastRecalledAt: 0,
     };
     await this.appendInternal(memo);
     await this.deleteFromArchive(id);
@@ -1202,7 +1280,11 @@ export class MemoryMemoStore {
       const daysSince = (Date.now() - memo.recordedAt) / (1000 * 60 * 60 * 24);
       const resNetFactor = Math.pow(D, daysSince);
 
-      if (resNetFactor < DEMOTE_RESNET_THRESHOLD || daysSince >= DEMOTE_DAYS_NO_HIT) {
+      // Tiered demotion: pick threshold based on valueTier
+      const tier = memo.valueTier ?? 'normal';
+      const config = TIERED_DEMOTION[tier] ?? TIERED_DEMOTION.normal;
+
+      if (resNetFactor < config.resNetThreshold || daysSince >= config.daysNoHit) {
         await this.demote(memo.id);
         demoted++;
         if (demoted >= DEMOTE_BATCH_SIZE) break;
@@ -1241,10 +1323,23 @@ export class MemoryMemoStore {
     const unprotected = hotMemos.filter(
       (m) => !(Array.isArray(m.tags) &&
         (m.tags.includes('baohu') || m.tags.includes('chundu') || m.tags.includes('ding') || m.tags.includes('yongjiu')))
+      // 🛠️ P1-5: critical valueTier exempts from demotion
+      && m.valueTier !== 'critical'
     );
+    // 🛠️ P1-10: bail early if nothing to demote after exemption
+    const excessCount = currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE;
+    if (excessCount <= 0 || unprotected.length === 0) return 0;
+
     const evictTargets = unprotected
-      .sort((a, b) => (a.recallCount ?? 0) - (b.recallCount ?? 0) || a.recordedAt - b.recordedAt)
-      .slice(0, currentCount - HOT_MAX_SIZE + PROMOTE_RESERVE_SPACE);
+      .sort((a, b) => {
+        // P1-10: sort by valueTier ranking first (lowest tier → demote first)
+        const rankA = TIER_RANK[a.valueTier ?? 'normal'] ?? 3;
+        const rankB = TIER_RANK[b.valueTier ?? 'normal'] ?? 3;
+        if (rankA !== rankB) return rankA - rankB;
+        // Then by recallCount ascending; finally recordedAt ASC so older memos are demoted first
+        return (a.recallCount ?? 0) - (b.recallCount ?? 0) || (a.recordedAt ?? 0) - (b.recordedAt ?? 0);
+      })
+      .slice(0, excessCount);
 
     let demoted = 0;
     for (const memo of evictTargets) {
@@ -1668,6 +1763,7 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     tags: parseTags(row['tags']),
     recallCount: typeof row['recall_count'] === 'number' ? row['recall_count'] : (row['hit_count'] as number | undefined),
     lastRecalledAt: typeof row['last_recalled_at'] === 'number' ? row['last_recalled_at'] : (row['last_hit_at'] as number | undefined) || undefined,
+    valueTier: typeof row['value_tier'] === 'string' ? (row['value_tier'] as 'critical' | 'valuable' | 'normal' | 'low') : undefined,
   };
 }
 

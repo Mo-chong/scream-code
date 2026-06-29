@@ -25,7 +25,7 @@
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
-| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ Observation Masking（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE=8）** |
+| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ Observation Masking（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
 | **整体架构** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |

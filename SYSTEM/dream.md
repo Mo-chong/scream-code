@@ -29,7 +29,8 @@ Consolidator (consolidator.ts)  ← 实际干活，buildConsolidationPlan() + ap
 ```
 用户执行 /dream
   → MemoryConsolidatePlanTool (memory-consolidate.ts:70-108)
-    → buildConsolidationPlan(store) (consolidator.ts:64-101)
+    → buildConsolidationPlan(store, options?) (consolidator.ts:88-131)
+       options.includeArchive (default false): 设为 true 时同时扫描冷层 (memos_archive) 做去重/过期清理
       → 读全量记忆
       → 过滤 baohu/chundu/yongjiu 标签 → active 列表
       → active 参与后续所有判断
