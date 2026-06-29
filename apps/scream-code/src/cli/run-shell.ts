@@ -11,6 +11,7 @@ import { runLoadingAnimation } from '#/tui/components/chrome/loading';
 import { detectTerminalTheme } from '#/tui/theme/detect';
 
 import type { CLIOptions } from './options';
+import { refreshUpdateCache } from './update/refresh';
 import { createScreamCodeHostIdentity } from './version';
 
 export async function runShell(
@@ -47,10 +48,14 @@ export async function runShell(
   await harness.ensureConfigFile();
 
   // Preflight validates the host environment (e.g. Git Bash on Windows)
-  // BEFORE the loading animation, so any error is visible to the user.
   await harness.preflight();
 
-  await runLoadingAnimation(resolvedTheme);
+  // Fire the update-cache refresh in parallel with the loading splash so its
+  // network latency is hidden behind the animation. The splash gates its
+  // "press ENTER" prompt on this promise resolving.
+  const updatePrefetch = refreshUpdateCache().catch(() => {});
+
+  await runLoadingAnimation(resolvedTheme, updatePrefetch);
 
   const tui = new ScreamTUI(harness, {
     cliOptions: opts,
@@ -59,6 +64,7 @@ export async function runShell(
     workDir,
     startupNotice: configWarning,
     resolvedTheme,
+    updatePrefetched: true,
   });
 
   tui.onExit = async (exitCode = 0) => {

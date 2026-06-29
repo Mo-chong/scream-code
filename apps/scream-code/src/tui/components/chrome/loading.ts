@@ -1,7 +1,7 @@
 import process from "node:process";
-const { stdout, stdin } = process;
-
 import type { ResolvedTheme } from "#/tui/theme/colors";
+
+const { stdout, stdin } = process;
 
 const LOGO = [
   '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗  ██████╗ ██████╗ ██████╗ ███████╗',
@@ -109,13 +109,24 @@ function supportsAnsi(): boolean {
   ansiSupported = false; return false
 }
 
-export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void> {
+export function runLoadingAnimation(
+  theme: ResolvedTheme = 'dark',
+  prefetch?: Promise<unknown>,
+): Promise<void> {
   const ansi = supportsAnsi()
 
   if (!ansi) {
-    for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-    stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在唤醒核心...${RESET}\n`)
-    return Promise.resolve()
+    // Honour the prefetch even in non-ANSI fallback so the update cache is
+    // warm before ScreamTUI reads it — keeps the no-colour path consistent.
+    const finish = (): void => {
+      for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+      stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在唤醒核心...${RESET}\n`)
+    }
+    if (prefetch === undefined) {
+      finish()
+      return Promise.resolve()
+    }
+    return prefetch.catch(() => {}).finally(() => finish()).then(() => undefined)
   }
 
   return new Promise((resolve) => {
@@ -227,9 +238,16 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     render()
     const timer = setInterval(tick, SHEEN_INTERVAL_MS)
 
-    setTimeout(() => {
+    // The ready phase is gated on BOTH the minimum animation duration AND the
+    // optional prefetch promise (e.g. update-cache refresh). The ENTER prompt
+    // only appears once both resolve, so a slow network stays inside the
+    // loading screen instead of blocking the welcome render later.
+    const minDelay = new Promise<void>((resolve) => { setTimeout(resolve, LOADING_DURATION_MS); })
+    const gate: Promise<unknown> =
+      prefetch === undefined ? minDelay : Promise.all([minDelay, prefetch.catch(() => {})])
+    void gate.then(() => {
       phase = 'ready'
       render()
-    }, LOADING_DURATION_MS)
+    })
   })
 }

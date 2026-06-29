@@ -84,6 +84,10 @@ export interface ScreamTUIStartupInput {
   readonly workDir: string;
   readonly startupNotice?: string;
   readonly resolvedTheme?: ResolvedTheme;
+  /** When true, the update cache was already refreshed during the loading
+   * splash screen, so checkForUpdates() should skip the network refresh and
+   * just read the cache. */
+  readonly updatePrefetched?: boolean;
 }
 
 function createInitialAppState(input: ScreamTUIStartupInput): AppState {
@@ -149,6 +153,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   private isShuttingDown = false;
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
+  private readonly updatePrefetched: boolean;
   readonly sessionManager: SessionManager;
   readonly dialogManager: DialogManager;
   readonly streamingUI: StreamingUIController;
@@ -189,6 +194,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     };
     this.options = tuiOptions;
     this.startupNotice = startupInput.startupNotice;
+    this.updatePrefetched = startupInput.updatePrefetched === true;
     this.state = createTUIState(tuiOptions);
 
     this.reverseRpcDisposers.push(
@@ -636,13 +642,13 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async fetchSessions(): Promise<void> {
     await this.sessionManager.fetchSessions();
   }
-
   private async checkForUpdates(): Promise<void> {
     try {
-      // Refresh from GitHub Releases API first so we always have a fresh
-      // cache before comparing.  Errors (network offline, rate-limited) are
-      // swallowed — the stale cache is still usable as a fallback.
-      await refreshUpdateCache().catch(() => {});
+      // When the loading splash already refreshed the npm cache, skip the
+      // network round-trip and just read the warm cache.
+      if (!this.updatePrefetched) {
+        await refreshUpdateCache().catch(() => {});
+      }
       const cache = await readUpdateCache();
       const target = selectUpdateTarget(this.state.appState.version, cache.latest);
       if (target !== null) {
