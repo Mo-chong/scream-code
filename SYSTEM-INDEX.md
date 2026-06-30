@@ -25,7 +25,7 @@
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
-| **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl` |
+| **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl`。**§11.4 Phase20 Bash 降噪**：builder 级 ANSI 剥离 + 重复行去重 + quality 简洁指令 |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ maskToolObservations（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
@@ -73,7 +73,8 @@
 | FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction / `SYSTEM/context-management.md` §四 |
 | ContentArchive（保留缓冲区） | `SYSTEM/context-management.md` §二 |
 | ArchiveRecover MCP 工具 | `SYSTEM/context-management.md` §五 |
-| 上下文管理三层架构总览 | `SYSTEM/context-management.md` §一、七 |
+| Bash 降噪/ANSI 剥离/sanitize | `SYSTEM/context-management.md` §11.4 / `SYSTEM/API-REFERENCE.md` §21 |
+| 上下文管理三层架构总览 | `SYSTEM/context-management.md` §一、七、十一 |
 | 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
 | 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
 | 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |

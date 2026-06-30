@@ -1327,4 +1327,65 @@ Agent 构造函数 `packages/agent-core/src/agent/tool/index.ts` L630-650 注册
 \r\n### 约束\r\r
 - 不封装 archive()：工具模型不应直接写 archive（应通过工具结果自然触发 archive）\r
 - 不暴露内部 TTL/priority：recover 对模型是黑箱寻址\r
-- expired 条目返回 undefined 而非错误信息\r\n
+- expired 条目返回 undefined 而非错误信息
+
+---
+
+## §21 ToolResultBuilder `sanitize` 选项（Phase20）
+
+### 接口
+
+```typescript
+interface ToolResultBuilderOptions {
+  readonly maxChars?: number;
+  readonly maxTailChars?: number;
+  readonly maxLineLength?: number | null;
+  readonly sanitize?: boolean;   // ← Phase20 新增
+}
+
+class ToolResultBuilder {
+  constructor(options?: ToolResultBuilderOptions);
+  write(text: string): number;   // sanitize=true 时自动调用 sanitizeOutput()
+  ok(): ToolResult;
+  error(): ToolResult;
+}
+```
+
+### 行为
+
+- `sanitize: true` 时，每次 `write(text)` 先过 `sanitizeOutput()`：
+  1. `stripAnsi()` — 正则 `[\u001B\u009B][[\]()#;?]*(?:...)` 删除全部 ANSI 序列（颜色/光标/清屏）
+  2. `collapseCarriageReturnLines()` — `\r` 行尾且 trim 后为空的行跳过
+
+- `sanitize: false`（默认）— 原始输出行为不变
+
+### 激活方
+
+| 调用方 | 代码 |
+|--------|------|
+| `shell/bash.ts` execute | `new ToolResultBuilder({ sanitize: true })` |
+
+### 配对方
+
+在 `agent/context/index.ts` 的 `truncateToolOutput` 中：
+
+- `collapseDuplicateLines(text, threshold=3)` — 连续重复行 >3 行去重，在 token 估算前做
+- `quality.ts` detector Signal 3 — bash 输出 >3000 chars 时升一级 + `concise-summary constraint`
+
+### 数据流
+
+```
+bash stdout
+ → readStreamIntoBuilder → builder.write(raw)
+ → builder.write() 检测 sanitizeEnabled
+ → sanitizeOutput() [stripAnsi + \r 空行跳过]
+ → truncateToolOutput() [collapseDuplicateLines + 截断]
+ → context 历史
+```
+
+### 测试
+
+`test/tools/result-builder.test.ts` 新增 3 个 Phase20 测试用例：
+1. `strips ANSI escape sequences when sanitize is true`
+2. `collapses \r-only progress lines when sanitize is true`
+3. `preserves output unchanged when sanitize is false (default)`\r\n
