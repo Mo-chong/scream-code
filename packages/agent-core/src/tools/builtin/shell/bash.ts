@@ -520,7 +520,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     }, timeoutMs);
 
     try {
-      const builder = new ToolResultBuilder();
+      const builder = new ToolResultBuilder({ sanitize: true });
       const [, exitCode] = await Promise.all([
         Promise.all([
           readStreamIntoBuilder(proc.stdout, builder),

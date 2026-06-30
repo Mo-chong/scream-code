@@ -100,7 +100,25 @@ export function detectQualityIssue(
       continue;
     }
 
-    // ── Signal 3 (预留): compaction 清除了注入 ──
+    // ── Signal 3 (Phase20): Bash 输出超大 → 简洁指令 ──
+    // 当 bash 工具返回 >3000 chars 的输出时，催促 AI 简洁回应
+    // 避免 AI 在回应中大段引用/重述 bash 输出
+    if (
+      (record.variant === 'prepare_bash_file' || record.variant === 'step_after_edit') &&
+      sig.outputLength > 3000
+    ) {
+      bestResult = betterResult(bestResult, {
+        confidence: 1,
+        signal: 'escalate',
+        targetVariant: record.variant,
+        currentLevel: record.level,
+        suggestedLevel: escalateLevel(record.level),
+        reason: `${record.variant}: bash output is large (${sig.outputLength} tokens); escalate ${record.level}→${escalateLevel(record.level)} with concise-summary constraint`,
+      });
+      continue;
+    }
+
+    // ── Signal 4 (预留): compaction 清除了注入 ──
     // 详见未来 Phase
   }
 

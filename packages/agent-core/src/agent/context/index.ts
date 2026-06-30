@@ -385,8 +385,31 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
   return truncateContentParts(output);
 }
 
+/**
+ * Collapse consecutive duplicate lines in a string, keeping only the first
+ * occurrence of each run.  This saves tokens on repetitive output patterns
+ * (progress bars, polling loops, repeated error messages).
+ */
+function collapseDuplicateLines(text: string, threshold: number = 3): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let runCount = 1;
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && lines[i] === lines[i - 1]) {
+      runCount++;
+      if (runCount > threshold) continue; // skip this duplicate
+    } else {
+      runCount = 1;
+    }
+    out.push(lines[i]!);
+  }
+  return out.join('\n');
+}
+
 /** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS. */
 function truncateToolOutput(text: string): string {
+  // P1-3: collapse consecutive duplicate lines (keep first N, skip rest)
+  text = collapseDuplicateLines(text);
   if (estimateTokens(text) <= MAX_TOOL_RESULT_TOKENS) return text;
   // Walk backwards to find a safe cut point within budget, reserving room
   // for the truncation notice.

@@ -134,6 +134,10 @@ export abstract class FlushBuffer<T> {
  *
  * 使用 FlushBuffer 骨架实现，追加写入 .jsonl 文件。
  * 每 30s 防抖刷盘，连续 5 次失败触发熔断。
+ *
+ * 审计追踪：内存中保留最近 KEEP_RECENT_MAX 条条目的环状缓冲区，
+ * 供 AI 在 tool 错误时通过 injection 系统自动引用查错。
+ * 不侵入刷盘路径，纯内存操作。
  */
 export class FileActionAudit extends FlushBuffer<FileActionAuditEntry> {
   protected readonly minFlushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS;
@@ -142,8 +146,47 @@ export class FileActionAudit extends FlushBuffer<FileActionAuditEntry> {
   private consecutiveFailures = 0;
   private circuitOpen = false;
 
+  // ─── 审计追踪（环状缓冲区）───
+  private static readonly KEEP_RECENT_MAX = 50;
+  private recentEntries: FileActionAuditEntry[] = [];
+  private recentWriteIndex = 0;
+
   constructor() {
     super();
+  }
+
+  /**
+   * 返回最近 N 条审计记录（按时间从新到旧）。
+   * 用于 tool 错误时自动注入上下文，帮助 AI 查错。
+   */
+  getRecentEntries(n: number): FileActionAuditEntry[] {
+    const limit = Math.min(n, FileActionAudit.KEEP_RECENT_MAX);
+    // 如果环状缓冲区没填满，直接反转
+    if (this.recentEntries.length < FileActionAudit.KEEP_RECENT_MAX) {
+      return [...this.recentEntries].reverse().slice(0, limit);
+    }
+    // 环状：从 writeIndex 向前取 n 条
+    const result: FileActionAuditEntry[] = [];
+    for (let i = 0; i < limit; i++) {
+      const idx = (this.recentWriteIndex - 1 - i + FileActionAudit.KEEP_RECENT_MAX) % FileActionAudit.KEEP_RECENT_MAX;
+      result.push(this.recentEntries[idx]!);
+    }
+    return result;
+  }
+
+  /**
+   * 覆写 push：在追加到刷盘缓冲区的同时，同步到环状缓冲区。
+   */
+  override push(entry: FileActionAuditEntry): void {
+    // 同步到环状缓冲区
+    if (this.recentEntries.length < FileActionAudit.KEEP_RECENT_MAX) {
+      this.recentEntries.push(entry);
+    } else {
+      this.recentEntries[this.recentWriteIndex] = entry;
+    }
+    this.recentWriteIndex = (this.recentWriteIndex + 1) % FileActionAudit.KEEP_RECENT_MAX;
+    // 父类 flush 路径不变
+    super.push(entry);
   }
 
   // ─── 熔断守卫 ───────────────────────────────

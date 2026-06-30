@@ -9,10 +9,54 @@ const DEFAULT_MAX_LINE_LENGTH = 2000;
 const TRUNCATION_MARKER = '[...truncated]';
 const TRUNCATION_MESSAGE = 'Output is truncated to fit in the message.';
 
+// Regex to match ANSI escape sequences (colors, cursor movement, clear screen, etc.)
+const ANSI_ESCAPE_RE = /[\u001B\u009B][[\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*|[a-zA-Z\d]+(?:;[-a-zA-Z\d\/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
+
+/**
+ * Strip ANSI escape sequences from a string.
+ */
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE_RE, '');
+}
+
+/**
+ * Collapse lines that consist only of carriage-return + cursor-move patterns.
+ * This handles progress bars (`\r 50%`, `\r 100%`), spinner artifacts, and
+ * other overwrite-style terminal output that is meaningless in a final log.
+ *
+ * Strategy: any line whose visible content (after stripping ANSI) is entirely
+ * whitespace or empty after removing trailing `\r` is dropped.
+ */
+function collapseCarriageReturnLines(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  for (const line of lines) {
+    // Strip ANSI first so we don't mistake colored whitespace for content
+    const visible = stripAnsi(line).replace(/\r+$/, '').trim();
+    if (visible.length === 0) {
+      // Skip lines that were only \r-based overwrites
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Sanitize a command output string: strip ANSI escape sequences and collapse
+ * carriage-return-only progress lines.
+ */
+export function sanitizeOutput(text: string): string {
+  const noAnsi = stripAnsi(text);
+  return collapseCarriageReturnLines(noAnsi);
+}
+
 export interface ToolResultBuilderOptions {
   readonly maxChars?: number;
   readonly maxTailChars?: number;
   readonly maxLineLength?: number | null;
+  /** When true, strip ANSI escape sequences and collapse \r-only progress lines on every write(). */
+  readonly sanitize?: boolean;
 }
 
 export type ExecutableToolResultBuilderResult = (
@@ -38,11 +82,14 @@ export class ToolResultBuilder {
   private readonly tailBuf: string[] = [];
   private tailCharsValue = 0;
 
+  private readonly sanitizeEnabled: boolean;
+
   constructor(options: ToolResultBuilderOptions = {}) {
     this.maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
     this.maxTailChars = options.maxTailChars ?? DEFAULT_TAIL_CHARS;
     this.maxLineLength =
       options.maxLineLength === undefined ? DEFAULT_MAX_LINE_LENGTH : options.maxLineLength;
+    this.sanitizeEnabled = options.sanitize ?? false;
 
     if (this.maxLineLength !== null && this.maxLineLength <= TRUNCATION_MARKER.length) {
       throw new Error('maxLineLength must be greater than the truncation marker length.');
@@ -67,7 +114,11 @@ export class ToolResultBuilder {
   write(text: string): number {
     if (text.length === 0) return 0;
 
-    const lines = text.match(/[^\r\n]*(?:\r\n|[\n\r])|[^\r\n]+/g) ?? [];
+    // Phase20: strip ANSI + collapse \r-only lines at the builder level
+    const cleaned = this.sanitizeEnabled ? sanitizeOutput(text) : text;
+    if (cleaned.length === 0) return 0;
+
+    const lines = cleaned.match(/[^\r\n]*(?:\r\n|[\n\r])|[^\r\n]+/g) ?? [];
     if (lines.length === 0) return 0;
 
     let charsWritten = 0;
