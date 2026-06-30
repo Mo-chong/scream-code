@@ -202,6 +202,15 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.updatePrefetched = startupInput.updatePrefetched === true;
     this.state = createTUIState(tuiOptions);
 
+    // Inject a live getter for `/model diy` bindings. Read at every subagent
+    // spawn/resume, so mid-session changes in the binder take effect on the
+    // next spawn without recreating the session. The arrow closure reads
+    // `appState.subagentModels` by reference each call — never a snapshot —
+    // so rebinding `coder → alias-A → alias-B` over time always reflects the
+    // latest choice, and unbinding (follow-main) falls back to the parent's
+    // current model.
+    this.harness.setSubagentModelBindings(() => this.state.appState.subagentModels);
+
     this.reverseRpcDisposers.push(
       ...registerReverseRPCHandlers(this.approvalController, this.questionController, {
         showApprovalPanel: (payload) => {

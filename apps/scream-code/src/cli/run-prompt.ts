@@ -9,6 +9,7 @@ import {
   type SessionStatus,
 } from '@scream-code/scream-code-sdk';
 
+import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import type { CLIOptions, PromptOutputFormat } from './options';
 import { createScreamCodeHostIdentity } from './version';
 
@@ -50,6 +51,21 @@ export async function runPrompt(
     uiMode: PROMPT_UI_MODE,
     skillDirs: opts.skillsDirs,
   });
+
+  // Read `[subagentModels]` from tui.toml so `/model diy` bindings configured
+  // in the interactive TUI also apply to `scream -p` sessions. tui.toml is
+  // read once here — prompt mode is single-shot, no live updates needed.
+  // A malformed tui.toml falls back to empty bindings rather than aborting.
+  let promptTuiConfig;
+  try {
+    promptTuiConfig = await loadTuiConfig();
+  } catch (error) {
+    if (!(error instanceof TuiConfigParseError)) throw error;
+    promptTuiConfig = error.fallback;
+  }
+  const promptSubagentModels = promptTuiConfig.subagentModels;
+  harness.setSubagentModelBindings(() => promptSubagentModels);
+
   log.info('scream-code starting', {
     version,
     uiMode: PROMPT_UI_MODE,

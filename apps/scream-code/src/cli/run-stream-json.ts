@@ -21,6 +21,7 @@ import {
   type Session,
 } from "@scream-code/scream-code-sdk";
 
+import { loadTuiConfig, TuiConfigParseError } from "#/tui/config";
 import { createScreamCodeHostIdentity } from "./version";
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -441,6 +442,21 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     uiMode: "print",
     skillDirs: opts.skillsDirs,
   });
+
+  // Read `[subagentModels]` from tui.toml so `/model diy` bindings configured
+  // in the interactive TUI also apply to cc-connect stream-json sessions.
+  // Read once at startup; cc-connect is a long-lived process that doesn't
+  // watch tui.toml for changes. A malformed tui.toml falls back to empty
+  // bindings rather than aborting the protocol handshake.
+  let streamTuiConfig;
+  try {
+    streamTuiConfig = await loadTuiConfig();
+  } catch (error) {
+    if (!(error instanceof TuiConfigParseError)) throw error;
+    streamTuiConfig = error.fallback;
+  }
+  const streamSubagentModels = streamTuiConfig.subagentModels;
+  harness.setSubagentModelBindings(() => streamSubagentModels);
 
   const writer = new ClaudeStreamJsonWriter((line) => {
     process.stdout.write(`${line}\n`);

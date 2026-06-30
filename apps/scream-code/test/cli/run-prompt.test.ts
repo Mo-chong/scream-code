@@ -57,6 +57,15 @@ const mocks = vi.hoisted(() => {
     harnessResumeSession: vi.fn(async () => session),
     harnessListSessions: vi.fn(async () => [{ id: 'ses_previous', workDir: process.cwd() }]),
     harnessDeleteSession: vi.fn(async () => undefined),
+    harnessSetSubagentModelBindings: vi.fn(),
+    loadTuiConfig: vi.fn(async () => ({
+      theme: 'dark',
+      editorCommand: null,
+      notifications: { enabled: true, condition: 'unfocused' },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
+    })),
     harnessGetCachedAccessToken: vi.fn(),
     createScreamDeviceId: vi.fn<CreateScreamDeviceId>(() => 'device-1'),
     resolveScreamHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/scream-code-test-home'),
@@ -79,6 +88,7 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
       listSessions = mocks.harnessListSessions;
       deleteSession = mocks.harnessDeleteSession;
       close = mocks.harnessClose;
+      setSubagentModelBindings = mocks.harnessSetSubagentModelBindings;
       constructor(...args: unknown[]) {
         const options = args[0] as { readonly homeDir?: string } | undefined;
         if (mocks.harnessCreatesDeviceIdOnConstruction) {
@@ -100,6 +110,17 @@ vi.mock('@scream-code/config', async () => {
     SCREAM_CODE_PROVIDER_NAME: 'scream-code',
   };
 });
+
+vi.mock('#/tui/config', () => ({
+  loadTuiConfig: mocks.loadTuiConfig,
+  TuiConfigParseError: class TuiConfigParseError extends Error {
+    readonly fallback;
+    constructor(fallback: unknown) {
+      super('malformed tui.toml');
+      this.fallback = fallback;
+    }
+  },
+}));
 
 
 function opts(overrides: Partial<Parameters<typeof runPrompt>[0]> = {}) {

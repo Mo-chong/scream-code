@@ -345,6 +345,28 @@ describe("ScreamTUI startup", () => {
 
     expect(uiContainsFooter(driver)).toBe(true);
   });
+
+  it("injects a live subagentModelBindings getter that reflects /model diy changes", () => {
+    const harness = makeHarness();
+    const driver = makeDriver(
+      harness,
+      makeStartupInput({}, { subagentModels: { coder: "k2" } }),
+    );
+
+    // Constructor wired the getter through.
+    expect(harness.setSubagentModelBindings).toHaveBeenCalledTimes(1);
+    const getter = (harness.setSubagentModelBindings as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as () => Record<string, string | undefined>;
+    expect(getter()).toEqual({ coder: "k2" });
+
+    // Live update: changing appState.subagentModels reflects on next call.
+    driver.state.appState.subagentModels = { coder: "sonnet", reviewer: "k2" };
+    expect(getter()).toEqual({ coder: "sonnet", reviewer: "k2" });
+
+    // Unbinding (follow-main) reads back as the key being absent.
+    driver.state.appState.subagentModels = {};
+    expect(getter()).toEqual({});
+  });
 });
 
 function uiContainsFooter(driver: StartupDriver): boolean {

@@ -154,7 +154,7 @@ export class SessionSubagentHost {
       // setModel between the initial spawn and the resume is reflected.
       () => {
         const binding = this.resolveModelBinding(profileName);
-        const modelAlias = binding ?? parent.config.modelAlias;
+        const modelAlias = this.resolveValidModelAlias(parent, binding);
         const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
         child.config.update({ modelAlias, thinkingLevel });
         return Promise.resolve();
@@ -306,9 +306,11 @@ export class SessionSubagentHost {
     profile: ResolvedAgentProfile,
   ): Promise<void> {
     // A subagent uses the model bound to its profile via /model diy when one
-    // is configured; otherwise it inherits the parent agent's model.
+    // is configured; otherwise it inherits the parent agent's model. A binding
+    // whose alias has since been removed from config.toml falls back to the
+    // parent model rather than sending the subagent into a hung LLM call.
     const binding = this.resolveModelBinding(profile.name);
-    const modelAlias = binding ?? parent.config.modelAlias;
+    const modelAlias = this.resolveValidModelAlias(parent, binding);
     const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
     child.config.update({
       cwd: parent.config.cwd,
@@ -326,6 +328,29 @@ export class SessionSubagentHost {
     const alias = bindings[profileName];
     if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
     return alias;
+  }
+
+  /**
+   * Validate that a bound alias still resolves in the provider registry.
+   * Returns the binding when valid; falls back to the parent's current model
+   * when the alias is unconfigured (or no provider is available) so a stale
+   * `/model diy` binding cannot send the subagent into a hung LLM call.
+   * `binding === undefined` (follow-main) is the common path and skips the
+   * probe entirely.
+   */
+  private resolveValidModelAlias(parent: Agent, binding: string | undefined): string | undefined {
+    if (binding === undefined) return parent.config.modelAlias;
+    if (parent.modelProvider === undefined) return parent.config.modelAlias;
+    try {
+      parent.modelProvider.resolveProviderConfig(binding);
+      return binding;
+    } catch (error) {
+      this.session.log?.warn(
+        `subagent binding "${binding}" no longer resolves in the provider registry; falling back to parent model "${parent.config.modelAlias}"`,
+        error,
+      );
+      return parent.config.modelAlias;
+    }
   }
 
   /**
