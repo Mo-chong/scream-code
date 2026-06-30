@@ -1497,3 +1497,39 @@ export async function installUpdate(): Promise<void>;  // 无参，自解析 res
 2. 三级分类只需要在消费端加 if/else，不改赋值点不改类型
 3. 不改管线不建新文件是"最小侵入"的正确姿势
 
+### 踩坑 #39：merge v0.7.6 后 pnpm-lock.yaml 冲突——重建而非手动合并（v0.7.6 合并 — 2026-06-30）
+
+**症状**：`git pull origin main` 后 `pnpm-lock.yaml` 处于冲突状态，无法 `git checkout --ours` 或 `--theirs` 直接解决。
+
+**根因**：lock 文件是自动生成的二进制友好格式，三方合并后总有冲突标记残留。
+
+**修复**：`rm pnpm-lock.yaml && pnpm install` 重建 lock 文件，之后 `git add` 即可。
+
+**教训**：
+1. lock 文件冲突的标准解法永远是重建——不要手动编辑
+2. `git checkout --ours` 或 `--theirs` 对 `pnpm-lock.yaml` 只会生成版本不对的文件，pnpm install 后再 add 才是正确路径
+
+### 踩坑 #40：`pnpm approve-builds` 在 Git Bash 中触发 prepare 脚本需要 node（v0.7.6 合并 — 2026-06-30）
+
+**症状**：`pnpm install` 重建 lock 后，`pnpm approve-builds` 命令完成后触发 postinstall/prepare 脚本（`node .pnpm/devops/.../postinstall.js`），Git Bash 中 PATH 无 node，脚本报错退出。
+
+**根因**：同踩坑 #29——Git Bash PATH 不包含 Node.js。
+
+**修复**：不影响包安装本身，后续 `build-dev.sh` 硬编码 node 路径走两段构建链即可。
+
+**教训**：
+1. pnpm lifecycle 脚本在 Git Bash 中会因 PATH 无 node 失败——不影响包解析和安装
+2. 只需确保 `build-dev.sh` 两段构建链能正常执行就好
+
+### 踩坑 #41：merge 后 `apps/scream-code/tsdown.config.ts` define 冲突——保留双方变量（v0.7.6 合并 — 2026-06-30）
+
+**症状**：上游 v0.7.6 在 `define` 块新增了 4 个版本变量（`__SCREAM_CODE_VERSION__`、`__SCREAM_CODE_CHANNEL__`、`__SCREAM_CODE_COMMIT__`、`__SCREAM_CODE_BUILD_TARGET__`），本地有 `__BUILD_TIMESTAMP__`。三方合并两者冲突。
+
+**根因**：双方都在 `define` 块末尾添加内容，Git 无法自动合并相邻行。
+
+**修复**：取双方内容，将本地 `__BUILD_TIMESTAMP__` 和上游 4 个新变量都保留。
+
+**教训**：
+1. `define` 块和 `alwaysBundle` 配置分开——alwaysBundle 在第 50 行，在冲突区外，自动保留
+2. 上游新增的构建版本变量不影响本地功能，全部接受即可
+
