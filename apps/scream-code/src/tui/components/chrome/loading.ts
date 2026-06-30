@@ -169,22 +169,13 @@ function supportsAnsi(): boolean {
 
 export function runLoadingAnimation(
   theme: ResolvedTheme = 'dark',
-  prefetch?: Promise<unknown>,
 ): Promise<void> {
   const ansi = supportsAnsi()
 
   if (!ansi) {
-    // Honour the prefetch even in non-ANSI fallback so the update cache is
-    // warm before ScreamTUI reads it — keeps the no-colour path consistent.
-    const finish = (): void => {
-      for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-      stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}正在唤醒核心...${RESET}\n`)
-    }
-    if (prefetch === undefined) {
-      finish()
-      return Promise.resolve()
-    }
-    return prefetch.catch(() => {}).finally(() => finish()).then(() => undefined)
+    for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+    stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}正在唤醒核心...${RESET}\n`)
+    return Promise.resolve()
   }
 
   return new Promise((resolve) => {
@@ -301,14 +292,11 @@ export function runLoadingAnimation(
     render()
     const timer = setInterval(tick, SHEEN_INTERVAL_MS)
 
-    // The ready phase is gated on BOTH the minimum animation duration AND the
-    // optional prefetch promise (e.g. update-cache refresh). The ENTER prompt
-    // only appears once both resolve, so a slow network stays inside the
-    // loading screen instead of blocking the welcome render later.
+    // The ready phase is gated only on the minimum animation duration. The
+    // update-cache refresh runs detached in the background so a slow network
+    // never blocks startup — next launch (or `/update`) picks up the result.
     const minDelay = new Promise<void>((resolve) => { setTimeout(resolve, LOADING_DURATION_MS); })
-    const gate: Promise<unknown> =
-      prefetch === undefined ? minDelay : Promise.all([minDelay, prefetch.catch(() => {})])
-    void gate.then(() => {
+    void minDelay.then(() => {
       phase = 'ready'
       render()
     })

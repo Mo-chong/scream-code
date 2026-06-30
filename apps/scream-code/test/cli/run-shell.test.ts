@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => {
     screamTuiConstructor: vi.fn(),
     tuiStart: vi.fn(),
     tuiGetStartupMcpMs: vi.fn(async () => 0),
-    runLoadingAnimation: vi.fn((_theme: string, _prefetch?: Promise<unknown>) => Promise.resolve()),
+    runLoadingAnimation: vi.fn((_theme: string) => Promise.resolve()),
     tuiGetCurrentSessionId: vi.fn(() => ''),
     tuiHasSessionContent: vi.fn(() => false),
     createScreamDeviceId: vi.fn<CreateScreamDeviceId>(() => 'device-1'),
@@ -183,13 +183,7 @@ describe('runShell', () => {
     expect(execSync).toHaveBeenCalledWith('stty -ixon', { stdio: 'ignore' });
     expect(mocks.refreshUpdateCache).toHaveBeenCalledOnce();
     expect(mocks.runLoadingAnimation).toHaveBeenCalledOnce();
-    const [, loadingPrefetch] = mocks.runLoadingAnimation.mock.calls[0]!;
-    expect(loadingPrefetch).toBeInstanceOf(Promise);
-    await expect(loadingPrefetch as Promise<unknown>).resolves.toEqual({
-      source: 'npm',
-      checkedAt: null,
-      latest: null,
-    });
+    expect(mocks.runLoadingAnimation.mock.calls[0]!).toHaveLength(1);
     expect(mocks.screamTuiConstructor).toHaveBeenCalledTimes(1);
 
     const [, harness, startupInput] = mocks.screamTuiConstructor.mock.calls[0]!;

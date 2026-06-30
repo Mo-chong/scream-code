@@ -50,12 +50,14 @@ export async function runShell(
   // Preflight validates the host environment (e.g. Git Bash on Windows)
   await harness.preflight();
 
-  // Fire the update-cache refresh in parallel with the loading splash so its
-  // network latency is hidden behind the animation. The splash gates its
-  // "press ENTER" prompt on this promise resolving.
-  const updatePrefetch = refreshUpdateCache().catch(() => {});
+  // Fire the update-cache refresh detached in the background. The loading
+  // splash no longer waits on it — a slow npm registry won't delay startup.
+  // The result lands in the cache for the next launch or `/update` to pick up.
+  void refreshUpdateCache().catch((error) => {
+    log.warn('update cache refresh failed', { error });
+  });
 
-  await runLoadingAnimation(resolvedTheme, updatePrefetch);
+  await runLoadingAnimation(resolvedTheme);
 
   const tui = new ScreamTUI(harness, {
     cliOptions: opts,
