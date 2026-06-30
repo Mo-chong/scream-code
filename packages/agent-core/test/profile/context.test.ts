@@ -4,7 +4,7 @@ import { join } from 'pathe';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { loadAgentsMd } from '../../src/profile/context';
+import { loadAgentsMd, prepareSystemPromptContext } from '../../src/profile/context';
 import { testJian } from '../fixtures/test-jian';
 
 let homeDir: string;
@@ -66,5 +66,42 @@ describe('loadAgentsMd user-level discovery', () => {
     const result = await loadAgentsMd(testJian);
 
     expect(result.split('home branded').length - 1).toBe(1);
+  });
+});
+
+describe('prepareSystemPromptContext roleAdditional', () => {
+  const ORIGINAL_HOME_ENV = process.env['SCREAM_CODE_HOME'];
+
+  beforeEach(async () => {
+    process.env['SCREAM_CODE_HOME'] = homeDir;
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_HOME_ENV === undefined) {
+      delete process.env['SCREAM_CODE_HOME'];
+    } else {
+      process.env['SCREAM_CODE_HOME'] = ORIGINAL_HOME_ENV;
+    }
+  });
+
+  it('returns undefined when user-prefs.md is absent', async () => {
+    const context = await prepareSystemPromptContext(testJian);
+    expect(context.roleAdditional).toBeUndefined();
+  });
+
+  it('loads trimmed user-prefs.md as roleAdditional', async () => {
+    await writeFile(
+      join(homeDir, 'user-prefs.md'),
+      '\n  The user\'s preferred nickname is "Alex".\n  ',
+      'utf-8',
+    );
+    const context = await prepareSystemPromptContext(testJian);
+    expect(context.roleAdditional).toBe('The user\'s preferred nickname is "Alex".');
+  });
+
+  it('returns undefined when user-prefs.md is empty', async () => {
+    await writeFile(join(homeDir, 'user-prefs.md'), '   \n  ', 'utf-8');
+    const context = await prepareSystemPromptContext(testJian);
+    expect(context.roleAdditional).toBeUndefined();
   });
 });

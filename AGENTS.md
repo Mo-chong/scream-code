@@ -400,6 +400,21 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 - **Core**: `packages/agent-core/src/agent/context/index.ts` — `undo()` performs a backward walk, splices messages, and clamps `_tokenCount` down.
 - **Availability**: `idle-only`.
 
+### User Preferences (`/like`)
+
+Collects the user's persona/preferences through a short interactive TUI and injects them into the **main agent** system prompt via the existing `{{ ROLE_ADDITIONAL }}` placeholder. Each `/like` save overwrites the previous preferences.
+
+- **Entry**: `/like` (no arguments)
+- **TUI flow**: three free-form text inputs — nickname, response tone, other preferences — followed by a save notification
+- **TUI command**: `apps/scream-code/src/tui/commands/like.ts`
+- **Persistence**:
+  - Structured preferences are saved in `~/.scream-code/tui.toml` under `[like]`.
+  - A rendered `~/.scream-code/user-prefs.md` file is written for `agent-core` to load.
+- **Prompt injection**: `packages/agent-core/src/profile/context.ts` reads `user-prefs.md` into `PreparedSystemPromptContext.roleAdditional`; `packages/agent-core/src/profile/resolve.ts` maps it to `{{ ROLE_ADDITIONAL }}`.
+- **Scope**: affects **new sessions / new agents** created after saving. It does not retroactively update the currently running session's system prompt, and subagents keep their default profiles.
+- **Availability**: `always` (works even without an active session).
+
+
 ### Skill Center (`/skill`)
 
 管理已安装 Skill 与浏览可安装 Skill 包。原 `/plugin` 命令及其别名已合并为 `/skill` 的兼容别名。
@@ -419,6 +434,20 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 ---
 
 ## Agent-Core Mechanisms
+
+### Fusion Plan
+
+`EnterPlanMode` supports a `mode: 'fusion'` argument. When the LLM requests it, the TUI spawns multiple headless `scream` CLI subagents in parallel, each exploring the task from a different angle. The subagent outputs are truncated, then fed to a synthesis subagent that produces a single consolidated plan. The synthesized plan is written to the session plan file before the main agent enters normal plan mode to review and present it.
+
+- **Angles**: correctness/edge cases, minimal invasiveness, and architecture/maintainability.
+- **Worker count**: defaults to 3; configurable per invocation (not yet exposed to the LLM).
+- **Timeout**: default 120 seconds per worker; synthesis has its own budget.
+- **Output budget**: default 8,000 bytes per worker, 12,000 bytes for synthesis.
+- **Recursion guard**: the environment variable `SCREAM_FUSIONPLAN_SUBAGENT` is set for spawned subagents so they do not recursively trigger fusion plan.
+
+The LLM should choose `mode: 'fusion'` for ambiguous, large, or multi-approach tasks and `mode: 'normal'` (default) for straightforward or localized changes. See `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md` for the full decision guide.
+
+Key files: `apps/scream-code/src/tui/utils/fusion-plan.ts`, `apps/scream-code/src/tui/commands/config.ts`, `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md`, `packages/agent-core/src/profile/default/system.md`.
 
 ### Compaction Pipeline
 

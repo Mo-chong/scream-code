@@ -160,9 +160,20 @@ function buildTemplateVars(
     SCREAM_AGENTS_MD: context.agentsMd ?? '',
     SCREAM_SKILLS: skills,
     SCREAM_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',
-    ROLE_ADDITIONAL:
-      context.roleAdditional ?? promptVars['ROLE_ADDITIONAL'] ?? promptVars['roleAdditional'] ?? '',
+    ROLE_ADDITIONAL: mergeRoleAdditional(context.roleAdditional, promptVars),
   };
+}
+
+function mergeRoleAdditional(
+  contextValue: string | undefined,
+  promptVars: Record<string, string>,
+): string {
+  const userPrefs = contextValue?.trim() ?? '';
+  const profileAdditional =
+    promptVars['ROLE_ADDITIONAL']?.trim() ?? promptVars['roleAdditional']?.trim() ?? '';
+  if (userPrefs.length === 0) return profileAdditional;
+  if (profileAdditional.length === 0) return userPrefs;
+  return `${userPrefs}\n\n${profileAdditional}`;
 }
 
 function applySubagentDescriptions(

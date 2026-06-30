@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
+import type { ScreamConfig } from '../../src/config';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
@@ -733,6 +734,104 @@ describe('SessionSubagentHost', () => {
     // than leave it on the stale model from its initial spawn.
     expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
     expect(child.agent.config.modelAlias).not.toBe('stale-model-from-initial-spawn');
+  });
+
+  it('applies a /model diy binding to the spawned subagent', async () => {
+    const twoModelConfig: ScreamConfig = {
+      providers: {
+        'test-provider': {
+          type: 'scream',
+          apiKey: 'test-key',
+        },
+      },
+      models: {
+        'parent-model': {
+          provider: 'test-provider',
+          model: 'parent-model',
+          maxContextSize: 1_000_000,
+        },
+        'bound-model': {
+          provider: 'test-provider',
+          model: 'bound-model',
+          maxContextSize: 1_000_000,
+        },
+      },
+    };
+    const parent = testAgent({ initialConfig: twoModelConfig });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent({ initialConfig: twoModelConfig });
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the bound-model subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(
+      session,
+      'main',
+      undefined,
+      () => ({ coder: 'bound-model' }),
+    );
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Do work',
+      description: 'Bound spawn',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(child.agent.config.modelAlias).toBe('bound-model');
+    expect(child.agent.config.modelAlias).not.toBe(parent.agent.config.modelAlias);
+  });
+
+  it('falls back to the parent model when a binding alias is no longer registered', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    // Default testAgent config registers only `mock-model`; `stale-alias`
+    // is intentionally absent so resolveProviderConfig throws for it,
+    // exercising the fallback path in resolveValidModelAlias.
+    parent.agent.config.update({ modelAlias: 'mock-model' });
+
+    const child = testAgent();
+    child.configure({ tools: ['Read'] });
+    child.mockNextResponse({
+      type: 'text',
+      text:
+        'Completed the fallback subagent task with a detailed enough summary for the parent agent to continue without repeating the child agent work. '.repeat(
+          2,
+        ),
+    });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(
+      session,
+      'main',
+      undefined,
+      () => ({ coder: 'stale-alias' }),
+    );
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Do work',
+      description: 'Stale binding',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // Stale binding rejected → child falls back to parent's current model
+    // instead of inheriting the unresolvable alias.
+    expect(child.agent.config.modelAlias).toBe('mock-model');
   });
 });
 

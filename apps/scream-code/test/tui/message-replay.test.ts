@@ -43,6 +43,9 @@ function makeStartupInput(): ScreamTUIStartupInput {
       theme: 'dark',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-a',
@@ -128,7 +131,7 @@ function makeSession(
       model: 'k2',
       thinkingLevel: 'off',
       permission: 'manual',
-      planMode: false,
+      planMode: 'off',
       contextTokens: 0,
       maxContextTokens: 100,
       contextUsage: 0,
@@ -153,6 +156,7 @@ function makeSession(
 
 function makeHarness(initialSession: Session) {
   return {
+    setSubagentModelBindings: vi.fn(),
     getConfig: vi.fn(async () => ({
       models: {
         k2: { model: 'scream-cli-v1', maxContextSize: 100 },

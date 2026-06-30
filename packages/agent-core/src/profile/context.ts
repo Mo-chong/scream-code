@@ -3,22 +3,40 @@ import { dirname, join } from 'pathe';
 import type { Jian } from '@scream-code/jian';
 
 import { listDirectory } from '../tools/support/list-directory';
+import { resolveScreamHome } from '../config/path';
 import type { SystemPromptContext } from './types';
 
 const AGENTS_MD_MAX_BYTES = 32 * 1024;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
-export type PreparedSystemPromptContext = Pick<SystemPromptContext, 'cwdListing' | 'agentsMd'>;
-
+export type PreparedSystemPromptContext = Pick<
+  SystemPromptContext,
+  'cwdListing' | 'agentsMd' | 'roleAdditional'
+>;
 export async function prepareSystemPromptContext(
   jian: Jian,
 ): Promise<PreparedSystemPromptContext> {
-  const [cwdListing, agentsMd] = await Promise.all([
+  const [cwdListing, agentsMd, roleAdditional] = await Promise.all([
     listDirectory(jian),
     loadAgentsMd(jian),
+    loadRoleAdditional(jian),
   ]);
-  return { cwdListing, agentsMd };
+  return { cwdListing, agentsMd, roleAdditional };
+}
+
+async function loadRoleAdditional(_jian: Jian): Promise<string | undefined> {
+  const prefsPath = join(resolveScreamHome(), 'user-prefs.md');
+  if (!(await pathExists(_jian, prefsPath))) {
+    return undefined;
+  }
+  try {
+    const content = await _jian.readText(prefsPath);
+    const trimmed = content.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function loadAgentsMd(jian: Jian): Promise<string> {

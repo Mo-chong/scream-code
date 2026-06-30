@@ -40,6 +40,7 @@ import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExit
 import { searchPendingDoc } from './turn/memory-rules';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
+import { DEFAULT_SECRET_PATTERNS, SecretObfuscator } from './secrets';
 import { WolfPackMode } from './wolfpack';
 import { SessionMemory } from './session-memory';
 import { WorkingSet } from './working-set';
@@ -262,7 +263,21 @@ export class Agent {
       capability: this.config.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,
+      obfuscator: this.obfuscator,
     });
+  }
+
+  private _obfuscator: SecretObfuscator | undefined;
+  private _obfuscatorConfigRef: ScreamConfig | undefined;
+
+  private get obfuscator(): SecretObfuscator | undefined {
+    if (this._obfuscatorConfigRef === this.screamConfig && this._obfuscator !== undefined) {
+      return this._obfuscator;
+    }
+    this._obfuscatorConfigRef = this.screamConfig;
+    const userEntries = this.screamConfig?.secrets ?? [];
+    this._obfuscator = new SecretObfuscator([...DEFAULT_SECRET_PATTERNS, ...userEntries]);
+    return this._obfuscator;
   }
 
   private logLlmRequest(
@@ -655,10 +670,12 @@ export class Agent {
     this.emitEvent({
       type: 'agent.status.updated',
       model,
+      thinkingLevel: this.config.thinkingLevel,
       contextTokens,
       maxContextTokens,
       contextUsage,
       planMode: this.planMode.isActive,
+      planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
       permission: this.permission.mode,
       usage,
     });

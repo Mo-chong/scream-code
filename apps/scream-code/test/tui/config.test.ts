@@ -56,6 +56,9 @@ notification_condition = "always"
       theme: 'light',
       editorCommand: 'code --wait',
       notifications: { enabled: false, condition: 'always' },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 
@@ -64,11 +67,13 @@ notification_condition = "always"
 [editor]
 command = "   "
 `);
-
     expect(config).toEqual({
       theme: 'auto',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 
@@ -98,6 +103,9 @@ command = "   "
         theme: 'light',
         editorCommand: 'vim',
         notifications: { enabled: false, condition: 'always' },
+        like: {},
+        fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+        subagentModels: {},
       },
       filePath,
     );
@@ -106,6 +114,9 @@ command = "   "
       theme: 'light',
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 });

@@ -40,12 +40,14 @@ const mocks = vi.hoisted(() => {
     screamTuiConstructor: vi.fn(),
     tuiStart: vi.fn(),
     tuiGetStartupMcpMs: vi.fn(async () => 0),
+    runLoadingAnimation: vi.fn((_theme: string) => Promise.resolve()),
     tuiGetCurrentSessionId: vi.fn(() => ''),
     tuiHasSessionContent: vi.fn(() => false),
     createScreamDeviceId: vi.fn<CreateScreamDeviceId>(() => 'device-1'),
     resolveScreamHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/scream-code-test-home'),
     harnessCreatesDeviceIdOnConstruction: false,
     execSync: vi.fn(),
+    refreshUpdateCache: vi.fn(async () => ({ source: 'npm', checkedAt: null, latest: null })),
     TuiConfigParseError,
   };
 });
@@ -118,7 +120,11 @@ vi.mock('node:child_process', () => ({
 }));
 
 vi.mock('../../src/tui/components/chrome/loading', () => ({
-  runLoadingAnimation: vi.fn(() => Promise.resolve()),
+  runLoadingAnimation: mocks.runLoadingAnimation,
+}));
+
+vi.mock('../../src/cli/update/refresh', () => ({
+  refreshUpdateCache: mocks.refreshUpdateCache,
 }));
 
 describe('runShell', () => {
@@ -175,6 +181,9 @@ describe('runShell', () => {
       mocks.harnessEnsureConfigFile.mock.invocationCallOrder[0]!,
     );
     expect(execSync).toHaveBeenCalledWith('stty -ixon', { stdio: 'ignore' });
+    expect(mocks.refreshUpdateCache).toHaveBeenCalledOnce();
+    expect(mocks.runLoadingAnimation).toHaveBeenCalledOnce();
+    expect(mocks.runLoadingAnimation.mock.calls[0]!).toHaveLength(1);
     expect(mocks.screamTuiConstructor).toHaveBeenCalledTimes(1);
 
     const [, harness, startupInput] = mocks.screamTuiConstructor.mock.calls[0]!;
@@ -189,6 +198,7 @@ describe('runShell', () => {
       version: '1.2.3-test',
       workDir: process.cwd(),
       resolvedTheme: 'dark',
+      updatePrefetched: true,
     });
     expect(mocks.tuiStart).toHaveBeenCalledOnce();
   });

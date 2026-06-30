@@ -12,8 +12,9 @@ import {
   NO_ACTIVE_SESSION_MESSAGE,
 } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
+import { isBusy, isStreaming } from '../utils/app-state';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
-import type { AppState, PendingExit, QueuedMessage } from '../types';
+import type { AppState, PendingExit, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 export interface EditorKeyboardHost {
@@ -34,7 +35,7 @@ export interface EditorKeyboardHost {
   togglePlanExpansion(): boolean;
   hideSessionPicker(): void;
   stop(exitCode?: number): Promise<void>;
-  handlePlanToggle(next: boolean): void;
+  handlePlanModeStateChange(state: PlanModeState): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
   cancelPendingMemoryExtraction(): void;
@@ -76,7 +77,7 @@ export class EditorKeyboardController {
         return;
       }
 
-      if (host.state.appState.streamingPhase !== 'idle') {
+      if (isStreaming(host.state.appState)) {
         this.clearPendingExit();
         this.cancelCurrentStream();
         return;
@@ -113,7 +114,7 @@ export class EditorKeyboardController {
         this.cancelCurrentCompaction();
         return;
       }
-      if (host.state.appState.streamingPhase !== 'idle') {
+      if (isStreaming(host.state.appState)) {
         this.cancelCurrentStream();
         return;
       }
@@ -129,8 +130,10 @@ export class EditorKeyboardController {
         host.showError(NO_ACTIVE_SESSION_MESSAGE);
         return;
       }
-      const next = !host.state.appState.planMode;
-      host.handlePlanToggle(next);
+      const current = host.state.appState.planMode;
+      const next: PlanModeState =
+        current === 'off' ? 'plan' : current === 'plan' ? 'fusionplan' : 'off';
+      host.handlePlanModeStateChange(next);
     };
 
     editor.onOpenExternalEditor = () => {
@@ -144,7 +147,7 @@ export class EditorKeyboardController {
     editor.onTogglePlanExpand = () => host.togglePlanExpansion();
 
     editor.onCtrlS = () => {
-      if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) return;
+      if (!isBusy(host.state.appState)) return;
       const text = editor.getText().trim();
       const queuedTexts = host.state.queuedMessages.map((m: QueuedMessage) => m.text);
       host.clearQueuedMessages();
@@ -174,7 +177,7 @@ export class EditorKeyboardController {
     };
 
     editor.onUpArrowEmpty = () => {
-      if (host.state.appState.streamingPhase === 'idle' && !host.state.appState.isCompacting) return false;
+      if (!isBusy(host.state.appState)) return false;
       const recalled = host.recallLastQueued();
       if (recalled !== undefined) {
         editor.setText(recalled);

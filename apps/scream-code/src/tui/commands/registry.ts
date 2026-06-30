@@ -92,6 +92,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
   },
   {
+    name: 'fusionplan',
+    aliases: ['fp'],
+    description: '切换融合计划模式（多子代理并行规划）',
+    priority: 118,
+    availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
+  },
+  {
     name: 'tasks',
     aliases: ['task'],
     description: '浏览后台任务',
@@ -127,6 +134,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'btw',
     aliases: [],
     description: '在不中断对话的情况下快速提问',
+    priority: 113,
+    availability: 'always',
+  },
+  {
+    name: 'like',
+    aliases: [],
+    description: '设置你的偏好（昵称、语气、其他偏好）',
     priority: 113,
     availability: 'always',
   },

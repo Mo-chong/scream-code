@@ -16,9 +16,9 @@ describe('status panel report lines', () => {
       workDir: '/tmp/project',
       sessionId: 'ses-1',
       sessionTitle: 'Implement status',
-      thinking: true,
+      thinkingLevel: 'high',
       permissionMode: 'manual',
-      planMode: false,
+      planMode: 'plan',
       contextUsage: 0.25,
       contextTokens: 2500,
       maxContextTokens: 10000,
@@ -54,12 +54,12 @@ describe('status panel report lines', () => {
 
     const output = lines.join('\n');
     expect(output).toContain('>_ Scream Code (v1.2.3)');
-    expect(output).toMatch(/模型\s+Scream K2 \(thinking on\)/);
-    expect(output).toMatch(/目录\s+\/tmp\/project/);
-    expect(output).toMatch(/权限\s+auto/);
-    expect(output).toMatch(/计划模式\s+on/);
-    expect(output).toMatch(/会话\s+ses-1/);
-    expect(output).toMatch(/标题\s+Implement status/);
+    expect(output).toMatch(/模型名称\s+Scream K2 \(thinking on\)/);
+    expect(output).toMatch(/工作目录\s+\/tmp\/project/);
+    expect(output).toMatch(/权限模式\s+auto/);
+    expect(output).toMatch(/计划模式\s+plan/);
+    expect(output).toMatch(/会话编号\s+ses-1/);
+    expect(output).toMatch(/会话标题\s+Implement status/);
     expect(output).toContain('上下文窗口');
     expect(output).toContain('25.0%');
     expect(output).toContain('(3.0k / 12.0k)');
@@ -68,6 +68,35 @@ describe('status panel report lines', () => {
     expect(output).not.toContain('Account');
     expect(output).not.toContain('AGENTS.md');
     expect(output).not.toContain('Runtime');
+  });
+  it('falls back to session status when app planMode is off', () => {
+    const lines = buildStatusReportLines({
+      colors: darkColors,
+      version: '1.2.3',
+      model: 'k2',
+      workDir: '/tmp/project',
+      sessionId: 'ses-1',
+      sessionTitle: null,
+      thinkingLevel: 'off',
+      permissionMode: 'manual',
+      planMode: 'off',
+      contextUsage: 0,
+      contextTokens: 0,
+      maxContextTokens: 0,
+      availableModels: {},
+      status: {
+        model: 'k2',
+        thinkingLevel: 'high',
+        permission: 'auto',
+        planMode: true,
+        planStrategy: 'fusion',
+        contextTokens: 0,
+        maxContextTokens: 0,
+        contextUsage: 0,
+      },
+    }).map(strip);
+
+    expect(lines.join('\n')).toMatch(/计划模式\s+fusion/);
   });
 
   it('falls back to app state and shows status load errors as warnings', () => {
@@ -78,9 +107,9 @@ describe('status panel report lines', () => {
       workDir: '/tmp/project',
       sessionId: '',
       sessionTitle: null,
-      thinking: false,
+      thinkingLevel: 'off',
       permissionMode: 'manual',
-      planMode: false,
+      planMode: 'off',
       contextUsage: 0,
       contextTokens: 0,
       maxContextTokens: 0,
@@ -89,9 +118,8 @@ describe('status panel report lines', () => {
     }).map(strip);
 
     const output = lines.join('\n');
-    expect(output).toMatch(/模型\s+未设置/);
-    expect(output).toMatch(/会话\s+无/);
-    expect(output).toMatch(/警告\s+No active session/);
-    expect(output).toContain('暂无上下文窗口数据。');
+    expect(output).toMatch(/模型名称\s+未设置/);
+    expect(output).toMatch(/会话编号\s+无/);
+    expect(output).toMatch(/状态警告\s+No active session/);
   });
 });

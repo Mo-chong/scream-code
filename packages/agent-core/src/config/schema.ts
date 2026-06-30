@@ -35,6 +35,8 @@ export const ProviderConfigSchema = z.object({
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+const ThinkingEffortSchema = z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
+
 export const ModelAliasSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -47,6 +49,9 @@ export const ModelAliasSchema = z.object({
   // model-name version inference. Needed for custom-named Anthropic endpoints
   // whose model name does not encode a parseable Claude version.
   adaptiveThinking: z.boolean().optional(),
+  // Levels this model supports for explicit thinking effort. If omitted the
+  // UI falls back to [off, low, medium, high].
+  thinkingLevels: z.array(ThinkingEffortSchema).optional(),
 });
 
 export type ModelAlias = z.infer<typeof ModelAliasSchema>;
@@ -192,6 +197,15 @@ export const McpServerConfigSchema = z.preprocess((raw) => {
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+export const SecretEntrySchema = z.object({
+  type: z.enum(['plain', 'regex']),
+  content: z.string().min(1),
+  mode: z.enum(['obfuscate', 'replace']).default('obfuscate'),
+  replacement: z.string().optional(),
+  flags: z.string().optional(),
+});
+export type SecretEntry = z.infer<typeof SecretEntrySchema>;
+
 export const ScreamConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema).default({}),
   defaultProvider: z.string().optional(),
@@ -210,6 +224,7 @@ export const ScreamConfigSchema = z.object({
   extraSkillDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
   background: BackgroundConfigSchema.optional(),
+  secrets: z.array(SecretEntrySchema).optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -248,6 +263,7 @@ export const ScreamConfigPatchSchema = z
     extraSkillDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
     background: BackgroundConfigPatchSchema.optional(),
+    secrets: z.array(SecretEntrySchema).optional(),
   })
   .strict();
 

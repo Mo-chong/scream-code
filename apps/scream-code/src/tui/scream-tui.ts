@@ -6,10 +6,10 @@ import type {
   ApprovalRequest,
   ApprovalResponse,
   BackgroundTaskInfo,
-  ScreamHarness,
   PermissionMode,
   Session,
 } from '@scream-code/scream-code-sdk';
+import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import type { CLIOptions } from '#/cli/options';
 
 import {
@@ -51,6 +51,7 @@ import {
   INITIAL_LIVE_PANE,
   type AppState,
   type LoginProgressSpinnerHandle,
+  type PlanModeState,
   type ScreamTUIOptions,
   type LivePaneState,
   type QueuedMessage,
@@ -83,6 +84,10 @@ export interface ScreamTUIStartupInput {
   readonly workDir: string;
   readonly startupNotice?: string;
   readonly resolvedTheme?: ResolvedTheme;
+  /** When true, the update cache was already refreshed during the loading
+   * splash screen, so checkForUpdates() should skip the network refresh and
+   * just read the cache. */
+  readonly updatePrefetched?: boolean;
 }
 
 function createInitialAppState(input: ScreamTUIStartupInput): AppState {
@@ -96,22 +101,26 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     workDir: input.workDir,
     sessionId: '',
     permissionMode: startupPermission,
-    planMode: input.cliOptions.plan,
-    thinking: false,
+    planMode: input.cliOptions.plan ? 'plan' : 'off',
+    thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
     isCompacting: false,
+    lastCompactionFinishedAt: undefined,
+    autoCompactionCount: 0,
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
-    livePaneMode: 'idle',
     theme: input.tuiConfig.theme,
     version: input.version,
     hasNewVersion: false,
     latestVersion: null,
     editorCommand: input.tuiConfig.editorCommand,
     notifications: input.tuiConfig.notifications,
+    like: input.tuiConfig.like,
+    fusionPlan: input.tuiConfig.fusionPlan,
+    subagentModels: input.tuiConfig.subagentModels,
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -126,7 +135,9 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
     recentSessions: [],
+    subagentUsage: {},
   };
 }
 
@@ -147,6 +158,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   private isShuttingDown = false;
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
+  private readonly updatePrefetched: boolean;
   readonly sessionManager: SessionManager;
   readonly dialogManager: DialogManager;
   readonly streamingUI: StreamingUIController;
@@ -161,6 +173,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   public onExit?: (exitCode?: number) => Promise<void>;
 
+  /**
+   * Execute a compound UI update without intermediate renders. All
+   * `requestRender()` calls inside `fn` are deferred; a single force render is
+   * queued when the batch completes.
+   */
+  batchUpdate<T>(fn: () => T): T {
+    return this.state.renderBatcher.batchUpdate(fn);
+  }
 
   constructor(harness: ScreamHarness, startupInput: ScreamTUIStartupInput) {
     this.harness = harness;
@@ -179,7 +199,17 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     };
     this.options = tuiOptions;
     this.startupNotice = startupInput.startupNotice;
+    this.updatePrefetched = startupInput.updatePrefetched === true;
     this.state = createTUIState(tuiOptions);
+
+    // Inject a live getter for `/model diy` bindings. Read at every subagent
+    // spawn/resume, so mid-session changes in the binder take effect on the
+    // next spawn without recreating the session. The arrow closure reads
+    // `appState.subagentModels` by reference each call — never a snapshot —
+    // so rebinding `coder → alias-A → alias-B` over time always reflects the
+    // latest choice, and unbinding (follow-main) falls back to the parent's
+    // current model.
+    this.harness.setSubagentModelBindings(() => this.state.appState.subagentModels);
 
     this.reverseRpcDisposers.push(
       ...registerReverseRPCHandlers(this.approvalController, this.questionController, {
@@ -275,6 +305,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   private async initMainTui(): Promise<boolean> {
     const shouldReplayHistory = await this.init();
 
+    // Check for updates before rendering the welcome screen so the version
+    // hint is always based on the freshly fetched latest release.
+    await this.checkForUpdates();
+
     // Load recent sessions for the welcome screen.
     try {
       const sessions = await this.harness.listSessions({ workDir: this.state.appState.workDir });
@@ -316,15 +350,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (resumeState?.warning !== undefined) {
       this.showStatus(`警告：${resumeState.warning}`, this.state.theme.colors.warning);
     }
-    if (this.session !== undefined) {
-      this.sessionEventHandler.startSubscription();
-    }
-    void this.fetchSessions();
-    if (this.session !== undefined) {
-      this.refreshSessionTitle();
-    }
     void this.refreshSkillCommands(this.session);
-    void this.checkForUpdates();
   }
 
   private async showTmuxKeyboardWarningIfNeeded(): Promise<void> {
@@ -384,7 +410,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   sendNormalUserInput(text: string): void {
-    this.inputController.sendNormalUserInput(text);
+    void this.inputController.sendNormalUserInput(text);
   }
   onTurnCompleted(): void {
     this.lifecycleController.onTurnCompleted();
@@ -430,9 +456,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
   // Input Dispatch (delegated to InputController)
   // =========================================================================
-
-  handlePlanToggle(next: boolean): void {
-    this.inputController.handlePlanToggle(next);
+  handlePlanModeStateChange(state: PlanModeState): void {
+    this.inputController.handlePlanModeStateChange(state);
   }
 
   steerMessage(session: Session, input: string[]): void {
@@ -450,13 +475,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.streamingUI.resetToolCallState();
 
     this.patchLivePane({
-      mode: 'waiting',
       pendingApproval: null,
       pendingQuestion: null,
     });
     this.setAppState({
       streamingPhase: 'waiting',
-      streamingStartTime: Date.now(),
     });
   }
 
@@ -568,12 +591,39 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   setAppState(patch: Partial<AppState>): void {
+    // Auto-stamp streamingStartTime whenever streamingPhase transitions.
+    // Callers no longer need to pair streamingPhase with a manual timestamp.
+    // Guard against undefined: a caller could legally pass
+    // `{ streamingPhase: undefined }` to "unset" the field, which we treat as
+    // a no-op rather than corrupting the state machine.
+    if (
+      'streamingPhase' in patch &&
+      patch.streamingPhase !== undefined &&
+      patch.streamingPhase !== this.state.appState.streamingPhase
+    ) {
+      patch = {
+        ...patch,
+        streamingStartTime: patch.streamingPhase === 'idle' ? 0 : Date.now(),
+      };
+    }
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
+    const prevPlanMode = this.state.appState.planMode;
+    const prevSessionId = this.state.appState.sessionId;
     Object.assign(this.state.appState, patch);
-    if ('planMode' in patch) this.updateEditorBorderHighlight();
-    if ('thinking' in patch) {
-      this.state.editor.thinking = patch.thinking ?? false;
+    const planModeChanged = 'planMode' in patch && prevPlanMode !== this.state.appState.planMode;
+    // Session switch (sessionId change) must also reset the banner path —
+    // otherwise the banner keeps showing the previous session's plan file
+    // when the new session happens to share the same planMode.
+    const sessionChanged =
+      'sessionId' in patch && this.state.appState.sessionId !== prevSessionId;
+    if (planModeChanged || sessionChanged) {
+      this.updateEditorBorderHighlight();
+      this.state.planModeBanner.setPlanMode(this.state.appState.planMode ?? 'off');
+    }
+    if ('thinkingLevel' in patch) {
+      this.state.editor.thinking = patch.thinkingLevel !== 'off';
+      this.state.editor.thinkingLevel = patch.thinkingLevel ?? 'off';
     }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing
@@ -590,10 +640,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   patchLivePane(patch: Partial<LivePaneState>): void {
     if (!hasPatchChanges(this.state.livePane, patch)) return;
     Object.assign(this.state.livePane, patch);
-    if ('mode' in patch) {
-      this.state.appState.livePaneMode = patch.mode!;
-      this.state.footer.setState(this.state.appState);
-    }
     this.lifecycleController.updateActivityPane();
     this.state.ui.requestRender();
   }
@@ -630,13 +676,13 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async fetchSessions(): Promise<void> {
     await this.sessionManager.fetchSessions();
   }
-
   private async checkForUpdates(): Promise<void> {
     try {
-      // Refresh from GitHub Releases API first so we always have a fresh
-      // cache before comparing.  Errors (network offline, rate-limited) are
-      // swallowed — the stale cache is still usable as a fallback.
-      await refreshUpdateCache().catch(() => {});
+      // When the loading splash already refreshed the npm cache, skip the
+      // network round-trip and just read the warm cache.
+      if (!this.updatePrefetched) {
+        await refreshUpdateCache().catch(() => {});
+      }
       const cache = await readUpdateCache();
       const target = selectUpdateTarget(this.state.appState.version, cache.latest);
       if (target !== null) {
@@ -654,15 +700,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   resetSessionRuntime(): void {
     this.sessionManager.resetSessionRuntime();
   }
-
-  /**
-   * Pin the editor + footer to the terminal bottom. The pi-tui patch adds a
-   * `fixedBottomLineCount` property: the last N rendered lines stay pinned
-   * while the transcript above scrolls independently.
-   *
-   * We override `doRender` to measure the editor + footer height each frame
-   * and set the count before the real render runs.
-   */
 
   async resumeSession(targetSessionId: string): Promise<boolean> {
     const result = await this.sessionManager.resumeSession(targetSessionId);
@@ -690,8 +727,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.transcriptController.stopWelcomeBreathing();
   }
 
-  appendTranscriptEntry(entry: TranscriptEntry): void {
-    this.transcriptController.appendEntry(entry);
+  appendTranscriptEntry(entry: TranscriptEntry): Component | null {
+    return this.transcriptController.appendEntry(entry);
   }
 
   appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void {
@@ -713,6 +750,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   showNotice(title: string, detail?: string): void {
     this.transcriptController.showNotice(title, detail);
+  }
+
+  setPlanModeBanner(mode: PlanModeState, planPath?: string): void {
+    this.state.planModeBanner.setPlanMode(mode, planPath);
+    this.state.ui.requestRender();
   }
 
   showError(message: string): void {
@@ -759,7 +801,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.state.ui.requestRender();
   }
 
+  exitFullScreenTakeover(): void {
+    if (this.state.tasksBrowser !== undefined) {
+      this.tasksBrowserController.close();
+    }
+  }
+
   mountEditorReplacement(panel: Component & Focusable): void {
+    this.exitFullScreenTakeover();
     this.swapEditor(panel);
   }
 

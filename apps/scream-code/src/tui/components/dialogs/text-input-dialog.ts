@@ -21,6 +21,10 @@ export interface TextInputDialogOptions {
   readonly placeholder?: string;
   /** When true, displayed characters are masked (e.g. for API keys). */
   readonly masked?: boolean;
+  /** Optional initial value shown in the input. */
+  readonly initialValue?: string;
+  /** When true, submitting an empty value returns '' instead of blocking. */
+  readonly allowEmpty?: boolean;
   readonly colors: ColorPalette;
 }
 
@@ -42,12 +46,14 @@ export class TextInputDialogComponent extends Container implements Focusable {
   private readonly opts: TextInputDialogOptions;
   private done = false;
   private emptyHinted = false;
-
   constructor(onDone: (result: TextInputResult) => void, opts: TextInputDialogOptions) {
     super();
     this.onDone = onDone;
     this.opts = opts;
     this.input = new Input();
+    if (opts.initialValue !== undefined) {
+      this.input.setValue(opts.initialValue);
+    }
     this.input.onSubmit = (value) => {
       this.submit(value);
     };
@@ -126,7 +132,7 @@ export class TextInputDialogComponent extends Container implements Focusable {
   private submit(value: string): void {
     if (this.done) return;
     const trimmed = value.trim();
-    if (trimmed.length === 0) {
+    if (trimmed.length === 0 && !this.opts.allowEmpty) {
       this.emptyHinted = true;
       return;
     }

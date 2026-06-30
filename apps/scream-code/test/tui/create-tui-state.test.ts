@@ -10,22 +10,26 @@ function fakeInitialAppState(): AppState {
     workDir: '/tmp/scream-test',
     sessionId: 'sess-1',
     permissionMode: 'manual',
-    planMode: false,
-    thinking: false,
+    planMode: 'off',
+    thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
     isCompacting: false,
+    lastCompactionFinishedAt: undefined,
+    autoCompactionCount: 0,
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
-    livePaneMode: 'idle',
     theme: 'dark',
     version: '0.0.0-test',
     hasNewVersion: false,
     latestVersion: null,
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
+    like: {},
+    fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+    subagentModels: {},
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -40,7 +44,9 @@ function fakeInitialAppState(): AppState {
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
     recentSessions: [],
+    subagentUsage: {},
   };
 }
 
@@ -67,9 +73,9 @@ describe('createTUIState', () => {
     expect(state.editorContainer).toBeDefined();
     expect(state.editor).toBeDefined();
     expect(state.footer).toBeDefined();
-    expect(state.todoPanel).toBeDefined();
     expect(state.theme.colors).toBeDefined();
     expect(state.theme.markdownTheme).toBeDefined();
+    expect(state.renderBatcher).toBeDefined();
 
     // App state is cloned from initialAppState, not reused by reference.
     expect(state.appState).not.toBe(opts.initialAppState);
@@ -78,7 +84,6 @@ describe('createTUIState', () => {
     expect(state.startupState).toBe('pending');
 
     // LivePane defaults.
-    expect(state.livePane.mode).toBe('idle');
     expect(state.livePane.pendingApproval).toBeNull();
     expect(state.livePane.pendingQuestion).toBeNull();
 

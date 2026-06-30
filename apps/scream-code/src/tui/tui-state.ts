@@ -3,11 +3,15 @@ import {
   ProcessTerminal,
   TUI,
 } from '@earendil-works/pi-tui';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { getLogDir } from '#/utils/paths';
+import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
 
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
 import type { MoonLoader, SpinnerStyle } from './components/chrome/moon-loader';
+import { PlanModeBannerComponent } from './components/chrome/plan-mode-banner';
 import type { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { TodoPanelComponent } from './components/chrome/todo-panel';
 import type { SessionRow } from './components/dialogs/session-picker';
@@ -39,6 +43,8 @@ export interface TUIState {
   queueContainer: Container;
   errorBanner: ErrorBannerComponent;
   errorBannerContainer: Container;
+  planModeBanner: PlanModeBannerComponent;
+  planModeBannerContainer: Container;
   editorContainer: Container;
   footer: FooterComponent;
   editor: CustomEditor;
@@ -60,6 +66,18 @@ export interface TUIState {
   queuedMessages: QueuedMessage[];
   fdPath: string | null;
   gitLsFilesCache: GitLsFilesCache;
+  renderBatcher: RenderBatchController;
+}
+function logRenderError(error: unknown): void {
+  try {
+    const logDir = getLogDir();
+    mkdirSync(logDir, { recursive: true });
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    const line = `[${new Date().toISOString()}] TUI render error: ${message}\n`;
+    appendFileSync(`${logDir}/render-errors.log`, line, 'utf8');
+  } catch {
+    // Last-resort fallback: avoid recursion or further terminal corruption.
+  }
 }
 
 export function createTUIState(options: ScreamTUIOptions): TUIState {
@@ -69,8 +87,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const terminal = new ProcessTerminal();
   const ui = new TUI(terminal);
   // Keep differential rendering when content shrinks (e.g. transcript commit,
-  // tool-call collapse). Without this, pi-tui 0.78.1 defaults to clearing the
-  // whole screen and recalculating the viewport, which causes visible jumps.
+  // tool-call collapse). Without this, pi-tui defaults to clearing the whole
+  // screen and recalculating the viewport, which causes visible jumps.
   ui.setClearOnShrink(false);
 
   // ── Render safety net ──────────────────────────────────────────────
@@ -83,11 +101,18 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   uiAny['doRender'] = (): void => {
     try {
       originalDoRender();
-    } catch {
-      // Swallow render errors to prevent a single bad component from crashing the
-      // whole TUI or corrupting terminal state. Logging here risks recursion or
-      // further terminal corruption, so we intentionally stay silent.
+    } catch (error) {
+      logRenderError(error);
     }
+  };
+
+  // Wrap pi-tui's render scheduling so multiple requestRender() calls in the
+  // same microtask collapse into a single underlying call, and so
+  // ScreamTUI.batchUpdate() can suppress renders during compound updates.
+  const originalRequestRender = ui.requestRender.bind(ui);
+  const renderBatcher = createRenderBatcher(originalRequestRender);
+  ui.requestRender = (force = false): void => {
+    renderBatcher.requestRender(force);
   };
 
   const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
@@ -98,9 +123,13 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const errorBanner = new ErrorBannerComponent(theme.colors);
   const errorBannerContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   errorBannerContainer.addChild(errorBanner);
+  const planModeBanner = new PlanModeBannerComponent(theme.colors);
+  const planModeBannerContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  planModeBannerContainer.addChild(planModeBanner);
   const editorContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editor = new CustomEditor(ui, theme.colors);
-  editor.thinking = initialAppState.thinking;
+  editor.thinking = initialAppState.thinkingLevel !== 'off';
+  editor.thinkingLevel = initialAppState.thinkingLevel;
   const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui, () => {
     ui.requestRender();
   });
@@ -115,6 +144,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     queueContainer,
     errorBanner,
     errorBannerContainer,
+    planModeBanner,
+    planModeBannerContainer,
     editorContainer,
     footer,
     editor,
@@ -136,5 +167,6 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     queuedMessages: [],
     fdPath: detectFdPath(),
     gitLsFilesCache: createGitLsFilesCache(initialAppState.workDir),
+    renderBatcher,
   };
 }

@@ -17,7 +17,7 @@ import type { BuiltinSlashCommandName } from './registry';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
-import type { AppState, LoginProgressSpinnerHandle, QueuedMessage } from '../types';
+import type { AppState, LoginProgressSpinnerHandle, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 import { handleConnectCommand, handleLogoutCommand } from './auth';
@@ -25,6 +25,7 @@ import {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleWolfpackCommand,
@@ -53,6 +54,7 @@ import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 import { handleLoopCommand } from './loop';
+import { handleLikeCommand } from './like';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -66,6 +68,7 @@ export {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleWolfpackCommand,
@@ -111,6 +114,7 @@ export interface SlashCommandHost {
   showError(msg: string): void;
   showStatus(msg: string, color?: string): void;
   showNotice(title: string, detail?: string): void;
+  setPlanModeBanner(mode: PlanModeState, planPath?: string): void;
   mountEditorReplacement(panel: Component & Focusable): void;
   restoreEditor(): void;
 
@@ -250,6 +254,9 @@ async function handleBuiltInSlashCommand(
     case 'settings':
       showSettingsSelector(host);
       return;
+    case 'like':
+      await handleLikeCommand(host);
+      return;
     case 'usage':
       showUsage(host).catch((error: unknown) => {
         host.showError(`显示使用情况失败：${formatErrorMessage(error)}`);
@@ -271,6 +278,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'plan':
       await handlePlanCommand(host, args);
+      return;
+    case 'fusionplan':
+      await handleFusionPlanCommand(host, args);
       return;
     case 'wolfpack':
       await handleWolfpackCommand(host, args);

@@ -43,6 +43,9 @@ function makeStartupInput(
       theme: "dark",
       editorCommand: null,
       notifications: { enabled: true, condition: "unfocused" },
+      like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
       ...tuiConfig,
     },
     version: "0.0.0-test",
@@ -60,7 +63,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       model: "k2",
       thinkingLevel: "off",
       permission: "manual",
-      planMode: false,
+      planMode: "off",
       contextTokens: 10,
       maxContextTokens: 100,
       contextUsage: 0.1,
@@ -81,6 +84,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 
 function makeHarness(session = makeSession(), overrides: Record<string, unknown> = {}) {
   return {
+    setSubagentModelBindings: vi.fn(),
     getConfig: vi.fn(async () => ({
       models: {
         k2: { model: "scream-cli-v1", maxContextSize: 100 },
@@ -155,7 +159,7 @@ describe("ScreamTUI startup", () => {
     expect(driver.state.appState).toMatchObject({
       model: "k2",
       permissionMode: "yolo",
-      planMode: true,
+      planMode: "plan",
       contextTokens: 25,
       maxContextTokens: 200,
       contextUsage: 0.125,
@@ -202,7 +206,7 @@ describe("ScreamTUI startup", () => {
         model,
         thinkingLevel: "off",
         permission: "manual",
-        planMode: false,
+        planMode: "off",
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -340,6 +344,28 @@ describe("ScreamTUI startup", () => {
     await driver.initMainTui();
 
     expect(uiContainsFooter(driver)).toBe(true);
+  });
+
+  it("injects a live subagentModelBindings getter that reflects /model diy changes", () => {
+    const harness = makeHarness();
+    const driver = makeDriver(
+      harness,
+      makeStartupInput({}, { subagentModels: { coder: "k2" } }),
+    );
+
+    // Constructor wired the getter through.
+    expect(harness.setSubagentModelBindings).toHaveBeenCalledTimes(1);
+    const getter = (harness.setSubagentModelBindings as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as () => Record<string, string | undefined>;
+    expect(getter()).toEqual({ coder: "k2" });
+
+    // Live update: changing appState.subagentModels reflects on next call.
+    driver.state.appState.subagentModels = { coder: "sonnet", reviewer: "k2" };
+    expect(getter()).toEqual({ coder: "sonnet", reviewer: "k2" });
+
+    // Unbinding (follow-main) reads back as the key being absent.
+    driver.state.appState.subagentModels = {};
+    expect(getter()).toEqual({});
   });
 });
 

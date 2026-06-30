@@ -108,7 +108,9 @@ export interface ApplyCatalogProviderOptions {
   readonly apiKey: string;
   readonly models: readonly CatalogModel[];
   readonly selectedModelId: string;
-  readonly thinking: boolean;
+  /** @deprecated Use thinkingLevel instead. */
+  readonly thinking?: boolean;
+  readonly thinkingLevel?: import('@scream-code/ltod').ThinkingEffort;
 }
 
 /**
@@ -157,7 +159,9 @@ export function applyCatalogProvider(
   config.models = models;
 
   const defaultModel = `${options.providerId}/${options.selectedModelId}`;
+  const thinkingLevel = options.thinkingLevel ?? (options.thinking === true ? 'medium' : 'off');
   config.defaultModel = defaultModel;
-  config.defaultThinking = options.thinking;
+  config.defaultThinking = thinkingLevel !== 'off';
+  config.thinking = { ...config.thinking, mode: thinkingLevel === 'off' ? 'off' : 'on', effort: thinkingLevel };
   return { defaultModel };
 }

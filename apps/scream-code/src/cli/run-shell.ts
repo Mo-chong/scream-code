@@ -11,6 +11,7 @@ import { runLoadingAnimation } from '#/tui/components/chrome/loading';
 import { detectTerminalTheme } from '#/tui/theme/detect';
 
 import type { CLIOptions } from './options';
+import { refreshUpdateCache } from './update/refresh';
 import { createScreamCodeHostIdentity } from './version';
 
 export async function runShell(
@@ -47,8 +48,14 @@ export async function runShell(
   await harness.ensureConfigFile();
 
   // Preflight validates the host environment (e.g. Git Bash on Windows)
-  // BEFORE the loading animation, so any error is visible to the user.
   await harness.preflight();
+
+  // Fire the update-cache refresh detached in the background. The loading
+  // splash no longer waits on it — a slow npm registry won't delay startup.
+  // The result lands in the cache for the next launch or `/update` to pick up.
+  void refreshUpdateCache().catch((error) => {
+    log.warn('update cache refresh failed', { error });
+  });
 
   await runLoadingAnimation(resolvedTheme);
 
@@ -59,6 +66,7 @@ export async function runShell(
     workDir,
     startupNotice: configWarning,
     resolvedTheme,
+    updatePrefetched: true,
   });
 
   tui.onExit = async (exitCode = 0) => {

@@ -44,10 +44,12 @@ export type TurnEndReason = 'completed' | 'cancelled' | 'failed';
 export interface AgentStatusUpdatedEvent {
   readonly type: 'agent.status.updated';
   readonly model?: string | undefined;
+  readonly thinkingLevel?: string | undefined;
   readonly contextTokens?: number | undefined;
   readonly maxContextTokens?: number | undefined;
   readonly contextUsage?: number | undefined;
   readonly planMode?: boolean | undefined;
+  readonly planStrategy?: 'normal' | 'fusion' | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly usage?: UsageStatus | undefined;
 }
@@ -240,6 +242,7 @@ export interface SubagentFailedEvent {
   readonly subagentId: string;
   readonly parentToolCallId: string;
   readonly error: string;
+  readonly usage?: TokenUsage | undefined;
 }
 
 export interface CompactionStartedEvent {

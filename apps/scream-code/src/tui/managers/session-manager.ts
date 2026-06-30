@@ -7,12 +7,13 @@ import type {
 } from '@scream-code/scream-code-sdk';
 import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
+import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
-import type { AppState, TUIStartupOptions } from '../types';
+import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
 import type { TUIState } from '../tui-state';
 import type { SessionEventHandler } from '../controllers/session-event-handler';
 import type { SessionReplayRenderer } from '../controllers/session-replay';
@@ -124,6 +125,10 @@ export class SessionManager {
     await this.setSession(session);
     await this.syncRuntimeState(session);
     this.host.state.startupState = 'ready';
+    // Subscribe to session events for the newly initialized session. This is
+    // required for the initial createSession path; resume/switch paths call
+    // startSubscription in their own flows.
+    this.host.sessionEventHandler.startSubscription();
     return { session, shouldReplay: shouldReplayHistory };
   }
 
@@ -144,9 +149,8 @@ export class SessionManager {
     this.host.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
-      thinking: status.thinkingLevel !== 'off',
-      permissionMode: status.permission,
-      planMode: status.planMode,
+      thinkingLevel: status.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort,
+      planMode: (status.planMode ? 'plan' : 'off') as PlanModeState,
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
@@ -227,7 +231,7 @@ export class SessionManager {
       this.host.showStatus('已在该会话中。');
       return { switched: true };
     }
-    if (this.host.state.appState.streamingPhase !== 'idle') {
+    if (isBusy(this.host.state.appState)) {
       this.host.showError('流式传输期间无法切换会话 — 请先按 Esc 或 Ctrl-C。');
       return { switched: false };
     }
@@ -326,11 +330,11 @@ export class SessionManager {
       thinking:
         this.host.session === undefined
           ? undefined
-          : this.host.state.appState.thinking
-            ? 'on'
-            : 'off',
+          : this.host.state.appState.thinkingLevel === 'off'
+            ? 'off'
+            : this.host.state.appState.thinkingLevel,
       permission: this.host.state.appState.permissionMode,
-      planMode: this.host.state.appState.planMode ? true : undefined,
+      planMode: this.host.state.appState.planMode !== 'off' ? true : undefined,
     });
   }
 

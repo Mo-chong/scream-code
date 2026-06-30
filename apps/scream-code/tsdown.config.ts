@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { defineConfig } from 'tsdown';
@@ -7,6 +8,13 @@ import { BUILT_IN_CATALOG_DEFINE, builtInCatalogDefine } from './scripts/built-i
 
 const appRoot = import.meta.dirname;
 const repoRoot = resolve(appRoot, '../..');
+const packageJson = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
+) as { version: string };
+
+function buildTarget(): string {
+  return process.env['SCREAM_CODE_BUILD_TARGET'] ?? `${process.platform}-${process.arch}`;
+}
 
 export default defineConfig({
   entry: ['./src/main.ts'],
@@ -30,6 +38,10 @@ export default defineConfig({
   define: {
     [BUILT_IN_CATALOG_DEFINE]: builtInCatalogDefine(),
     __BUILD_TIMESTAMP__: String(Date.now()),
+    __SCREAM_CODE_VERSION__: JSON.stringify(packageJson.version),
+    __SCREAM_CODE_CHANNEL__: JSON.stringify(process.env['SCREAM_CODE_CHANNEL'] ?? ''),
+    __SCREAM_CODE_COMMIT__: JSON.stringify(process.env['SCREAM_CODE_COMMIT'] ?? ''),
+    __SCREAM_CODE_BUILD_TARGET__: JSON.stringify(buildTarget()),
   },
   deps: {
     alwaysBundle: [/^@scream-./],

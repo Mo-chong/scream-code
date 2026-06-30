@@ -220,6 +220,17 @@ describe('default agent profiles', () => {
     expect(second).toContain('/workspace/two');
     expect(second).not.toContain('/workspace/one');
   });
+
+  it('merges user preferences with subagent role instructions', () => {
+    const prompt = DEFAULT_AGENT_PROFILES['coder']?.systemPrompt({
+      ...promptContext,
+      roleAdditional: 'The user\'s preferred nickname is "Alex".',
+    });
+
+    expect(prompt).toContain('The user\'s preferred nickname is "Alex".');
+    expect(prompt).toContain('You are now running as a subagent.');
+    expect(prompt).not.toContain('{{ ROLE_ADDITIONAL }}');
+  });
 });
 
 async function write(fileName: string, content: string): Promise<string> {

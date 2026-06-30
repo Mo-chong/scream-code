@@ -11,6 +11,7 @@ export { handleSkillCommand } from './skill-center';
 export {
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
@@ -19,6 +20,7 @@ export {
   showPermissionPicker,
   showSettingsSelector,
 } from './config';
+export { handleLikeCommand } from './like';
 export { handleLoopCommand, describeLoopStatus } from './loop';
 export {
   showMcpServers,

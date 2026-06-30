@@ -4,12 +4,12 @@
  * It mirrors `/usage` visual language but keeps runtime status formatting
  * separate from the TUI orchestration layer.
  */
-
-import type { ModelAlias, PermissionMode, SessionStatus } from '@scream-code/scream-code-sdk';
+import type { ModelAlias, PermissionMode, SessionStatus, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
 import { PRODUCT_NAME } from '#/constant/app';
 import type { ColorPalette } from '#/tui/theme/colors';
+import type { PlanModeState } from '#/tui/types';
 import {
   formatTokenCount,
   ratioSeverity,
@@ -32,9 +32,9 @@ export interface StatusReportOptions {
   readonly workDir: string;
   readonly sessionId: string;
   readonly sessionTitle: string | null;
-  readonly thinking: boolean;
+  readonly thinkingLevel: ThinkingEffort;
   readonly permissionMode: PermissionMode;
-  readonly planMode: boolean;
+  readonly planMode: PlanModeState;
   readonly contextUsage: number;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
@@ -56,9 +56,8 @@ function formatModelStatus(options: StatusReportOptions): string {
   const model = options.status?.model ?? options.model;
   if (model.trim().length === 0) return '未设置';
 
-  const thinking = (options.status?.thinkingLevel ?? (options.thinking ? 'on' : 'off')) === 'off'
-    ? 'off'
-    : 'on';
+  const level = options.status?.thinkingLevel ?? options.thinkingLevel;
+  const thinking = level === 'off' ? 'off' : 'on';
   return `${displayModelName(model, options.availableModels)} (thinking ${thinking})`;
 }
 
@@ -96,21 +95,28 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
   const errorStyle = chalk.hex(colors.error);
   const severityHex = (sev: 'ok' | 'warn' | 'danger'): string =>
     sev === 'danger' ? colors.error : sev === 'warn' ? colors.warning : colors.success;
-
   const permission = options.status?.permission ?? options.permissionMode;
-  const planMode = options.status?.planMode ?? options.planMode;
+  const planMode: PlanModeState =
+    options.planMode !== 'off'
+      ? options.planMode
+      : options.status?.planMode
+        ? options.status.planStrategy === 'fusion'
+          ? 'fusionplan'
+          : 'plan'
+        : 'off';
+  const planModeLabel = planMode === 'off' ? 'off' : planMode === 'plan' ? 'plan' : 'fusion';
   const sessionId = options.sessionId.trim().length > 0 ? options.sessionId : '无';
   const rows: FieldRow[] = [
-    { label: '模型', value: formatModelStatus(options) },
-    { label: '目录', value: options.workDir },
-    { label: '权限', value: permission },
-    { label: '计划模式', value: planMode ? 'on' : 'off' },
-    { label: '会话', value: sessionId },
+    { label: '模型名称', value: formatModelStatus(options) },
+    { label: '工作目录', value: options.workDir },
+    { label: '权限模式', value: permission },
+    { label: '计划模式', value: planModeLabel },
+    { label: '会话编号', value: sessionId },
   ];
   const title = options.sessionTitle?.trim();
-  if (title !== undefined && title.length > 0) rows.push({ label: '标题', value: title });
+  if (title !== undefined && title.length > 0) rows.push({ label: '会话标题', value: title });
   if (options.statusError !== undefined) {
-    rows.push({ label: '警告', value: options.statusError, severity: 'error' });
+    rows.push({ label: '状态警告', value: options.statusError, severity: 'error' });
   }
 
   const lines: string[] = [

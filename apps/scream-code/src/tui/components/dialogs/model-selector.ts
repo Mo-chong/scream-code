@@ -1,4 +1,4 @@
-import type { ModelAlias } from '@scream-code/scream-code-sdk';
+import type { ModelAlias, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import {
   Container,
   Key,
@@ -25,8 +25,10 @@ interface ModelChoice {
 
 export interface ModelSelection {
   readonly alias: string;
-  readonly thinking: boolean;
+  readonly thinkingLevel: ThinkingEffort;
 }
+
+const DEFAULT_THINKING_LEVELS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high'];
 
 export function modelDisplayName(alias: string, model: ModelAlias | undefined): string {
   return model?.displayName ?? model?.model ?? alias;
@@ -51,7 +53,7 @@ export interface ModelSelectorOptions {
   readonly models: Record<string, ModelAlias>;
   readonly currentValue: string;
   readonly selectedValue?: string;
-  readonly currentThinking: boolean;
+  readonly currentThinkingLevel: ThinkingEffort;
   readonly colors: ColorPalette;
   /** When true, typed characters filter the list (fuzzy) and a search line is shown. */
   readonly searchable?: boolean;
@@ -80,18 +82,31 @@ function thinkingAvailability(model: ModelAlias): ThinkingAvailability {
   return 'unsupported';
 }
 
-function effectiveThinking(model: ModelAlias, thinkingDraft: boolean): boolean {
+function getThinkingLevels(model: ModelAlias): readonly ThinkingEffort[] {
   const availability = thinkingAvailability(model);
-  if (availability === 'always-on') return true;
-  if (availability === 'unsupported') return false;
-  return thinkingDraft;
+  if (availability === 'unsupported') return ['off'];
+  const base = model.thinkingLevels ?? DEFAULT_THINKING_LEVELS;
+  if (availability === 'always-on') {
+    return base.filter((level) => level !== 'off');
+  }
+  return base;
+}
+
+function effectiveThinkingLevel(
+  model: ModelAlias,
+  thinkingDraft: ThinkingEffort,
+): ThinkingEffort {
+  const levels = getThinkingLevels(model);
+  if (levels.includes(thinkingDraft)) return thinkingDraft;
+  // If the draft is unsupported, fall back to the first available level.
+  return levels[0] ?? 'off';
 }
 
 export class ModelSelectorComponent extends Container implements Focusable {
   focused = false;
   private readonly opts: ModelSelectorOptions;
   private readonly list: SearchableList<ModelChoice>;
-  private thinkingDraft: boolean;
+  private thinkingDraft: ThinkingEffort;
 
   constructor(opts: ModelSelectorOptions) {
     super();
@@ -106,7 +121,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
       initialIndex: Math.max(selectedIdx, 0),
       searchable: opts.searchable === true,
     });
-    this.thinkingDraft = opts.currentThinking;
+    const initialChoice = choices[selectedIdx];
+    this.thinkingDraft =
+      initialChoice !== undefined
+        ? effectiveThinkingLevel(initialChoice.model, opts.currentThinkingLevel)
+        : opts.currentThinkingLevel;
   }
 
   handleInput(data: string): void {
@@ -116,15 +135,19 @@ export class ModelSelectorComponent extends Container implements Focusable {
       return;
     }
     const selected = this.list.selected();
-    // Left/Right toggle thinking (only when the model supports it); paging is on
-    // PgUp/PgDn so the horizontal arrows stay free for the thinking control.
-    if (selected !== undefined && thinkingAvailability(selected.model) === 'toggle') {
+    // Left/Right cycle thinking level for the selected model. Paging stays on
+    // PgUp/PgDn so horizontal arrows are free for the thinking control.
+    if (selected !== undefined && thinkingAvailability(selected.model) !== 'unsupported') {
+      const levels = getThinkingLevels(selected.model);
+      const idx = levels.indexOf(this.thinkingDraft);
       if (matchesKey(data, Key.left)) {
-        this.thinkingDraft = true;
+        const nextIdx = idx <= 0 ? levels.length - 1 : idx - 1;
+        this.thinkingDraft = levels[nextIdx]!;
         return;
       }
       if (matchesKey(data, Key.right)) {
-        this.thinkingDraft = false;
+        const nextIdx = idx === -1 || idx >= levels.length - 1 ? 0 : idx + 1;
+        this.thinkingDraft = levels[nextIdx]!;
         return;
       }
     }
@@ -132,7 +155,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
       if (selected === undefined) return;
       this.opts.onSelect({
         alias: selected.alias,
-        thinking: effectiveThinking(selected.model, this.thinkingDraft),
+        thinkingLevel: effectiveThinkingLevel(selected.model, this.thinkingDraft),
       });
       return;
     }
@@ -145,7 +168,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
     const view = this.list.view();
     const choices = view.items;
 
-    const navParts = ['↑↓ 模型', '←→ 思考'];
+    const navParts = ['↑↓ 模型', '←→ 思考等级'];
     if (view.page.pageCount > 1) navParts.push('PgUp/PgDn 翻页');
     navParts.push('Enter 应用', 'Esc 取消');
 
@@ -198,18 +221,21 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
   private renderThinkingControl(model: ModelAlias): string {
     const { colors } = this.opts;
-    const segment = (label: string, active: boolean): string =>
-      active
-        ? chalk.hex(colors.primary).bold(`[ ${label} ]`)
-        : chalk.hex(colors.text)(`  ${label}  `);
-
     const availability = thinkingAvailability(model);
-    if (availability === 'always-on') {
-      return `  ${segment('Always on', true)}`;
-    }
+    const levels = getThinkingLevels(model);
+    const effectiveLevel = effectiveThinkingLevel(model, this.thinkingDraft);
+
+    const segments = levels.map((level) => {
+      const active = level === effectiveLevel;
+      return active
+        ? chalk.hex(colors.primary).bold(`[ ${level} ]`)
+        : chalk.hex(colors.text)(level);
+    });
+
+    const line = `  ${segments.join('  ')}`;
     if (availability === 'unsupported') {
-      return `  ${segment('Off', true)} ${chalk.hex(colors.textMuted)('unsupported')}`;
+      return `${line} ${chalk.hex(colors.textMuted)('unsupported')}`;
     }
-    return `  ${segment('On', this.thinkingDraft)}  ${segment('Off', !this.thinkingDraft)}`;
+    return line;
   }
 }

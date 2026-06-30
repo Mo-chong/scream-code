@@ -3,11 +3,12 @@ import type {
   PermissionMode,
   ProviderConfig,
   PromptPart,
+  ThinkingEffort,
+  TokenUsage,
   ToolInputDisplay,
   ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
-
-import type { NotificationsConfig } from './config';
+import type { NotificationsConfig, TuiConfig, TuiLikePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { Theme } from './theme';
 import type { ResolvedTheme } from './theme/colors';
@@ -40,27 +41,33 @@ export type LoopLimitRuntime =
       deadlineMs: number;
     };
 
+export type PlanModeState = 'off' | 'plan' | 'fusionplan';
+
 export interface AppState {
   model: string;
   workDir: string;
   sessionId: string;
   permissionMode: PermissionMode;
-  planMode: boolean;
-  thinking: boolean;
+  planMode: PlanModeState;
+  thinkingLevel: ThinkingEffort;
   contextUsage: number;
   contextTokens: number;
   maxContextTokens: number;
   isCompacting: boolean;
+  lastCompactionFinishedAt: number | undefined;
+  autoCompactionCount: number;
   isReplaying: boolean;
-  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing';
+  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
   streamingStartTime: number;
-  livePaneMode: LivePaneMode;
   theme: Theme;
   version: string;
   hasNewVersion: boolean;
   latestVersion: string | null;
   editorCommand: string | null;
   notifications: NotificationsConfig;
+  like: TuiLikePreferences;
+  fusionPlan: TuiConfig['fusionPlan'];
+  subagentModels: Record<string, string>;
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;
@@ -75,7 +82,9 @@ export interface AppState {
   loopVerifier: { command: string; timeoutMs: number } | undefined;
   loopIteration: number;
   loopLastVerifyPassed: boolean | undefined;
+  loopVerifying: boolean;
   recentSessions: RecentSession[];
+  subagentUsage: SubagentUsageMap;
 }
 
 export interface ToolCallBlockData {
@@ -117,6 +126,8 @@ export interface SubagentReplayToolCallData {
   result?: ToolResultBlockData;
 }
 
+export type SubagentUsageMap = Record<string, TokenUsage>;
+
 export interface SubagentReplayBlockData {
   id: string;
   name?: string;
@@ -132,6 +143,24 @@ export interface BackgroundAgentMetadata {
 }
 
 export type BackgroundAgentStatusPhase = 'started' | 'completed' | 'failed';
+
+export type FusionPlanPhase = 'planning' | 'synthesis' | 'completed' | 'failed';
+
+export interface FusionPlanWorkerProgress {
+  readonly index: number;
+  readonly status: 'pending' | 'running' | 'completed' | 'failed';
+  readonly angle: string;
+  readonly label: string;
+}
+
+export interface FusionPlanStatusData {
+  readonly phase: FusionPlanPhase;
+  readonly completedWorkers: number;
+  readonly totalWorkers: number;
+  readonly failedWorkers: number;
+  readonly workers: readonly FusionPlanWorkerProgress[];
+  readonly detail?: string;
+}
 
 export interface BackgroundAgentStatusData {
   readonly phase: BackgroundAgentStatusPhase;
@@ -174,6 +203,7 @@ export interface TranscriptEntry {
   detail?: string;
   toolCallData?: ToolCallBlockData;
   backgroundAgentStatus?: BackgroundAgentStatusData;
+  fusionPlanStatus?: FusionPlanStatusData;
   compactionData?: CompactionTranscriptData;
   cronData?: CronTranscriptData;
   imageAttachmentIds?: readonly number[];
@@ -183,15 +213,7 @@ export interface TranscriptEntry {
   skillTrigger?: 'user-slash' | 'model-tool' | 'nested-skill';
 }
 
-export type LivePaneMode =
-  | 'idle'
-  | 'waiting'
-  | 'thinking'
-  | 'tool'
-  | 'session';
-
 export interface LivePaneState {
-  mode: LivePaneMode;
   pendingApproval: PendingApproval | null;
   pendingQuestion: PendingQuestion | null;
 }
@@ -210,7 +232,6 @@ export interface SendMessageOptions {
 }
 
 export const INITIAL_LIVE_PANE: LivePaneState = {
-  mode: 'idle',
   pendingApproval: null,
   pendingQuestion: null,
 };

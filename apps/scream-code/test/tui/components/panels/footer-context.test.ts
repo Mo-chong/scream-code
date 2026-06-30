@@ -24,8 +24,8 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     workDir: '/tmp',
     sessionId: 'sess_1',
     permissionMode: 'manual',
-    planMode: false,
-    thinking: false,
+    planMode: 'off',
+    thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
@@ -100,7 +100,7 @@ describe('FooterComponent — context NaN resilience', () => {
   });
 
   it('does not show a thinking label in the footer', () => {
-    const on = makeFooter(baseState({ model: 'k2', thinking: true }));
+    const on = makeFooter(baseState({ model: 'k2', thinkingLevel: 'high' }));
 
     expect(strip(on.render(120)[0]!)).not.toContain('思考中');
   });
@@ -119,6 +119,18 @@ describe('FooterComponent — context NaN resilience', () => {
 
     const [line1] = footer.render(120);
     expect(strip(line1 ?? '')).toContain('上下文：0.0%');
+  });
+
+  it('renders plan badge on line 1 in plan mode', () => {
+    const footer = makeFooter(baseState({ planMode: 'plan' }));
+    const [line1] = footer.render(120);
+    expect(strip(line1 ?? '')).toMatch(/\bplan\b/);
+  });
+
+  it('renders fusion badge on line 1 in fusion plan mode', () => {
+    const footer = makeFooter(baseState({ planMode: 'fusionplan' }));
+    const [line1] = footer.render(120);
+    expect(strip(line1 ?? '')).toMatch(/\bfusion\b/);
   });
 
   it('highlights the pull request badge separately from git status text', () => {

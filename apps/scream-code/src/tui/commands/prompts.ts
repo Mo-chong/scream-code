@@ -4,6 +4,7 @@ import {
   type Catalog,
   type CatalogModel,
   type ModelAlias,
+  type ThinkingEffort,
 } from '@scream-code/scream-code-sdk';
 
 import { ApiKeyInputDialogComponent, type ApiKeyInputResult } from '../components/dialogs/api-key-input-dialog';
@@ -90,7 +91,7 @@ export async function promptModelSelectionForCatalog(
   host: SlashCommandHost,
   providerId: string,
   models: CatalogModel[],
-): Promise<{ model: CatalogModel; thinking: boolean } | undefined> {
+): Promise<{ model: CatalogModel; thinkingLevel: ThinkingEffort } | undefined> {
   const modelDict: Record<string, ModelAlias> = {};
   for (const m of models) {
     modelDict[`${providerId}/${m.id}`] = catalogModelToAlias(providerId, m);
@@ -98,26 +99,26 @@ export async function promptModelSelectionForCatalog(
   const selection = await runModelSelector(host, modelDict);
   if (selection === undefined) return undefined;
   const model = models.find((m) => `${providerId}/${m.id}` === selection.alias);
-  return model ? { model, thinking: selection.thinking } : undefined;
+  return model ? { model, thinkingLevel: selection.thinkingLevel } : undefined;
 }
 
 export function runModelSelector(
   host: SlashCommandHost,
   modelDict: Record<string, ModelAlias>,
-): Promise<{ alias: string; thinking: boolean } | undefined> {
+): Promise<{ alias: string; thinkingLevel: ThinkingEffort } | undefined> {
   return new Promise((resolve) => {
     const firstAlias = Object.keys(modelDict)[0] ?? '';
     const caps = modelDict[firstAlias]?.capabilities ?? [];
-    const initialThinking = caps.includes('always_thinking') || caps.includes('thinking');
+    const initialThinkingLevel: ThinkingEffort = caps.includes('always_thinking') ? 'medium' : 'off';
     const selector = new ModelSelectorComponent({
       models: modelDict,
       currentValue: firstAlias,
-      currentThinking: initialThinking,
+      currentThinkingLevel: initialThinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
-      onSelect: ({ alias, thinking }) => {
+      onSelect: ({ alias, thinkingLevel }) => {
         host.restoreEditor();
-        resolve({ alias, thinking });
+        resolve({ alias, thinkingLevel });
       },
       onCancel: () => {
         host.restoreEditor();
@@ -134,10 +135,11 @@ const WIRE_TYPE_OPTIONS: ChoiceOption[] = [
   { value: 'openai', label: 'OpenAI 兼容协议', description: '适用于 DeepSeek、OpenAI、Groq 等' },
   { value: 'anthropic', label: 'Anthropic 协议', description: '适用于 Claude 系列模型' },
 ];
-
 const THINKING_OPTIONS: ChoiceOption[] = [
-  { value: 'true', label: '开启思考模式' },
-  { value: 'false', label: '关闭思考模式' },
+  { value: 'off', label: '关闭思考' },
+  { value: 'low', label: '低强度思考' },
+  { value: 'medium', label: '中强度思考' },
+  { value: 'high', label: '高强度思考' },
 ];
 
 export function promptWireType(host: SlashCommandHost): Promise<string | undefined> {
@@ -176,15 +178,14 @@ export function promptTextInput(
     host.mountEditorReplacement(dialog);
   });
 }
-
-export function promptThinkingMode(host: SlashCommandHost): Promise<boolean | undefined> {
+export function promptThinkingMode(host: SlashCommandHost): Promise<ThinkingEffort | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
       title: '思考模式',
-      hint: '启用后模型会先思考再回答（需要模型支持）',
+      hint: '选择模型思考强度（需要模型支持）',
       options: THINKING_OPTIONS,
       colors: host.state.theme.colors,
-      onSelect: (value) => { host.restoreEditor(); resolve(value === 'true'); },
+      onSelect: (value) => { host.restoreEditor(); resolve(value as ThinkingEffort); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },
     });
     host.mountEditorReplacement(picker);

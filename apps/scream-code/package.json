@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.7.2",
+  "version": "0.7.6",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -39,8 +39,7 @@
     ]
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "tsdown",
@@ -57,7 +56,7 @@
     "smoke": "node dist/main.mjs --version"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "^0.78.1",
+    "@earendil-works/pi-tui": "^0.80.2",
     "@mariozechner/clipboard": "^0.3.2",
     "@photostructure/sqlite-vec": "^1.1.1",
     "chalk": "^5.4.1",

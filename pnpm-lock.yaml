@@ -15,7 +15,7 @@ overrides:
   ssh2@1.17.0>nan: '-'
 
 patchedDependencies:
-  '@earendil-works/pi-tui@0.78.1': 22d9785c574a66b5180288cf8ee08692a3690630997d06c86844b34e5415c644
+  '@earendil-works/pi-tui@0.80.2': 3ad022c188373792ea0c7490d3848faf12b19224cdf26512c3fa568b6b14eaf6
 
 importers:
 
@@ -82,8 +82,8 @@ importers:
   apps/scream-code:
     dependencies:
       '@earendil-works/pi-tui':
-        specifier: ^0.78.1
-        version: 0.78.1(patch_hash=22d9785c574a66b5180288cf8ee08692a3690630997d06c86844b34e5415c644)
+        specifier: ^0.80.2
+        version: 0.80.2(patch_hash=3ad022c188373792ea0c7490d3848faf12b19224cdf26512c3fa568b6b14eaf6)
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -488,8 +488,8 @@ packages:
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
     engines: {node: '>=0.1.90'}
 
-  '@earendil-works/pi-tui@0.78.1':
-    resolution: {integrity: sha512-07GVQo/38a0yvIPlWDr3RJn1B8gk3ZuIX9h2oIQ+Biyu3JN0KppWmgWHfaWRydQgse5JtC++KDw5MWaIRnV0mw==}
+  '@earendil-works/pi-tui@0.80.2':
+    resolution: {integrity: sha512-OvOAMIbXiC9OSse17YMiXIsI9AS5XM/ZV8N/k+UzdlRpPILDQYmLElevgGW92kkXR8qHBClIdzhCjuzlBGvphA==}
     engines: {node: '>=22.19.0'}
 
   '@emnapi/core@1.10.0':
@@ -2679,9 +2679,9 @@ packages:
     peerDependencies:
       marked: '>=1 <16'
 
-  marked@15.0.12:
-    resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
-    engines: {node: '>= 18'}
+  marked@18.0.5:
+    resolution: {integrity: sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   marked@9.1.6:
@@ -3984,10 +3984,10 @@ snapshots:
   '@colors/colors@1.5.0':
     optional: true
 
-  '@earendil-works/pi-tui@0.78.1(patch_hash=22d9785c574a66b5180288cf8ee08692a3690630997d06c86844b34e5415c644)':
+  '@earendil-works/pi-tui@0.80.2(patch_hash=3ad022c188373792ea0c7490d3848faf12b19224cdf26512c3fa568b6b14eaf6)':
     dependencies:
       get-east-asian-width: 1.6.0
-      marked: 15.0.12
+      marked: 18.0.5
 
   '@emnapi/core@1.10.0':
     dependencies:
@@ -5953,7 +5953,7 @@ snapshots:
       node-emoji: 2.2.0
       supports-hyperlinks: 3.2.0
 
-  marked@15.0.12: {}
+  marked@18.0.5: {}
 
   marked@9.1.6: {}
 
