@@ -70,6 +70,19 @@ const ACCESS_BOOST_FACTOR = 0.5;  // 访问新鲜度因子
  * 线程安全：当前场景是单线程事件循环，无需锁。
  */
 export class ContentArchive {
+  /**
+   * 全局共享存储（跨 agent 实例）。
+   *
+   * 子 agent 的 ContentArchive 通过此静态 Map 共享父 agent 的存档内容，
+   * 实现「跨子 agent 缓存」——新建子 agent 时无需重新攒存。
+   *
+   * 生命周期：进程级，随进程销毁；不持久化。
+   * 写入策略：每次 archive() 同步写入 sharedStore。
+   * 读取策略：recover() 先查本地 store，未命中则回退到 sharedStore。
+   * key 冲突：同 key 以本地 store 为准（本地优先）。
+   */
+  static readonly sharedStore = new Map<string, ContentArchiveEntry>();
+
   private readonly store = new Map<string, ContentArchiveEntry>();
   private readonly ttlMs: number;
   private readonly maxEntries: number;
@@ -124,31 +137,62 @@ export class ContentArchive {
       lastAccessedAt: now,
     });
 
+    // 同步写入全局共享存储（跨 agent 实例可见）
+    ContentArchive.sharedStore.set(key, {
+      content,
+      timestamp: now,
+      source: options?.source ?? 'unknown',
+      priority: options?.priority ?? PRIORITY_NEW,
+      protected: options?.protected ?? false,
+      lastAccessedAt: now,
+    });
+
     return { key, success: true, evictedCount };
   }
 
   /**
    * 按 key 取回内容。
-   * 同时升权（priority += 0.1, 上限 1.0）+ 刷新 lastAccessedAt。
+   * 先查本地 store，未命中则回退到 sharedStore。
+   * 同时升权 + 刷新 lastAccessedAt。
    * 过期或不存在返回 undefined。
    */
   recover(key: string): string | ContentPart[] | undefined {
+    // 查本地 store
     const entry = this.store.get(key);
-    if (entry === undefined) return undefined;
-
-    const now = Date.now();
-
-    // TTL 过期检查（protected 条目同样过期）
-    if (now - entry.timestamp > this.ttlMs) {
-      this.store.delete(key);
-      return undefined;
+    if (entry !== undefined) {
+      const now = Date.now();
+      if (now - entry.timestamp > this.ttlMs) {
+        this.store.delete(key);
+        ContentArchive.sharedStore.delete(key);
+        return undefined;
+      }
+      entry.priority = Math.min(PRIORITY_MAX, entry.priority + PRIORITY_BOOST);
+      entry.lastAccessedAt = now;
+      return entry.content;
     }
 
-    // 升权
-    entry.priority = Math.min(PRIORITY_MAX, entry.priority + PRIORITY_BOOST);
-    entry.lastAccessedAt = now;
+    // 未命中本地 → 回退到共享存储
+    const shared = ContentArchive.sharedStore.get(key);
+    if (shared === undefined) return undefined;
 
-    return entry.content;
+    const now = Date.now();
+    if (now - shared.timestamp > this.ttlMs) {
+      ContentArchive.sharedStore.delete(key);
+      return undefined;
+    }
+    // 从共享存储"借"回本地（soft copy-on-access）
+    const lifted: ContentArchiveEntry = {
+      content: shared.content,
+      timestamp: shared.timestamp,
+      source: shared.source,
+      priority: Math.min(PRIORITY_MAX, shared.priority + PRIORITY_BOOST),
+      protected: shared.protected,
+      lastAccessedAt: now,
+    };
+    ContentArchive.sharedStore.set(key, lifted);
+    shared.priority = lifted.priority;
+    shared.lastAccessedAt = now;
+    return shared.content;
   }
 
   /**

@@ -19,13 +19,14 @@
 
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
-| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）**；**recallCount 增强：记录召回次数、降级保护（baohu/ding/yongjiu/chundu）、search blend (relevance×0.7 + heatScore×0.3)、recalcRecallCountFromLog 运维工具** |
+| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）**；**recallCount 增强：记录召回次数、降级保护（baohu/ding/yongjiu/chundu）、search blend (relevance×0.7 + heatScore×0.3)、recalcRecallCountFromLog 运维工具**；**§十五: 12痛点修复（2026-06-28）**：CJK Bigram 中文召回、usageBoost NaN 防御、TIER_RANK 模块常量、splitClaims 12分割符、critical 豁免淘汰、CLAIMS_OVERLAP 阈值提升+单字保护、scope:'all' 跨项目参数、向量漂移告警、TAG_CONFIG 扩容、toLowerCase 大小写不敏感、promote 双计数 bug 修复、tier+recalledAt 排序防御 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
-| **上下文压缩** | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ Observation Masking（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
+| **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl` |
+| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ maskToolObservations（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
 | **整体架构** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
@@ -67,9 +68,12 @@
 | MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
 | 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
 | 数据库直接在哪里 | `SYSTEM/memory-store.md` §直接数据库操作 |
-| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 |
-| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction |
-| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction |
+| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 / `SYSTEM/context-management.md` §三、四 |
+| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction / `SYSTEM/context-management.md` §三 |
+| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction / `SYSTEM/context-management.md` §四 |
+| ContentArchive（保留缓冲区） | `SYSTEM/context-management.md` §二 |
+| ArchiveRecover MCP 工具 | `SYSTEM/context-management.md` §五 |
+| 上下文管理三层架构总览 | `SYSTEM/context-management.md` §一、七 |
 | 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
 | 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
 | 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
@@ -99,6 +103,12 @@
 | 合并 v0.7 的真实冲突经验 | `SYSTEM/pitfalls.md` §合并上游 v0.7 的真实冲突复盘 |
 | installUpdate 签名不匹配 | `SYSTEM/pitfalls.md` §踩坑点总结 |
 | 构建卡 prepare 脚本（node 不在 PATH） | `SYSTEM/pitfalls.md` §构建卡在 prepare 脚本 |
+| 数据库备份找错系统 | `SYSTEM/pitfalls.md` §踩坑 #8 |
+| MemoryWrite 标签被过滤（baohu/ding） | `SYSTEM/pitfalls.md` §踩坑 #9 |
+| MemoryEdit id 要带 memo- 前缀 | `SYSTEM/pitfalls.md` §踩坑 #9 |
+| search() scope:'all' 是否新功能 | `SYSTEM/pitfalls.md` §踩坑 #10 |
+| promote 双计数 bug | `SYSTEM/pitfalls.md` §踩坑 #11 |
+| claimsOverlap 大小写不敏感 | `SYSTEM/pitfalls.md` §踩坑 #12 |
 | 开发构建怎么跑 | `scripts/build-dev.sh` |
 | FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
 | vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |

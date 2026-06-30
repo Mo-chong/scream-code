@@ -1879,9 +1879,16 @@ export class TurnFlow {
         check: () => {
           const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
           const hasPassed = latestVerification?.passed === true;
-          return this.lastToolFailure?.isExploratory === false && !hasPassed
-            ? `A required tool (${this.lastToolFailure.toolName}) failed this turn. Analyze the error and fix it before reporting completion.`
-            : null;
+          if (this.lastToolFailure?.isExploratory === false && !hasPassed) {
+            const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5);
+            const faaSnippet = faaEntries && faaEntries.length > 0
+              ? `\n\nRecent file audit entries (most recent first):\n${faaEntries.map(e =>
+                  `  ${e.action} — ${e.resultPreview}  (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`
+                ).join('\n')}`
+              : '';
+            return `A required tool (${this.lastToolFailure.toolName}) failed this turn. Analyze the error and fix it before reporting completion.${faaSnippet}`;
+          }
+          return null;
         },
       },
       {

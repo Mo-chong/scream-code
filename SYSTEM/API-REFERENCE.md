@@ -1098,6 +1098,35 @@ Point C (full.ts):          (comment only — FullCompact rewrites messages via 
 
 The `recover(key)` method reads an entry by key while refreshing its TTL and boosting priority (+0.1). Expired or missing keys return `undefined`. The companion `ArchiveRecoverTool` (§20) wraps this as a built-in agent tool for model-facing access.\r
 \r
+### v2.1 — sharedStore（跨子 agent 共享）\r
+\r
+**Added 2026-06-29.** ContentArchive 新增静态全局共享储存，解决子 agent 隔离导致的主 agent 存档内容不可见问题。\r
+\r
+```typescript\r
+class ContentArchive {\r
+  // 新增：静态全局 Map，所有 Agent 实例共享\r
+  static readonly sharedStore = new Map<string, ContentArchiveEntry>()\r
+\r
+  archive(key: string, content: string | ContentPart[], options?: ArchiveOptions): ArchiveResult {\r
+    // 同步写入 sharedStore（不增加本地限制）\r
+  }\r
+\r
+  recover(key: string): string | ContentPart[] | undefined {\r
+    // 先查本地 store → 未命中回退 sharedStore\r
+    // copy-on-access：从 sharedStore 找到后写入本地供后续访问\r
+  }\r
+}\r
+```\r
+\r
+**设计要点：**\r
+- `sharedStore` 是 `static` 字段，所有 Agent 构造函数创建的实例共享同一块内存\r
+- `archive()` 写入本地 store 的同时同步写入 `sharedStore`（不变更 TTL/priority）\r
+- `recover()` 先查本地 store → 未命中则回退查 `sharedStore` → 找到后 copy-on-access 写回本地\r
+- 不破坏子 agent 隔离：本地 store 独立，共享只作 fallback 寻址\r
+- 不增加 sharedStore 的 TTL/eviction 开销——sharedStore 的条目由各个实例的 archive/prune 连带管理\r
+\r
+**集成点：** 同上（Point A / Point B / Point C），自动生效无需新增 flag。\r
+\r
 ### v2.0 changes (2026-06)\r
 \r
 | Change | Before | After |\r
@@ -1154,6 +1183,11 @@ class FileActionAudit extends FlushBuffer<FileActionAuditEntry> {\r
   // 熔断: 连续 5 次失败 → circuitOpen = true → 跳过刷盘\r
   // 防抖: 两次 flush 间隔 < 30s 直接 return\r
   // 日切: 追加写入 <screamHome>/audit/YYYY-MM-DD.jsonl\r
+\r
+  // v2: 环状缓冲区（最近 50 条），用于查错注入\r
+  private static KEEP_RECENT_MAX = 50\r
+  private recentEntries: FileActionAuditEntry[] = []\r
+  getRecentEntries(n: number): FileActionAuditEntry[]\r
 }\r
 ```\r
 \r
@@ -1168,12 +1202,51 @@ class FileActionAudit extends FlushBuffer<FileActionAuditEntry> {\r
 | Day rotation | `.jsonl` per calendar day | Simple rotation, easy to grep/archive |\r
 | Exit flush | `fileActionAudit.flush()` in `extractMemoriesOnExit` finally | Best-effort drain on session end |\r
 | Reset on flush | `this.error = null` before `ensureFlush()` | Exit path gets a retry chance |\r
+| Ring buffer | 50 entries (v2) | `getRecentEntries(n)` returns last n entries newest-first |\r
+\r\n### v2 additions (2026-06-29)\r
+\r
+#### 环状缓冲区 / getRecentEntries\r
+\r\n```typescript\r
+// file-action-audit.ts\r
+static KEEP_RECENT_MAX = 50\r
+private recentEntries: FileActionAuditEntry[] = []\r
+\r\npush(entry: FileActionAuditEntry): void {\r
+  // override: 同步写入环状缓冲区\r
+  this.recentEntries.push(entry)\r
+  if (this.recentEntries.length > FileActionAudit.KEEP_RECENT_MAX)\r
+    this.recentEntries.shift()\r
+  // 保持原刷盘路径\r
+  super.push(entry)\r
+}\r\n\r
+getRecentEntries(n: number): FileActionAuditEntry[] {\r
+  // 返回最近 n 条（从新到旧）\r
+  return [...this.recentEntries].reverse().slice(0, n)\r
+}\r\n```\r
+\r
+#### 查错自动注入（turn/index.ts L1882-1889）\r
+\r\n**链路：** tool 执行失败 → `lastToolFailure` 非 exploratory 且未经验证 → 附加最近 5 条 FAA 记录到失败提示\r
+\r
+```typescript\r
+// turn/index.ts — formatToolFailureFeedback()\r
+if (this.lastToolFailure?.isExploratory === false && !hasPassed) {\r
+  const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5)\r
+  const faaSnippet = faaEntries?.length\r
+    ? `\\n\\nRecent file audit entries:\\n${faaEntries.map(e =>\r
+        `  ${e.action} — ${e.resultPreview} (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`\r
+      ).join('\\n')}`\r
+    : ''\r
+  return `A required tool failed this turn.${faasSnippet}`\r
+}\r
+```\r
+\r
+注入仅在 `file-action-audit` flag 开启时生效（空安全 `?.` 调用）。\r
 \r
 ### Integration flow\r
 \r
 ```\r
 B 组工具结果处理 (turn/index.ts)\r
   └─ Edit/Write 成功 → FileActionAudit.push(entry)\r
+     ├─ 环状缓冲区 ← 同步写入 getRecentEntries 可用\r
      └─ shouldFlush() → 熔断检查 → 防抖检查\r
         └─ scheduleFlush() / flush()\r
            └─ drainBatch() → append to <screamHome>/audit/YYYY-MM-DD.jsonl\r
@@ -1181,4 +1254,77 @@ B 组工具结果处理 (turn/index.ts)\r
 Agent 退出 (agent/index.ts)\r
   └─ extractMemoriesOnExit()\r
      └─ finally → fileActionAudit.flush() .catch(log)\r
-```
+\r\n查错注入 (turn/index.ts L1882-1889)\r
+  └─ tool 失败 → getRecentEntries(5) → 附加到失败提示\r
+```\r
+\r
+---\r
+\r\n## §20 — ArchiveRecoverTool（内容存档恢复工具）\r
+\r
+**Added 2026-06.** `ArchiveRecoverTool` 是对 ContentArchive.recover() 的 tool wrapper，以内置工具形式暴露给 LLM agent。所有 agent（包括子 agent）均可调用 `/recover` 恢复先前存档的任何内容。\r
+\r
+### 文件位置\r
+\r
+- **定义：** `packages/agent-core/src/tools/builtin/context/archive-recover.ts`\r
+- **注册：** `packages/agent-core/src/agent/tool/index.ts` L630-650（Agent 构造函数中按条件注册）\r
+- **联动：** `packages/agent-core/src/agent/context/content-archive.ts`（ContentArchive v2.1）\r
+\r
+### API\r
+\r
+```typescript\r
+// 输入 schema（zod）\r
+const ArchiveRecoverInputSchema = z.object({\r
+  key: z.string().optional().describe('精确匹配 key，返回单条内容'),\r
+  query: z.string().optional().describe('模糊搜索 key（key.includes(query)），返回所有匹配'),\r
+}).strict()\r
+\r\n// 工具实现\r
+class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {\r
+  readonly name = 'ArchiveRecover'  // 内置工具名\r
+  readonly description = '从内容存档中按 key 或关键词恢复之前截断/存档的内容。' +\r
+    '不传参数则列出所有可用 key（仅索引，不含内容）。' +\r
+    '传 key 精确匹配单条，传 query 模糊搜索全部匹配。'\r
+\r
+  constructor(contentArchive: ContentArchive) {}\r
+\r
+  // resolveExecution 模式（非 execute）\r
+  resolveExecution(args: ArchiveRecoverInput): ToolExecution {\r
+    return {\r
+      description: 'ArchiveRecover',\r
+      approvalRule: this.name,\r
+      execute: async (_ctx): Promise<ExecutableToolResult> => {\r
+        if (args.key) {\r
+          const content = this.contentArchive.recover(args.key)\r
+          return { output: content ?? '未找到该 key 对应的存档内容' }\r
+        }\r
+        if (args.query) {\r
+          const keys = this.contentArchive.list()\r
+            .filter((k) => k.includes(args.query!))\r
+          const matched = keys.map(k => ({ key: k, content: this.contentArchive.recover(k) })).filter(e => e.content !== undefined)
+          return { output: JSON.stringify({ count: matched.length, entries: matched }) }\r
+        }\r
+        return { output: JSON.stringify({ keys: this.contentArchive.list() }) }\r
+      },\r
+    }\r
+  }\r
+}\r
+```\r
+\r
+### 注册条件\r
+\r
+Agent 构造函数 `packages/agent-core/src/agent/tool/index.ts` L630-650 注册。原有 `this.agent.type === 'main' &&` 限制（2026-06-29 已移除）。所有 agent 均可注册。实例化前提是 agent 有 `contentArchive` 实例（受 `contentArchive` flag 控制）。\r
+\r
+### 与其他模块的关系\r
+\r
+| 模块 | 关系 |\r
+|------|------|\r
+| `ContentArchive` | ArchiveRecoverTool 是 recover() 的 tool 壳，不封装 archive() |\r
+| `contentArchive` flag | 控制是否启用 ContentArchive 实例——无 ContentArchive 则 register 失败跳过 |\r
+| `context/index.ts` Point A | ContentArchive.archive() 在 tool result 入 context 历史前执行，存档原始输出 |\r
+| sharedStore | ArchiveRecoverTool 通过 ContentArchive.recover() 自动寻址 sharedStore |\r
+| 子 agent | 子 agent 可通过 /recover 读取主 agent 放入 sharedStore 的内容 |\r
+\r\n### 使用场景\r
+\r\n1. **超大输出截断后找回：** Bash 输出超 8000 token 被 truncateToolOutput() 截断，调用 /recover 取原始数据\r\n2. **跨子 agent 数据传递：** 主 agent archive() → sharedStore → 子 agent /recover 读取\r\n3. **诊断调试：** 在 fail 信息中看到 ContentArchive 引用时（Point B），/recover 读取存档线索\r\n4. **子 agent 自救：** 子 agent 使用共享 tool 导致异常，/recover 查看主 agent 先前上下文\r
+\r\n### 约束\r\r
+- 不封装 archive()：工具模型不应直接写 archive（应通过工具结果自然触发 archive）\r
+- 不暴露内部 TTL/priority：recover 对模型是黑箱寻址\r
+- expired 条目返回 undefined 而非错误信息\r\n

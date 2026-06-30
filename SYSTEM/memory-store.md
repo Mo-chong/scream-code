@@ -861,3 +861,175 @@ await this.agent.memoStore.search("query");
 
 - `hermit` 标签未加入保护名单（如有需要可补）
 - 无对外暴露的 `recalcRecallCountFromLog()` 的 CLI/API 调用入口（需手动调 `store.recalcRecallCountFromLog()`）
+
+---
+
+## 十五、12痛点修复（2026-06-28）
+
+以下 12 个痛点修复是记忆系统上线后基于真实使用反馈的集中优化，覆盖评分、去重、存储、标签四个模块。
+
+### 15.1 概述
+
+| 痛点 | 文件 | 改动摘要 |
+|------|------|---------|
+| P1-1 | `scoring.ts` | CJK Bigram 提升中文召回精度 |
+| P1-2 | `scoring.ts` | usageBoost NaN 防御 |
+| P1-3 | `scoring.ts` | TIER_RANK 从内联升级为模块常量（重构） |
+| P1-4 | `consolidator.ts` | splitClaims 分隔符扩充到 12 个 |
+| P1-5 | `store.ts` | critical 层级豁免淘汰 |
+| P1-6 | `consolidator.ts` | CLAIMS_OVERLAP_MIN_MATCH = 2 + 单字保护 |
+| P2-1 | `store.ts` | search() 可选 scope:'all' 跨项目参数 |
+| P2-2 | `store.ts` | 向量维度漂移告警 |
+| P2-3 | `tags.ts` | TAG_CONFIG 扩容 |
+| P3-1 | `consolidator.ts` | toLowerCase 大小写不敏感 | 
+| P3-2 | `store.ts` | promote() recallCount:0 修复（双计数 bug） |
+| P3-3 | `store.ts` | tier + recordedAt 排序防御 |
+
+### 15.2 P1-1: CJK Bigram（中文双字组合评分）
+
+**文件**: `packages/memory/src/scoring.ts` L268-271
+
+**问题**: 中文短句搜索时，原有的单字匹配或全句匹配命中率低。
+
+**修复**: 所有相邻双字组合（bigram）参与评分。例如"今天天气好"拆为[今天, 天天, 天气, 气好]分别评分。
+
+```typescript
+// 中文连续双字组合（bigram）
+if (isCJK) {
+  for (let i = 0; i < a.length - 1; i++) {
+    const bigram = a.substring(i, i + 2);
+    if (searchText.includes(bigram)) matches++;
+  }
+}
+```
+
+### 15.3 P1-2: usageBoost NaN 防御
+
+**文件**: `packages/memory/src/scoring.ts` L110
+
+**问题**: 记忆无 `usageCount` 时，`usageCount * 0.1` 产生 NaN，污染总评分。
+
+**修复**: `(usageCount ?? 0) * 0.1`
+
+```typescript
+usageBoost: Math.min(0.3, (usageCount ?? 0) * 0.1),
+```
+
+### 15.4 P1-3: TIER_RANK 模块常量
+
+**文件**: `packages/memory/src/scoring.ts`（原内联 → 模块级常量）
+
+**问题**: `tierScores[tier]` 在内联函数中硬编码排序映射，重复分布。
+
+**修复**: 提升为模块常量：
+```typescript
+const TIER_RANK: Record<string, number> = {
+  vital: 5, high: 4, normal: 3, low: 2, archive: 1, critical: 6
+};
+```
+同时在 `store.ts` L1334-1341 引用同一常量排序。
+
+### 15.5 P1-4: splitClaims 分隔符扩充
+
+**文件**: `packages/memory/src/consolidator.ts` L286-290
+
+**问题**: 原分隔符只支持英文 `;`，无法拆解中文顿号/逗号/句号分隔的多句子记忆。
+
+**修复**: 正则扩充到 12 个中英文分隔符：
+```typescript
+/[；;。.!！?？，,\n\r]+/
+```
+
+### 15.6 P1-5: critical 豁免淘汰
+
+**文件**: `packages/memory/src/store.ts` L1326-1328
+
+**问题**: critical 级别的 bug/故障记忆应当长期保留，但旧代码按统一阈值淘汰。
+
+**修复**: critical 层级直接跳过淘汰检查：
+```typescript
+if (memo.valueTier === 'critical') { /* critical 豁免》*/ continue; }
+```
+
+### 15.7 P1-6: CLAIMS_OVERLAP_MIN_MATCH + 单字保护
+
+**文件**: `packages/memory/src/consolidator.ts` L321-335
+
+**问题**: 合并检测阈值过低，短词（单字）也被拖进重叠匹配，导致不该合并的条目被合并。
+
+**修复**: 
+- `CLAIMS_OVERLAP_MIN_MATCH` 从 1 提至 2
+- 单字 token 仅当两端单词相同才计入重叠（`leftToken === rightToken`）
+
+### 15.8 P2-1: search() 可选 scope:'all' 参数
+
+**文件**: `packages/memory/src/store.ts` L199-225
+
+**功能**: 扩展 `search()` 签名支持 `scope?: 'session' | 'all'`。默认 `'session'` 行为不变（限当前 projectDir），传 `'all'` 时不加 projectDir 过滤实现跨项目搜索。
+
+**背景**: 原始代码在 `projectDir` 未传时已隐式支持跨项目；此改动将能力从隐式变为显式参数。
+
+### 15.9 P2-2: 向量维度漂移告警
+
+**文件**: `packages/memory/src/store.ts` L936-940
+
+**问题**: embedding 模型变更有时候导致存储向量维度与当前维度不匹配，静默出错。
+
+**修复**: 搜索时校验维度并输出警告日志：
+```typescript
+if (queryVector.length !== this.config.dims) {
+  console.warn(`[MemoryStore] 向量维度不匹配: 查询 ${queryVector.length} 维, 存储 ${this.config.dims} 维`);
+}
+```
+
+### 15.10 P2-3: TAG_CONFIG 扩容
+
+**文件**: `packages/memory/src/tags.ts`
+
+**问题**: 中文标签多，旧配置（maxConcepts: 5, maxTotal: 10, initialCap: 128）频繁触发截断。
+
+**修复**: 
+```typescript
+export const TAG_CONFIG = {
+  SMARTTAGS_MAX_CONCEPTS: 10,
+  SMARTTAGS_MAX_TOTAL: 20,
+  PROCESSTAGS_INITIAL_CAP: 999,
+};
+```
+
+### 15.11 P3-1: consolidator toLowerCase 大小写不敏感
+
+**文件**: `packages/memory/src/consolidator.ts` L327
+
+**问题**: claimsOverlap 匹配时比较 token 未统一转小写，`"Learn"` 与 `"learn"` 误判为不重叠。
+
+**修复**:
+```typescript
+// 原: if (aWords[i] === bWords[j])
+// 改为:
+if (aWords[i].toLowerCase() === bWords[j].toLowerCase())
+```
+
+### 15.12 P3-2: promote() recallCount:0 双计数 bug
+
+**文件**: `packages/memory/src/store.ts` L1208-1212
+
+**问题**: `promote()` 调用 `calculateRecallCount()` 后再 `recordRecall()`，但 `recordRecall()` 内部也会调用 `calculateRecallCount()`，导致 `recallCount` 在 promote 时被双倍计数。
+
+**修复**: promote 路线走 `recallCount: 0` 分支，只从日志重算不额外加 1：
+```typescript
+recallCount: 0,  // 走 calculateRecallCount 从日志重算
+```
+
+### 15.13 P3-3: tier + recordedAt 排序防御
+
+**文件**: `packages/memory/src/store.ts` L1334-1341
+
+**问题**: 排序比较中 `recordedAt` 可能为 `undefined`，导致 `NaN` 排序异常。
+
+**修复**: `(recordedAt ?? 0)` 兜底 + 按 TIER_RANK 分层排序：
+```typescript
+const tierCompare = (TIER_RANK[b.valueTier] ?? 0) - (TIER_RANK[a.valueTier] ?? 0);
+if (tierCompare !== 0) return tierCompare;
+return ((b.recordedAt ?? 0) - (a.recordedAt ?? 0));
+```
