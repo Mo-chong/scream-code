@@ -30,7 +30,9 @@ import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
 import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, type WeightLevel } from './variant-registry';
+import { injectStuckInjector } from './injectors/stuck';
+
+import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, getScore, type WeightLevel } from './variant-registry';
 import { TurnEventLog } from './event-log';
 import { EventSnapshotBuffer } from './event-snapshot';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
@@ -192,6 +194,17 @@ export class TurnFlow {
   // ── Inject budget (Phase 5) ───────────────────────────────────
   private readonly injectBudget = new InjectBudget();
 
+  // ── Phase 21: Stuck injection state ───────────────────────────
+  /** 上次注入 system_ref_stuck 的 step (-1 = 从未注入) */
+  private stuckInjectedAtStep = -1;
+  /** 本轮 Edit 的文件路径（用于 stuck 检测） */
+  private editFileThisStep: string | undefined;
+  /** 本轮工具报错（用于 stuck 检测） */
+  private toolErrorThisStep: string | undefined;
+  /** 文件编辑历史 (最近 30 次) */
+  private editFileHistory: string[] = [];
+  /** 工具报错历史 (最近 30 次) */
+  private errorHistory: string[] = [];
   // ── Interception event log (Phase 10) ──────────────────────────
   private readonly eventLog = new TurnEventLog();
 
@@ -1214,7 +1227,10 @@ export class TurnFlow {
                   }
                   this.hasWriteToolsThisStep = true;
                   // D1 (Phase 17): Track modified paths so subsequent reads count as verification
-                  if (editPath) this.recentlyModifiedPathsThisTurn.add(editPath);
+                  if (editPath) {
+                    this.recentlyModifiedPathsThisTurn.add(editPath);
+                    this.editFileThisStep = editPath; // Phase 21: track for stuck detection
+                  }
                 }
                 if (ctx.toolCall.name === 'Write') {
                   this.hasWriteToolsThisStep = true;
@@ -1247,6 +1263,7 @@ export class TurnFlow {
                 // Parse exit code from tool output
                 const exitMatch = outputText.match(/Command failed with exit code: (\d+)/);
                 this.lastBashExitCode = exitMatch ? Number(exitMatch[1]) : (isError === true ? 1 : 0);
+                if (isError === true) this.toolErrorThisStep = ctx.toolCall.name;
               }
               // Track verify failure for C3
               if (ctx.toolCall.name === 'Bash' && isError === true) {
@@ -1491,6 +1508,16 @@ export class TurnFlow {
     }
     if (variant) this.stepInjectedVariants.add(variant);
 
+    // Phase22.3: 变体配额调度 — 委托 VariantScheduler
+    if (variant && !this.agent.injection.canInject(variant, this.currentStep)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_quota',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Quota denies ${variant} (count=${this.agent.injection.getInjectionCount(variant)})`,
+      });
+      return;
+    }
+
     const estimatedTokens = Math.ceil(text.length / 4);
     const level = detectWeightLevel(text);
     const effectiveLevel = this.getEffectiveLevel(meta, level);
@@ -1525,9 +1552,13 @@ export class TurnFlow {
 
     // 注册到 VariantRegistry（残差系统依赖）
     if (variant) {
-      this.variantRegistry.record(variant, effectiveLevel, this.currentStep);
+      this.variantRegistry.record(variant, 'D' as any, this.currentStep);
     }
-    this.injectBudget.syncVariantCount(this.variantRegistry.size);
+
+    // Phase22.3: 记录到 VariantScheduler
+    if (variant) {
+      this.agent.injection.afterInject(variant, this.currentStep);
+    }
 
     this.eventLog.record({
       kind: 'injection_delivered', variant: variant ?? '', action: 'injected',
@@ -1575,14 +1606,27 @@ export class TurnFlow {
     this.injectInterceptionSummary();
     this.checkEventLogHealth();
 
-    // Step 5: 检测器序列（scene, guard, behavior rules）
+    // Step 5: 检测器序列（scene, guard, behavior rules, stuck）
     this.detectSceneMemoryIssue();
+    this.stuckInjectedAtStep = injectStuckInjector(
+      (msg, meta) => this.inject(msg, { kind: 'injection', ...meta }),
+      this.currentStep,
+      this.stuckInjectedAtStep,
+      this.stepInjectedVariants,
+      this.editFileThisStep,
+      this.toolErrorThisStep,
+      this.editFileHistory,
+      this.errorHistory,
+    );
     await this.runGuardDetection();
     await this.injectBehaviorRulesAfterStep();
 
     // Step 6: 正反馈 + CodeRef
     this.injectPositiveFeedbackThisTurn();
     this.detectCodeRefIssue();
+
+    // Phase22.2: 收集注入器状态为 flat facts，可选注入
+    // (由 Phase22.3 VariantScheduler 通过 manage.ts 门控注入)
 
     // Step 7: 重置
     this.resetInjectorStepState();
@@ -1886,7 +1930,15 @@ export class TurnFlow {
                   `  ${e.action} — ${e.resultPreview}  (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`
                 ).join('\n')}`
               : '';
-            return `A required tool (${this.lastToolFailure.toolName}) failed this turn. Analyze the error and fix it before reporting completion.${faaSnippet}`;
+            // 三级分类：BLOCKER（验证失败）/ CRITICAL（OOM/超时）/ WARNING（其他）
+            if (this.verifyFailedThisStep) {
+              return `Step verification failed (${this.lastToolFailure.toolName})。不要跳过验证，修复根因后继续。${faaSnippet}`;
+            }
+            const criticalExit = this.lastBashExitCode;
+            if (criticalExit === 137 || criticalExit === 124) {
+              return `工具 ${this.lastToolFailure.toolName} 异常退出 (exit ${criticalExit})。可能资源耗尽或超时，检查状态后重试。${faaSnippet}`;
+            }
+            return `工具 ${this.lastToolFailure.toolName} 报告错误。检查最近的输出修复它。${faaSnippet}`;
           }
           return null;
         },
@@ -1987,6 +2039,9 @@ export class TurnFlow {
     this.lastStepCalledMemoryLookup = false;
     this.hasCurrentCodeToolsThisStep = false;
     this.stepToolCounts = {};
+    // Phase 21: reset per-step state for stuck injection
+    this.editFileThisStep = undefined;
+    this.toolErrorThisStep = undefined;
   }
 
   private turnHadMeaningfulWork(): boolean {

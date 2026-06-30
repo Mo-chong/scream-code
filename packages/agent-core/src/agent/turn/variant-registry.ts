@@ -75,6 +75,16 @@ export class VariantRegistry {
   /**
    * 获取已过期的变体（注入超过 N 步仍未观察到行为）。
    */
+  /** 获取该变体累计触发次数（Phase22.2 facts 用） */
+  getInjectionCount(variant: string): number {
+    return this.records.get(variant)?.triggerCount ?? 0;
+  }
+
+  /** 获取该变体最后一次注入的 step（Phase22.2 facts 用） */
+  getLastStep(variant: string): number {
+    return this.records.get(variant)?.stepInjected ?? -1;
+  }
+
   getStale(currentStep: number, maxAge: number): VariantRecord[] {
     const result: VariantRecord[] = [];
     for (const record of this.records.values()) {
@@ -258,6 +268,12 @@ export interface VariantMeta {
   interceptThreshold?: number;
 }
 
+export function getScore(variant: string, stepDelta: number): number {
+  const meta = VARIANT_META[variant];
+  if (!meta) return 0;
+  return meta.weight * Math.pow(meta.decayPerStep, stepDelta);
+}
+
 export const VARIANT_META: Record<string, VariantMeta> = {
   // system_trigger / 紧急 → 永不跳过（死代码保留行，万一 inject() 前移逻辑需要；当前 system_trigger 在 inject() 顶部提前返回）
   system_trigger:              { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
@@ -356,4 +372,87 @@ export function shortenText(text: string): string {
   if (imperative) return imperative;
   // 回退到第一条非空行
   return lines[0] ?? text;
+}
+
+// ── Phase22.3: 配额系统 ──────────────────────────────────────────
+
+export interface QuotaConfig {
+  /** 整轮对话该变体最大注入次数 */
+  maxPerConversation: number;
+  /** 注入后冷却步数 */
+  cooldownSteps: number;
+  /** 滑动窗口大小 */
+  windowSteps?: number;
+}
+
+export const QUOTA_TABLE: Record<string, QuotaConfig> = {
+  default: { maxPerConversation: 20, cooldownSteps: 1, windowSteps: 100 },
+  low: { maxPerConversation: 8, cooldownSteps: 3, windowSteps: 50 },
+};
+
+// ── Phase22.3: 变体调度器 ─────────────────────────────────────────
+
+export class VariantScheduler {
+  private records: Record<string, { count: number; lastStep: number; slotWindow: number[] }> = {};
+
+  constructor(private currentStep: number = 0) {}
+
+  setStep(step: number): void {
+    this.currentStep = step;
+  }
+
+  shouldInject(variant: string, currentStep: number): boolean {
+    const meta = VARIANT_META[variant];
+    if (!meta) return false;
+
+    const rec = this.records[variant];
+    if (!rec) return true;
+
+    const delta = currentStep - rec.lastStep;
+
+    if (delta < meta.minStepGap) return false;
+
+    const quotaKey = 'default';
+    const quota = QUOTA_TABLE[quotaKey];
+    if (quota) {
+      if (delta < quota.cooldownSteps) return false;
+      if (rec.count >= quota.maxPerConversation) return false;
+      if (quota.windowSteps && rec.slotWindow.length >= quota.windowSteps) {
+        const oldest = rec.slotWindow[0];
+        if (oldest !== undefined && currentStep - oldest < quota.windowSteps) return false;
+      }
+    }
+
+    return true;
+  }
+
+  record(variant: string, currentStep: number): void {
+    if (!this.records[variant]) {
+      this.records[variant] = { count: 0, lastStep: -1, slotWindow: [] };
+    }
+    const rec = this.records[variant];
+    rec.count++;
+    rec.lastStep = currentStep;
+    rec.slotWindow.push(currentStep);
+  }
+
+  reset(): void {
+    this.records = {};
+  }
+
+  getInjectionCount(variant: string): number {
+    return this.records[variant]?.count ?? 0;
+  }
+
+  getLastStep(variant: string): number {
+    return this.records[variant]?.lastStep ?? -1;
+  }
+
+  getAllCounts(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [k, v] of Object.entries(this.records)) {
+      result[k] = v.count;
+    }
+    return result;
+  }
 }

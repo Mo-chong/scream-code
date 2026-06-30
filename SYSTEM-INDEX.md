@@ -13,24 +13,27 @@
 → 不需要每次从零查源码
 ```
 
+> **整体架构分层图 → `SYSTEM/architecture-overview.md`**（第0层Monorepo→第4层外部系统，看完再查子系统）
+
 ---
 
 ## 索引表
 
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
+| **整体架构(分层图)** | `SYSTEM/architecture-overview.md` | ☑ **优先读这个**：0→4层完整分层，大架构套小架构，看完再查具体模块 |
 | **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）**；**recallCount 增强：记录召回次数、降级保护（baohu/ding/yongjiu/chundu）、search blend (relevance×0.7 + heatScore×0.3)、recalcRecallCountFromLog 运维工具**；**§十五: 12痛点修复（2026-06-28）**：CJK Bigram 中文召回、usageBoost NaN 防御、TIER_RANK 模块常量、splitClaims 12分割符、critical 豁免淘汰、CLAIMS_OVERLAP 阈值提升+单字保护、scope:'all' 跨项目参数、向量漂移告警、TAG_CONFIG 扩容、toLowerCase 大小写不敏感、promote 双计数 bug 修复、tier+recalledAt 排序防御 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
-| **注入系统** | `SYSTEM/injection-system.md` | inject() 三种优先级 + InjectionManager + VariantRegistry |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler + **残差注意力门控 R=W×D^Δs** + QUOTA_TABLE per-conversation 配额 |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl`。**§11.4 Phase20 Bash 降噪**：builder 级 ANSI 剥离 + 重复行去重 + quality 简洁指令 |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ maskToolObservations（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
-| **整体架构** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
-| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、**v0.7 升级合并踩坑、策略层防御模式、merge SOP、Observation Masking 压缩路径漏遮、构建卡 prepare 脚本** |
+| **Agent 类架构(细节)** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
+| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、**v0.7 升级合并踩坑、策略层防御模式、merge SOP、Observation Masking 压缩路径漏遮、构建卡 prepare 脚本、Phase22 4 坑（protected 字段炸 snapshot/getScore checkout 回滚/record 签名不匹配/全 protected 死循环）** |
 | **Phase14：可执行优化** 🆕 | `SYSTEM/Phase14-可执行优化.md` | afterStep 分段命名化 + 收敛条件数组化 + 跨回合标记 + 模块减肥 |
 | **Phase15：行为偏差拦截通道** 🆕 | `SYSTEM/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
 | **行为矫正方案** | `../DECISIONS/行为矫正系统-完整实战方案.md` | 融合 Guard + 记忆注入 + 收敛门的完整计划 |
@@ -54,6 +57,14 @@
 | system_trigger 是什么 | `SYSTEM/injection-system.md` §system_trigger |
 | 收敛门怎么拦住 AI | `SYSTEM/turn-control.md` §收敛门 |
 | Guard 什么时候触发 | `SYSTEM/guard-engine.md` §触发时机 |
+| **注入 ResNet 残差调度** | `SYSTEM/injection-system.md` §variant-registry L319-345 |
+| **VariantScheduler 配额调度** | `SYSTEM/API-REFERENCE.md` §22.5 |
+| **QUOTA_TABLE 配额表** | `SYSTEM/API-REFERENCE.md` §22.5 |
+| **protected compaction 保护** | `SYSTEM/API-REFERENCE.md` §22.1-22.4 |
+| **collectInjectorFacts** | `SYSTEM/API-REFERENCE.md` §22.8 |
+| **InjectionManager 占位方法** | `SYSTEM/API-REFERENCE.md` §22.7 |
+| **记忆 ResNet 衰减因子** | `SYSTEM/memory-store.md` §热冷升降 / `scoring.ts` §resNetFactors |
+| **两套 ResNet 什么关系** | `Phase21.1-深度分析-系统引用重构方案.md` §四 |
 | /memory + i 键的完整链路 | `SYSTEM/cli-tui.md` §memory-命令 |
 | 回合生命周期 | `SYSTEM/turn-control.md` §生命周期 |
 | AI 编造怎么检测 | `SYSTEM/guard-engine.md` §反事实检测 |
@@ -114,7 +125,9 @@
 | FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
 | vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
 | 热冷升降触发条件 | store.ts §promote/demote/autoDemote/autoPromote |
-| ResNet 衰减因子 | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |
+| ResNet 衰减因子（记忆） | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |
+| **ResNet 残差调度（注入）** | **variant-registry.ts §shouldInjectByResidual (L319-345, R = W × D^Δs)** |
+| **两套 ResNet 对比** | **`ZHU/DECISIONS/Phase21.1-深度分析-系统引用重构方案.md` §四** |
 | sqlite-vec 初始化 | store.ts §_doInit + `@photostructure/sqlite-vec` |
 | 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
 
@@ -141,7 +154,7 @@
     agent/index.ts                → Agent 类（所有子系统的容器）
     agent/turn/index.ts           → 回合控制核心（1737 行）
     agent/context/index.ts        → appendUserMessage / appendSystemReminder
-    agent/injection/manager.ts    → InjectionManager（6 个 injector）
+    agent/injection/manager.ts    → InjectionManager（5 个 injector，Phase21 移除 system-ref）
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
     tools/builtin/memory/
@@ -179,4 +192,33 @@ CLI/TUI 源码:
 | system_trigger 穿透预算 | turn/index.ts:1356-1359 | 收敛门注入不受 budget 限制 |
 | sendNormalUserInput ≠ inject | context/index.ts:75-80 vs 83-91 | 前者是普通用户消息，后者是 <system-reminder> |
 | inject('injection') 受 5 重限制 | turn/index.ts:1368-1419 | 重复衰减→残差→去重→预算→注册 |
+| **system-ref 废弃 → stuck 注入器 (Phase21)** | turn/injectors/stuck.ts + turn/index.ts:1579-1598 + variant-registry.ts:313 | 旧 system-ref.ts DynamicInjector 绕过所有 guard 被删除；替代为 stuck 注入器走残差系统。检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步），受 budget/dedup/残差三重门控。验收中修复残差起始值 bug（currentStep→0）并清理 3 处死代码 |
+| **ResNet 双系统** | variant-registry.ts L319-345 + store.ts:1281-1287 + scoring.ts:162-163 | 记忆 ResNet（天级幂衰减）+ 注入调度 ResNet（步级幂衰减），公式均为 R = W×D^Δs |
+
 ---
+
+## 关键词 → 文档映射表 (Phase21 动态生成)
+
+> 关键词为文件名去扩展名+去连字符后自动提取。原 `detectSystemRefIssue` 已于 Phase21.2 清理中删除；
+> 保留此表作为 SYTEM/ZHU 文档结构参考。
+
+| 文件名 | 自动关键词 | 说明 |
+|--------|-----------|------|
+| `SYSTEM/context-management.md` | context management | 四层架构核心文档 |
+| `SYSTEM/API-REFERENCE.md` | API REFERENCE | API 签名索引（§1-§22） |
+| `SYSTEM/architecture.md` | architecture | 整体架构 |
+| `SYSTEM/cli-tui.md` | cli tui | CLI/TUI 层 |
+| `SYSTEM/compaction.md` | compaction | 上下文压缩（旧版） |
+| `SYSTEM/dream.md` | dream | Dream 整理系统 |
+| `SYSTEM/guard-engine.md` | guard engine | Guard 规则引擎 |
+| `SYSTEM/injection-system.md` | injection system | 注入系统 |
+| `SYSTEM/interception.md` | interception | 拦截日志 |
+| `SYSTEM/mcp-server.md` | mcp server | MCP 服务器集成 |
+| `SYSTEM/memory-store.md` | memory store | 记忆系统 |
+| `SYSTEM/pitfalls.md` | pitfalls | 踩坑记录 |
+| `SYSTEM/turn-control.md` | turn control | 回合控制 |
+| `SYSTEM/Phase14-可执行优化.md` | Phase14 可执行优化 | Phase14 文档 |
+| `SYSTEM/Phase15-行为偏差拦截通道.md` | Phase15 行为偏差拦截通道 | Phase15 文档 |
+| `SYSTEM-INDEX.md` | INDEX | 本索引文件 |
+| `ZHU/DECISIONS/INDEX.md` | DECISIONS INDEX | 决策演化追踪 |
+| `ZHU/DECISIONS/*.md` | (文件名自动提取) | 各 Phase 决策文档 |

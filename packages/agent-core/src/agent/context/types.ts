@@ -78,6 +78,8 @@ export type PromptOrigin =
 export type ContextMessage = Message & {
   readonly origin?: PromptOrigin | undefined;
   readonly isError?: boolean;
+  /** compaction 时跳过此条消息 */
+  readonly protected?: boolean;
 };
 
 export interface UserMessageRecord {
@@ -88,6 +90,8 @@ export interface UserMessageRecord {
 export interface SystemReminderRecord {
   content: string;
   origin: PromptOrigin;
+  /** S/A 级 → true → compaction 跳过 */
+  protected?: boolean;
 }
 
 export interface AgentContextData {

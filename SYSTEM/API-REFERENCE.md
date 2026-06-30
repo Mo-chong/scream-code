@@ -536,6 +536,7 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 | guard_feedback_rule_2 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
 | guard_feedback_rule_3 | **0.8** | 0.85 | 0.35 | 4 | **2** | S→S ×2 → deviation chain (higher W + lower threshold) |
 | guard_feedback_rule_4 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
+| system_ref_stuck | 0.5 | 0.85 | 0.30 | 3 | — | Phase21: 痛点感知，取代旧 system-ref 无脑周期注入 |
 | scene_memory_recall | 0.8 | 0.88 | 0.30 | 5 | **3** | S→S ×3 → deviation chain |
 | intent_* (all 6) | 0.7-0.9 | 0.88-0.92 | 0.30 | 0 | — | Injected once at turn start |
 
@@ -1223,23 +1224,39 @@ getRecentEntries(n: number): FileActionAuditEntry[] {\r
   return [...this.recentEntries].reverse().slice(0, n)\r
 }\r\n```\r
 \r
-#### 查错自动注入（turn/index.ts L1882-1889）\r
-\r\n**链路：** tool 执行失败 → `lastToolFailure` 非 exploratory 且未经验证 → 附加最近 5 条 FAA 记录到失败提示\r
+#### 查错自动注入 — FAA 三级分类（turn/index.ts L1907-1925）\r
+\r\n**链路：** tool 执行失败 → `lastToolFailure.isExploratory === false && !hasPassed` → **三级分类**决定注入模板\r
+\r
+**三级分类：**\r
+\r
+| 级别 | 触发条件 | 注入模板 | FAA audit |\r
+|------|---------|---------|-----------|\r
+| BLOCKER | `this.verifyFailedThisStep === true` | 验证失败，不要跳过 | ✅ 全量 |\r
+| CRITICAL | `this.lastBashExitCode ∈ {137, 124}` | 异常退出（OOM/超时） | ✅ 全量 |\r
+| WARNING | 其他错误 | 报告错误，检查输出 | ✅ 全量 |\r
 \r
 ```typescript\r
-// turn/index.ts — formatToolFailureFeedback()\r
+// turn/index.ts — FAA convergence_gate checker\r
 if (this.lastToolFailure?.isExploratory === false && !hasPassed) {\r
-  const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5)\r
+  const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5);\r
   const faaSnippet = faaEntries?.length\r
     ? `\\n\\nRecent file audit entries:\\n${faaEntries.map(e =>\r
         `  ${e.action} — ${e.resultPreview} (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`\r
       ).join('\\n')}`\r
-    : ''\r
-  return `A required tool failed this turn.${faasSnippet}`\r
+    : '';\r
+  // 三级分类：BLOCKER（验证失败）/ CRITICAL（OOM/超时）/ WARNING（其他）\r
+  if (this.verifyFailedThisStep) {\r
+    return `Step verification failed (${this.lastToolFailure.toolName})。不要跳过验证，修复根因后继续。${faaSnippet}`;\r
+  }\r
+  const criticalExit = this.lastBashExitCode;\r
+  if (criticalExit === 137 || criticalExit === 124) {\r
+    return `工具 ${this.lastToolFailure.toolName} 异常退出 (exit ${criticalExit})。可能资源耗尽或超时，检查状态后重试。${faaSnippet}`;\r
+  }\r
+  return `工具 ${this.lastToolFailure.toolName} 报告错误。检查最近的输出修复它。${faaSnippet}`;\r
 }\r
 ```\r
 \r
-注入仅在 `file-action-audit` flag 开启时生效（空安全 `?.` 调用）。\r
+注入仅在 `file-action-audit` flag 开启时生效（空安全 `?.` 调用），不扩展 `lastToolFailure` 类型（只消费已有的 `lastBashExitCode` / `verifyFailedThisStep`）。\r
 \r
 ### Integration flow\r
 \r
@@ -1388,4 +1405,151 @@ bash stdout
 `test/tools/result-builder.test.ts` 新增 3 个 Phase20 测试用例：
 1. `strips ANSI escape sequences when sanitize is true`
 2. `collapses \r-only progress lines when sanitize is true`
-3. `preserves output unchanged when sanitize is false (default)`\r\n
+3. `preserves output unchanged when sanitize is false (default)`
+
+---
+
+## §22 Phase22：指令权重与注入器体系升级
+
+> 设计文档：`SYSTEM/injection-system.md`
+
+### 22.1 ContextMessage.protected（compaction 保护）
+
+**文件**：`agent/context/types.ts`
+
+```typescript
+export interface SystemReminderRecord {
+  content: string;
+  origin: PromptOrigin;
+  protected?: boolean;  // true → compaction 跳过
+}
+
+export type ContextMessage = Message & {
+  readonly origin?: PromptOrigin | undefined;
+  readonly isError?: boolean;
+  readonly protected?: boolean;  // Phase22.2
+};
+```
+
+**设计原则**：只传 `true` 时不传 `false`，避免 snapshot 字段差异。
+
+### 22.2 appendSystemReminder（三参签名）
+
+**文件**：`agent/context/index.ts`
+
+```typescript
+appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): SystemReminderRecord
+```
+
+- 第三参 `isProtected` 控制 `protected` 字段
+- `isProtected` 默认未传（`undefined`）→ 不设置字段
+- 调用示例：`appendSystemReminder(msg, 'system', true)`
+
+### 22.3 protectHighLevelReminders
+
+**文件**：`agent/context/index.ts`
+
+```typescript
+protectHighLevelReminders(highOrigins: Set<string>): void
+```
+
+- 遍历 `this._history`，对 `String(msg.origin)` 匹配 `highOrigins` 的消息设置 `protected: true`
+- 在 `applyCompaction()` 末尾调用：`protectHighLevelReminders(new Set(['system', 'scream_code']))`
+- ⚠️ 设计缺陷：compaction 后历史已被替换为摘要，此时标记 protected 已无实际效果（待后期修复）
+
+### 22.4 compaction：protected 消息跳过 + _maxTries 安全门控
+
+**文件**：`agent/compaction/full.ts`
+
+```typescript
+let messagesToCompact: ContextMessage[] = [];
+let _maxTries = originalHistory.length * 2;
+while (messagesToCompact.length < compactedCount && _idx < originalHistory.length && _maxTries-- > 0) {
+  const m = originalHistory[_idx++];
+  if (m && !m.protected) messagesToCompact.push(m);
+}
+```
+
+- `protected` 消息被跳过，不会被压缩摘要替换
+- `_maxTries` 防止全 protected 时 while 死循环
+
+### 22.5 VariantScheduler + QUOTA_TABLE
+
+**文件**：`agent/turn/variant-registry.ts`
+
+```typescript
+export const QUOTA_TABLE: Record<string, QuotaConfig> = {
+  default: { maxPerConversation: 20, cooldownSteps: 1, windowSteps: 100 },
+  low:    { maxPerConversation: 10, cooldownSteps: 3, windowSteps: 50 },
+};
+
+export class VariantScheduler {
+  shouldInject(variant: string, currentStep: number): boolean { ... }
+  record(variant: string, currentStep: number): void { ... }
+  reset(): void { ... }
+  getInjectionCount(variant: string): number { ... }
+  getLastStep(variant: string): number | undefined { ... }
+}
+```
+
+- `shouldInject`：检查配额、冷却、窗口频率三条件
+- `record`：记录一次注入（更新计数 + 最后步号）
+- `reset`：清空所有调度记录（用于 turn 重置）
+- `QUOTA_TABLE.default`：20 次/会话，1 步冷却，100 步窗口
+- `QUOTA_TABLE.low`：10 次/会话，3 步冷却，50 步窗口
+
+### 22.6 VariantRegistry 新增方法
+
+**文件**：`agent/turn/variant-registry.ts`
+
+```typescript
+class VariantRegistry {
+  getInjectionCount(variant: string): number    // 通过 VariantScheduler 查
+  getLastStep(variant: string): number | undefined
+}
+
+export function getScore(variant: string, stepDelta: number): number  // 恢复导出
+```
+
+### 22.7 InjectionManager 配额调度方法（已实现）
+
+**文件**：`agent/injection/manager.ts`
+
+```typescript
+class InjectionManager {
+  canInject(variant: string, currentStep: number): boolean;
+  getInjectionCount(variant: string): number;
+  afterInject(variant: string, currentStep: number): void;
+  resetForTurn(): void;
+}
+```
+
+- `canInject(variant, step)` → `scheduler.shouldInject(variant, step)` — 四层配额检查
+- `getInjectionCount(variant)` → `scheduler.getInjectionCount(variant)` — 查询已注入次数
+- `afterInject(variant, step)` → `scheduler.record(variant, step)` — 注入后更新计数器
+- `resetForTurn()` → `scheduler.reset()` — 回合重置清空调度器
+
+调用链：`TurnFlow.inject()` 注入前调 `canInject()` 做配额检查（超限则跳过+记录`injection_skipped`），注入后调 `afterInject()`。
+
+### 22.8 collectInjectorFacts
+
+**文件**：`agent/turn/injectors/facts.ts`
+
+```typescript
+export function collectInjectorFacts(
+  variantRegistry: { getInjectionCount: (v: string) => number; getLastStep: (v: string) => number | undefined },
+  getScore: (variant: string, stepDelta: number) => number,
+  currentStep: number,
+  variantMeta: Record<string, VariantMeta>,
+  budgetRemaining: number,
+  stepInjectionCount: number,
+): string
+```
+
+- 收集注入器调度事实，生成自然语言描述
+- 当前未被 `handleAfterStep` 调用（占位阶段）
+- 需通过 VariantScheduler 门控接入后启用
+
+### 22.9 测试
+
+详见 `test/agent-core/agent/agent.injection.test.ts`：19 个测试用例覆盖 manager/plan-mode/plugin-session-start。\r\n

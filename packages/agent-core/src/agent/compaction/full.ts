@@ -21,6 +21,7 @@ import {
   sleepForRetry,
 } from '../../loop/retry';
 import { renderPrompt } from '../../utils/render-prompt';
+import type { ContextMessage } from '../context';
 import {
   estimateTokens,
   estimateTokensForMessages,
@@ -350,7 +351,16 @@ export class FullCompaction {
       let usage: TokenUsage | null;
       let summary: string;
       while (true) {
-        const messagesToCompact = originalHistory.slice(0, compactedCount);
+        // Phase22.2: 跳过 protected 消息（S/A 级 system reminders，不被压缩）
+        const messagesToCompact: ContextMessage[] = [];
+        let _idx = 0;
+        let _maxTries = originalHistory.length * 2; // 安全门控：防止全 protected 死循环
+        while (messagesToCompact.length < compactedCount && _idx < originalHistory.length && _maxTries-- > 0) {
+          const m = originalHistory[_idx++];
+          if (m && !m.protected) {
+            messagesToCompact.push(m);
+          }
+        }
         const projected = project(messagesToCompact);
         const masked = maskToolObservations(projected, 1);
         const messages = [

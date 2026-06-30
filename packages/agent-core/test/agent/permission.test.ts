@@ -62,15 +62,16 @@ describe('Agent permission', () => {
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 116, "maxContextTokens": 1000000, "contextUsage": 0.000116, "planMode": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "feedback_positive" } }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed auto-output." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The command printed auto-output." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 153, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 153, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 153, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 164, "maxContextTokens": 1000000, "contextUsage": 0.000164, "planMode": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 244, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 244, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 244, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 189, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 189, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 189, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 200, "maxContextTokens": 1000000, "contextUsage": 0.0002, "planMode": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 280, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 280, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 280, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -86,6 +87,8 @@ describe('Agent permission', () => {
           <last>
           assistant: text "Running without asking."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
           tool[call_bash]: text "auto-output"
+          user: text "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>"
+          user: text "<system-reminder>\\n【注入器状态】\\n  code_quality_feedback: level=D count=0 lastStep=-1 score=0.6\\n  deviation_chain_intercept: level=D count=0 lastStep=-1 score=0.99\\n  feedback_positive: level=D count=1 lastStep=1 score=0.6\\n  guard_feedback_rule_1: level=D count=0 lastStep=-1 score=0.81\\n  guard_feedback_rule_2: level=D count=0 lastStep=-1 score=0.6\\n  guard_feedback_rule_3: level=D count=0 lastStep=-1 score=0.68\\n  guard_feedback_rule_4: level=D count=0 lastStep=-1 score=0.6\\n  intent_add_feature: level=D count=0 lastStep=-1 score=0.83\\n  intent_document: level=D count=0 lastStep=-1 score=0.62\\n  intent_fix_bug: level=D count=0 lastStep=-1 score=0.83\\n  intent_refactor: level=D count=0 lastStep=-1 score=0.83\\n  intent_research: level=D count=0 lastStep=-1 score=0.72\\n  intent_review: level=D count=0 lastStep=-1 score=0.72\\n  post_edit: level=D count=0 lastStep=-1 score=0.48\\n  post_memory: level=D count=0 lastStep=-1 score=0.48\\n  post_search: level=D count=0 lastStep=-1 score=0.48\\n  post_verify_fail: level=D count=0 lastStep=-1 score=0.79\\n  post_verify_pass: level=D count=0 lastStep=-1 score=0.4\\n  post_write_large: level=D count=0 lastStep=-1 score=0.4\\n  prepare_bash_file: level=D count=0 lastStep=-1 score=0.41\\n  prepare_edit: level=D count=0 lastStep=-1 score=0.68\\n  prepare_memory: level=D count=0 lastStep=-1 score=0.6\\n  prepare_search: level=D count=0 lastStep=-1 score=0.6\\n  prepare_verify: level=D count=0 lastStep=-1 score=0.68\\n  prepare_write: level=D count=0 lastStep=-1 score=0.68\\n  scene_memory_recall: level=D count=0 lastStep=-1 score=0.7\\n  step_after_edit: level=D count=0 lastStep=-1 score=0.48\\n  step_after_search: level=D count=0 lastStep=-1 score=0.4\\n  step_after_verify_fail: level=D count=0 lastStep=-1 score=0.68\\n  step_code_ref_quality: level=D count=0 lastStep=-1 score=0.43\\n  system_trigger: level=D count=0 lastStep=-1 score=0.99\\n  budget: 250 remaining, 1 this step\\n</system-reminder>"
           user: text "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
@@ -101,6 +104,22 @@ describe('Agent permission', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash in yolo mode' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
+      call 1:
+        system: <system-prompt>
+        tools: Bash
+        messages:
+          user: text "Run Bash in auto mode"
+          user: text <auto-mode-enter-reminder>
+
+      call 2:
+        messages:
+          <last>
+          assistant: text "Running without asking."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
+          tool[call_bash]: text "auto-output"
+          user: text "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>"
+          user: text "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>"
+    `);
+    expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "yolo", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "permission": "yolo" }
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "origin": { "kind": "user" }, "time": "<time>" }
@@ -119,30 +138,17 @@ describe('Agent permission', () => {
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 32, "maxContextTokens": 1000000, "contextUsage": 0.000032, "planMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "feedback_positive" } }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed yolo-output." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The command printed yolo-output." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 69, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 69, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 69, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 80, "maxContextTokens": 1000000, "contextUsage": 0.00008, "planMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 76, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 76, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 76, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 105, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 105, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 105, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 116, "maxContextTokens": 1000000, "contextUsage": 0.000116, "planMode": false, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 112, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 112, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 112, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
-    `);
-    expect(ctx.llmInputs()).toMatchInlineSnapshot(`
-      call 1:
-        system: <system-prompt>
-        tools: Bash
-        messages:
-          user: text "Run Bash in yolo mode"
-
-      call 2:
-        messages:
-          <last>
-          assistant: text "Running in yolo mode."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
-          tool[call_bash]: text "yolo-output"
-          user: text "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -160,6 +166,21 @@ describe('Agent permission', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Back to manual' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
+      call 1:
+        system: <system-prompt>
+        tools: Bash
+        messages:
+          user: text "Run Bash in yolo mode"
+
+      call 2:
+        messages:
+          <last>
+          assistant: text "Running in yolo mode."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
+          tool[call_bash]: text "yolo-output"
+          user: text "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>"
+          user: text "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>"
+    `);
+    expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "manual", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 96, "maxContextTokens": 1000000, "contextUsage": 0.000096, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 89, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 89, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Back to manual" } ], "origin": { "kind": "user" }, "time": "<time>" }
@@ -170,26 +191,12 @@ describe('Agent permission', () => {
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 1, "delta": "Manual turn done." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "1", "step": 1, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "Manual turn done." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "1", "step": 1, "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-3>", "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 169, "maxContextTokens": 1000000, "contextUsage": 0.000169, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 250, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 250, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "1", "step": 1, "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-3>", "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 205, "maxContextTokens": 1000000, "contextUsage": 0.000205, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 286, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 286, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "feedback_positive" } }, "time": "<time>" }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
-    `);
-    expect(ctx.llmInputs()).toMatchInlineSnapshot(`
-      call 1:
-        system: <system-prompt>
-        tools: []
-        messages:
-          user: text "Use auto first"
-          user: text <auto-mode-enter-reminder>
-
-      call 2:
-        messages:
-          <last>
-          assistant: text "Auto turn done."
-          user: text "Back to manual"
-          user: text <auto-mode-exit-reminder>
     `);
     await ctx.expectResumeMatches();
   });
@@ -210,6 +217,22 @@ describe('Agent permission', () => {
     ctx.mockNextResponse({ type: 'text', text: 'I will try Bash.' }, bashCall);
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Try to run Bash' }] });
     expect(await ctx.untilApproval(false)).toMatchInlineSnapshot(`
+      call 1:
+        system: <system-prompt>
+        tools: []
+        messages:
+          user: text "Use auto first"
+          user: text <auto-mode-enter-reminder>
+
+      call 2:
+        messages:
+          <last>
+          assistant: text "Auto turn done."
+          user: text "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>"
+          user: text "Back to manual"
+          user: text <auto-mode-exit-reminder>
+    `);
+    expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Try to run Bash" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Try to run Bash" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
@@ -220,38 +243,13 @@ describe('Agent permission', () => {
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will try Bash." } }, "time": "<time>" }
       [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
     `);
-    expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will not run the command.' });
+    expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       system: <system-prompt>
       tools: Bash
       messages:
         user: text "Try to run Bash"
-    `);
-
-    ctx.mockNextResponse({ type: 'text', text: 'I will not run the command.' });
-    expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "result": { "decision": "rejected", "selectedLabel": "reject" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
-      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "Tool \\"Bash\\" was not run because the user rejected the approval request.", "isError": true } }, "time": "<time>" }
-      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "Tool \\"Bash\\" was not run because the user rejected the approval request.", "isError": true }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 27, "maxContextTokens": 1000000, "contextUsage": 0.000027, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
-      [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
-      [emit] assistant.delta                     { "turnId": 0, "delta": "I will not run the command." }
-      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "I will not run the command." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 91, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 91, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 91, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 101, "maxContextTokens": 1000000, "contextUsage": 0.000101, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 96, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 96, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 96, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nA required tool (Bash) failed this turn. Analyze the error and fix it before reporting completion.\\n\\nDo not report completion until the above is resolved.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "convergence_gate" } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "0", "step": 3 }, "time": "<time>" }
-      [emit] turn.step.started                   { "turnId": 0, "step": 3, "stepId": "<uuid-5>" }
-      [emit] turn.step.interrupted               { "turnId": 0, "step": 3, "reason": "error", "message": "Unexpected generate call #3" }
-      [emit] turn.ended                          { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #3", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
     `);
     await ctx.expectResumeMatches();
   });

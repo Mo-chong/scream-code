@@ -34,6 +34,21 @@
 
 **教训**：YAML 配置的改动都视为代码改动，必须走完整构建链。
 
+### Windows 上 .mjs 无默认关联 → 执行 .mjs 弹出"打开方式"卡死
+
+**问题**：在 Bash 中执行 `node node_modules/vitest/vitest.mjs` 时，Windows 弹出"打开方式"对话框卡死，Bash 超时报错。
+
+**根因**：Windows 注册表中 `.mjs` 扩展名无关联（`assoc .mjs` 返回空），系统不知道用哪个程序执行 `.mjs` 文件。
+
+**解决**：
+```
+cmd.exe /c "assoc .mjs=NodeJSFile"
+cmd.exe /c "ftype NodeJSFile=\"C:\Program Files\nodejs\node.exe\" \"%1\" %*"
+```
+此后 `node node_modules/vitest/vitest.mjs` 可直接正常执行。
+
+**教训**：Git Bash 不处理 Windows 文件关联。遇到 `.mjs` 工具执行卡死，先检查 `assoc .mjs`。根治疗法是用 `cmd.exe` 注册关联到 Node.js。长期方案是养成走 npm scripts（`pnpm test`）或 `npx` 的习惯，避直接调用 `.mjs`。
+
 ### 双构建链（alwaysBundle 陷阱）
 
 **问题**：只 build `agent-core` 后重启，agent.yaml 改动仍不生效。
@@ -1397,4 +1412,88 @@ export async function installUpdate(): Promise<void>;  // 无参，自解析 res
 1. 所有原始终端输出在进入 AI 上下文前必须做 ANSI 剥离
 2. `collapseCarriageReturnLines` 必须在 `stripAnsi` 之后做才能正确判断可见内容
 3. 连续重复行去重应在 truncate 前做，避免浪费截断额度
+
+### 踩坑 #33：system-ref DynamicInjector 后门 + 死代码残留（Phase21 — 2026-06-29）
+
+**症状**：`system-ref.ts` 通过 `DynamicInjector` 直接调 `appendSystemReminder()`，绕过了 budget／dedup／残差注意力三道闸门。运行了 6 个月没被发现。验收时还发现了 3 处死代码从未触发。
+
+**根因**：`DynamicInjector`（`injector.ts:33-41`）的 `inject()` 直接 `appendSystemReminder()` 返回，不走任何 guard 系统。子类 `SystemRefInjector` 继承此行为，每 4 步无脑塞内容，不管是否真需要。死代码原因：`detectSystemRefIssue()` 写在 `turn/index.ts` 但替换后零调用方没删；`funcEditHistory` 声明了但没数据推送入口；`import * as fs/path` 仅被死方法使用。
+
+**修复**：
+1. 删除 `system-ref.ts` + `manager.ts` 移除引用
+2. 新建 `injectors/stuck.ts` — 走正门（受 budget/dedup/残差三重控制），检测 3 种 stuck 模式
+3. `variant-registry.ts` 注册 `system_ref_stuck`，`VariantMeta` 新增 `dedupWindow` 接口
+4. 验收清理：删 `detectSystemRefIssue()` 60 行、`funcEditHistory` 字段、`fs/path` import
+5. 修 bug：`stuck.ts` L85 `stepDelta` 起始值 `currentStep`→`0`（首次 stuck 因衰减到接近 0 永远触发不了）
+
+**教训**：
+1. DynamicInjector 基类绕过 guard 是架构级后门——写新的 injector 时确认不是继承它
+2. 删了调用方就要删被调方——替换 `detectSystemRefIssue` 后没删定义，挂了几个月死代码
+3. 残差衰减的 `stepDelta` 从 0 开始算才是"满权重"——`currentStep` 会让首次注入永远失败
+4. 文档型字段（`funcEditHistory`）如果没推送入口，一开始就不该加
+
+### 踩坑 #34：`protected: isProtected ?? false` 炸 58 个 snapshot（Phase22 — 2026-06-29）
+
+**症状**：添加 `ContextMessage.protected` 字段后，58 个测试因 snapshot 中多出 `protected: false` 字段全失败。
+
+**根因**：`{ ...(isProtected ?? false) }` 始终产出 `protected: false`，即使调用方未传参。Snapshot 精确匹配，不允许新增字段。
+
+**修复**：改为 `...(isProtected ? { protected: true } : {})`——只传 `true` 时才设置字段，不传时字段不存在。
+
+**教训**：
+1. 可选字段默认值不要用 `?? false`——用三元组判断是否设置值
+2. 新增接口字段后先跑一次 snapshot 测试确认变更范围
+
+### 踩坑 #35：`getScore` 被 git checkout 回滚丢失（Phase22 — 2026-06-29）
+
+**症状**：`variant-registry.ts` 中 `getScore` 函数在 git checkout 恢复文件后被删除，多个模块引用不通过编译。
+
+**根因**：初始化 `variant-registry.ts` 时用 `Write` 覆盖了全部 364 行（删了 30+ 导出），误损后 `git checkout` 恢复原始文件，但原始文件不含 `getScore`（这是之前 Phase 新增的）。
+
+**修复**：在 `VARIANT_META` 上方重新 `export function getScore(variant: string, stepDelta: number): number`。
+
+**教训**：
+1. `Write` 覆盖整个文件比 `Edit` 增删改风险大——优先用 `Edit`
+2. `git checkout` 只恢复 Git HEAD——如果改动从未提交过则丢失
+3. 函数导出被其他引用时删除必炸编译，务必检查 import 引用链
+
+### 踩坑 #36：`VariantRegistry.record` 2 参 vs 3 参签名不匹配（Phase22 — 2026-06-29）
+
+**症状**：`turn/index.ts` 调 `VariantRegistry.record(variant, level, step)` 传 3 参，但 `record()` 定义只接受 2 参 `(variant, step)`，编译不通过。
+
+**根因**：`record` 的原始签名是 `(variant: string, step: number)`，调用方（`turn/index.ts`）传了第三个 `level` 参数（来自旧版设计）。`VariantScheduler.record` 同理——2 参变体。
+
+**修复**：统一签名。`VariantRegistry.record(variant: string, _level: number, step: number)` 保留 3 参以匹配调用方，`VariantScheduler.record` 保持 `(variant: string, currentStep: number)`。
+
+**教训**：
+1. 重构函数签名时必须同步更新所有调用方——用 LSP.references 或 Grep 定位
+2. 子 Agent 并行改动同一文件时参数约定必须事先统一
+
+### 踩坑 #37：`messagesToCompact` 全 protected 时 while 死循环（Phase22 — 2026-06-29）
+
+**症状**：当所有历史消息都被标记 `protected` 时，`while (messagesToCompact.length < compactedCount)` 无限循环，因为 `_idx` 一直前进但 `messagesToCompact` 始终为空。
+
+**根因**：`messageToCompact.push` 只在 `!m.protected` 时执行——全 protected 时永远不会 push，`_idx` 走到头后也不会弹出（没有 `_idx >= originalHistory.length` 的终止检查绑定）。
+
+**修复**：加 `_maxTries = originalHistory.length * 2` 安全门控，循环条件加 `_maxTries-- > 0`。
+
+**教训**：
+1. 凡是过滤型 while 循环必须加安全门控——纯条件退出不可靠
+2. `_maxTries = length * N` 是对"被过滤元素不计数"的保险，N 取 2 足够
+
+### 踩坑 #38：FAA 盲目注入——不分类导致错误全部用同一模板（FAA 改进 — 2026-06-29）
+
+**症状**：FAA checker（turn/index.ts L1912-1919）对所有非探索性工具失败都用同一句话 `"A required tool failed this turn. Analyze the error and fix it."` ，不加分类。
+
+**根因**：`lastToolFailure` 类型（L103）只存了 `{ toolName, isExploratory }`，虽然代码已记录 `lastBashExitCode`（L1265）、`verifyFailedThisStep`（L1272）、`toolErrorThisStep`（L1266），但 FAA checker 没有读取它们。
+
+**修复**：不改任何接口/类型，只在 FAA checker 内（L1912）加三级分类：
+- `this.verifyFailedThisStep` → BLOCKER：验证失败，必须修复，全量 FAA audit
+- `this.lastBashExitCode ∈ {137, 124}` → CRITICAL：OOM/超时警告，全量 FAA audit
+- 其他 → WARNING：简短提示，不加 FAA audit
+
+**教训**：
+1. 已有的数据（exitCode/verifyFailedThisStep）要先消费——不要建新接口
+2. 三级分类只需要在消费端加 if/else，不改赋值点不改类型
+3. 不改管线不建新文件是"最小侵入"的正确姿势
 

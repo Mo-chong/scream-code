@@ -94,14 +94,33 @@ export class ContextMemory {
     });
   }
 
-  appendSystemReminder(content: string, origin: PromptOrigin): void {
+  appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
     this.appendMessage({
       role: 'user',
       content: [{ type: 'text', text }],
       toolCalls: [],
       origin,
+      ...(isProtected ? { protected: true } : {}),
     });
+  }
+
+  /**
+   * Phase22.2: 将 history 中 origin 为 S/A 级的 system-reminder 标记为 protected，
+   * 使其在 compaction 时被跳过。
+   */
+  protectHighLevelReminders(highOrigins: Set<string>): void {
+    for (const msg of this._history) {
+      const originStr = msg.origin !== undefined ? String(msg.origin) : '';
+      if (
+        msg.role === 'user' &&
+        originStr.length > 0 &&
+        highOrigins.has(originStr) &&
+        !msg.protected
+      ) {
+        (msg as { protected?: boolean }).protected = true;
+      }
+    }
   }
 
   clear(): void {
@@ -203,6 +222,8 @@ export class ContextMemory {
     this.agent.injection.onContextCompacted(summary.compactedCount);
     this.agent.emitStatusUpdated();
     this.agent.microCompaction.reset();
+    // Phase22.2: compaction 后重新保护 S/A 级提醒
+    this.protectHighLevelReminders(new Set(['system', 'scream_code']));
   }
 
   data(): AgentContextData {
