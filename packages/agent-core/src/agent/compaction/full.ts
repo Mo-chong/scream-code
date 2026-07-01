@@ -433,6 +433,14 @@ export class FullCompaction {
       await this.extractAndStoreMemos(summary);
       this.triggerPostCompactHook(data, result);
 
+      // Phase4: 压缩后恢复提醒，告知模型所有激活的指令仍然生效
+      if (this.agent?.context?.appendSystemReminder) {
+        this.agent.context.appendSystemReminder(
+          'Context was compacted. All active instructions remain in effect.',
+          { kind: 'injection', variant: 'post_compact_notice' },
+        );
+      }
+
       // Compaction succeeded — reset circuit breaker
       this.consecutiveCompactionFailures = 0;
       this._shouldInjectSessionSummary = true;

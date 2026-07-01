@@ -45,6 +45,7 @@ import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendin
 import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
 import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
+import { AttentionPositionStrategy } from '../injection/position-strategy';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -1547,7 +1548,19 @@ export class TurnFlow {
       return;
     }
 
-    this.agent.context.appendSystemReminder(text, meta);
+    // Phase4 注意力管控：根据 variant 等级选择注入位置
+    if (effectiveLevel) {
+      const pos = new AttentionPositionStrategy().decidePosition(variant ?? '', effectiveLevel as WeightLevel);
+      if (pos === 'head') {
+        this.agent.context.insertSystemReminderAtHead(text, meta, true);
+      } else if (pos === 'near_head') {
+        this.agent.context.insertSystemReminderAtNearHead(text, meta, true);
+      } else {
+        this.agent.context.appendSystemReminder(text, meta);
+      }
+    } else {
+      this.agent.context.appendSystemReminder(text, meta);
+    }
     this.injectBudget.record(estimatedTokens);
 
     // 注册到 VariantRegistry（残差系统依赖）

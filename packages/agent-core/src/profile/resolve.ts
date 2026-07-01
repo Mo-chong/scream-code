@@ -161,6 +161,9 @@ function buildTemplateVars(
     SCREAM_SKILLS: skills,
     SCREAM_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',
     ROLE_ADDITIONAL: mergeRoleAdditional(context.roleAdditional, promptVars),
+    // Phase4: 条件系统 prompt 组装 — Nunjucks 模板用
+    HAS_SUBAGENT: promptVars['SCREAM_SUBAGENT_TYPE']?.trim() ? 'true' : '',
+    HAS_SKILL_CONTENT: skills.trim().length > 0 ? 'true' : '',
   };
 }
 

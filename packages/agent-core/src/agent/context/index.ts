@@ -106,6 +106,52 @@ export class ContextMemory {
   }
 
   /**
+   * Phase4 注意力管控：从尾部搜索最后一条 system-reminder，在其后插入新提醒（利用 primacy effect）。
+   * 若无任何 system-reminder，则追加到 history 最前面。
+   */
+  insertSystemReminderAtHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
+    const text = `<system-reminder>\n${content}\n</system-reminder>`;
+    const insertMsg: ContextMessage = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin,
+      ...(isProtected ? { protected: true as const } : {}),
+    };
+    // 从尾部向前找最后一条 system-reminder
+    let lastReminderIdx = -1;
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const c = this._history[i]!.content;
+      const firstPart = Array.isArray(c) ? (c[0] as { text?: string }) : undefined;
+      if (firstPart?.text?.includes('<system-reminder>')) {
+        lastReminderIdx = i;
+        break;
+      }
+    }
+    if (lastReminderIdx === -1) {
+      this._history.unshift(insertMsg);
+    } else {
+      this._history.splice(lastReminderIdx + 1, 0, insertMsg);
+    }
+  }
+
+  /**
+   * Phase4 注意力管控：在历史列表前 1/3 位置插入提醒（避免 U 形死区，near_head 位置）。
+   */
+  insertSystemReminderAtNearHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
+    const text = `<system-reminder>\n${content}\n</system-reminder>`;
+    const insertMsg: ContextMessage = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin,
+      ...(isProtected ? { protected: true as const } : {}),
+    };
+    const nearHeadPos = Math.max(1, Math.floor(this._history.length / 3));
+    this._history.splice(nearHeadPos, 0, insertMsg);
+  }
+
+  /**
    * Phase22.2: 将 history 中 origin 为 S/A 级的 system-reminder 标记为 protected，
    * 使其在 compaction 时被跳过。
    */
