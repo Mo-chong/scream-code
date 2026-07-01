@@ -322,6 +322,9 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // ── Phase 18: 代码质量反馈 ────────────────────────────────────
   code_quality_feedback:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
+
+  // ── Phase 21: 痛点感知（stuck 检测 → 文档导航）────────────────
+  system_ref_stuck:          { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 5 },
 };
 
 /**
