@@ -16,7 +16,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState, RecentSession } from '#/tui/types';
-import { BREATHE_INTERVAL_MS, getBreathingFrame } from '#/tui/utils/breathing-clock';
+import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 
 // 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
 const HUE_STOPS = 24;
@@ -131,6 +131,7 @@ export class WelcomeComponent implements Component {
   private colors: ColorPalette;
   private ui: TUI;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
+  private breatheTimeout: ReturnType<typeof setTimeout> | null = null;
   private breathePalette: string[];
   private recentSessions: readonly RecentSession[];
   borderTitle: string | null = null;
@@ -150,19 +151,31 @@ export class WelcomeComponent implements Component {
       this.breatheTimer = null;
       this.ui.requestRender();
     }
+    if (this.breatheTimeout !== null) {
+      clearTimeout(this.breatheTimeout);
+      this.breatheTimeout = null;
+    }
   }
 
   private startBreathing(): void {
+    resetBreathingClock();
     this.breatheTimer = setInterval(() => {
       this.ui.requestRender();
     }, BREATHE_INTERVAL_MS);
+    if (this.breatheTimeout === null) {
+      this.breatheTimeout = setTimeout(() => {
+        this.stopBreathing();
+      }, BREATHE_CYCLE_MS);
+    }
   }
 
   invalidate(): void {}
 
   render(width: number): string[] {
     const breatheFrame = this.breatheTimer !== null ? getBreathingFrame() : 0;
-    const breatheColor = this.breathePalette[breatheFrame] ?? this.colors.primary;
+    const breatheColor = this.breatheTimer !== null
+      ? (this.breathePalette[breatheFrame] ?? this.colors.primary)
+      : this.colors.primary;
     const boxColor = chalk.hex(breatheColor);
     const dim = chalk.hex(this.colors.textDim);
     const muted = chalk.hex(this.colors.textMuted);
@@ -179,6 +192,16 @@ export class WelcomeComponent implements Component {
     const modelValue = isLoggedOut
       ? chalk.hex(this.colors.warning)('未设置')
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
+
+    const like = this.state.like;
+    const likeActive = Boolean(
+      (like.nickname ?? '').trim() ||
+        (like.tone ?? '').trim() ||
+        (like.other ?? '').trim(),
+    );
+    const likeValue = likeActive
+      ? chalk.hex(this.colors.success)('like已激活')
+      : chalk.hex(this.colors.textDim)('like未加载');
 
     let versionValue: string;
     if (this.state.hasNewVersion && this.state.latestVersion !== null) {
@@ -233,6 +256,7 @@ export class WelcomeComponent implements Component {
         '',
         centerText(dim(versionValue), leftCol),
         centerText(dim(modelValue), leftCol),
+        centerText(likeValue, leftCol),
       ];
       const topPad = Math.max(0, Math.floor((rightRows.length - leftContent.length) / 2));
       const bottomPad = Math.max(0, rightRows.length - leftContent.length - topPad);
@@ -249,6 +273,7 @@ export class WelcomeComponent implements Component {
         '',
         centerText(dim(versionValue), leftCol),
         centerText(dim(modelValue), leftCol),
+        centerText(likeValue, leftCol),
         '',
       ];
       leftRows = leftContent;

@@ -5,9 +5,11 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import { Container, Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
+import { Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
 import type { Component, MarkdownTheme, TUI } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+
+import { CachedContainer } from '#/tui/utils/cached-container';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
 import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
@@ -465,7 +467,7 @@ class PrefixedWrappedLine implements Component {
   }
 }
 
-export class ToolCallComponent extends Container {
+export class ToolCallComponent extends CachedContainer {
   private expanded = false;
   private planExpanded = false;
   private toolCall: ToolCallBlockData;
@@ -548,6 +550,11 @@ export class ToolCallComponent extends Container {
    * only belong to one group at a time, so one listener slot is enough.
    */
   private onSnapshotChange: (() => void) | undefined;
+
+  // Spacer(1) + headerText — the two children rebuildBody keeps before
+  // rebuilding the call preview and everything after it. Hoisted to a named
+  // constant so the rebuild invariant survives future constructor changes.
+  private static readonly HEADER_END_INDEX = 2;
 
   constructor(
     toolCall: ToolCallBlockData,
@@ -652,6 +659,8 @@ export class ToolCallComponent extends Container {
     this.disposed = true;
     this.stopStreamingProgressTimer();
     this.stopSubagentElapsedTimer();
+    // Drop the group listener so a borrowed card can't be polled after dispose.
+    this.onSnapshotChange = undefined;
   }
 
   /**
@@ -663,7 +672,16 @@ export class ToolCallComponent extends Container {
   setPlanInfo(info: { plan?: string; path?: string }): void {
     if (this.toolCall.name !== 'ExitPlanMode') return;
     let changed = false;
-    if (info.plan !== undefined && info.plan.length > 0 && this.currentPlan !== info.plan) {
+    // args.plan takes priority over currentPlan in resolvePlanForPreview, so
+    // skip the plan update (and the rebuild it would trigger) when args
+    // already carries a plan — the injected currentPlan would never be read.
+    const argsPlan = str(this.toolCall.args['plan']);
+    if (
+      argsPlan.length === 0 &&
+      info.plan !== undefined &&
+      info.plan.length > 0 &&
+      this.currentPlan !== info.plan
+    ) {
       this.currentPlan = info.plan;
       changed = true;
     }
@@ -1264,6 +1282,10 @@ export class ToolCallComponent extends Container {
   }
 
   private rebuildContent(): void {
+    // children.pop() below bypasses CachedContainer.removeChild, so mark
+    // dirty explicitly — otherwise a rebuild that only removes children
+    // would leave the cache returning stale lines.
+    this.markDirty();
     while (this.children.length > this.callPreviewEndIndex) {
       this.children.pop();
     }
@@ -1273,7 +1295,9 @@ export class ToolCallComponent extends Container {
   }
 
   private rebuildBody(): void {
-    while (this.children.length > 2) {
+    // See rebuildContent for why markDirty is needed before pop().
+    this.markDirty();
+    while (this.children.length > ToolCallComponent.HEADER_END_INDEX) {
       this.children.pop();
     }
     this.buildCallPreview();

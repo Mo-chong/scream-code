@@ -39,8 +39,8 @@ Scream Code 是一款省心的本地中文 AI Agent 助手。无需硬记代码�
   </tr>
   <tr>
     <td width="50%">
-      <h3>🧠 永久记忆备忘录</h3>
-      <p><strong>痛点记忆结构化SQL提取</strong>，FTS5全文+Tag语义+向量三重检索不漂移。跨会话共享，越用越懂你。</p>
+      <h3>🧠 永久记忆备忘录+SAG知识库</h3>
+      <p><strong>痛点记忆结构化SQL提取</strong>，FTS5全文+Tag语义+向量三重检索不漂移。跨会话共享，越用越懂你。Ai时代-SAG知识库，随时导入你的专属知识，让Agent更懂你</p>
     </td>
     <td width="50%">
       <h3>🛡️ 效率级轻量底层</h3>
@@ -49,8 +49,8 @@ Scream Code 是一款省心的本地中文 AI Agent 助手。无需硬记代码�
   </tr>
   <tr>
     <td width="50%">
-      <h3>🔌 自定义拓展</h3>
-      <p><strong>MCP / Skill / 模型商</strong> /子Agent等全部自由定义无限拓展。支持 DeepSeek、OpenAI、Anthropic 等。</p>
+      <h3>🔌 自定义拓展+多代理编排</h3>
+      <p><strong>MCP / Skill / 模型商</strong> /支持子Agent开启多代理编排可自定义模型。支持 DeepSeek、OpenAI、Anthropic 等。</p>
     </td>
     <td width="50%">
       <h3>📱 多渠道互联</h3>

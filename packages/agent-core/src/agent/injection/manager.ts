@@ -5,6 +5,7 @@ import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
 import { TodoListReminderInjector } from './todo-list';
+import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
 import { WorkingSetInjector } from './working-set';
 import { VariantScheduler } from '../turn/variant-registry';
@@ -22,6 +23,7 @@ export class InjectionManager {
       new TodoListReminderInjector(agent),
       new GoalInjector(agent),
       new WorkingSetInjector(agent),
+      new UserPrefsInjector(agent),
     ];
     this.scheduler = new VariantScheduler();
   }

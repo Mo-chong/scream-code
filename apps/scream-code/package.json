@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.7.8",
+  "version": "0.8.1",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -53,6 +53,7 @@
     "e2e:real": "pnpm -w run build:packages && SCREAM_E2E_REAL=1 vitest run test/e2e/real-llm-smoke.e2e.test.ts",
     "preinstall": "node -e \"console.log('\\n📦 正在安装 scream-code，请稍候...\\n')\"",
     "postinstall": "node scripts/postinstall.mjs",
+    "prepublishOnly": "node scripts/verify-publish.mjs",
     "smoke": "node dist/main.mjs --version"
   },
   "dependencies": {
@@ -71,6 +72,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@scream-code/agent-core": "workspace:^",
     "@scream-code/config": "workspace:^",
+    "@scream-code/knowledge": "workspace:*",
     "@scream-code/memory": "workspace:*",
     "@scream-code/migration-legacy": "workspace:^",
     "@scream-code/scream-code-sdk": "workspace:^",
