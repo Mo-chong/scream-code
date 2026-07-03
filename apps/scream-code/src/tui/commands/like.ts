@@ -42,7 +42,7 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
     parts.push(`The user's preferred nickname is "${prefs.nickname.trim()}".`);
   }
   if (prefs.tone !== undefined && prefs.tone.trim().length > 0) {
-    parts.push(`Respond in a ${prefs.tone.trim()} tone.`);
+    parts.push(`Respond ${prefs.tone.trim()}.`);
   }
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
     parts.push(`Additional user preferences: ${prefs.other.trim()}`);

@@ -15,7 +15,7 @@ describe('buildRoleAdditionalText', () => {
 
   it('includes the tone when set', () => {
     expect(buildRoleAdditionalText({ tone: 'friendly' })).toBe(
-      'Respond in a friendly tone.',
+      'Respond friendly.',
     );
   });
 
@@ -33,19 +33,19 @@ describe('buildRoleAdditionalText', () => {
         other: 'use examples',
       }),
     ).toBe(
-      'The user\'s preferred nickname is "Alex".\nRespond in a friendly tone.\nAdditional user preferences: use examples',
+      'The user\'s preferred nickname is "Alex".\nRespond friendly.\nAdditional user preferences: use examples',
     );
   });
 
   it('trims whitespace from inputs', () => {
     expect(buildRoleAdditionalText({ nickname: '  Alex  ', tone: '  concise ' })).toBe(
-      'The user\'s preferred nickname is "Alex".\nRespond in a concise tone.',
+      'The user\'s preferred nickname is "Alex".\nRespond concise.',
     );
   });
 
   it('ignores fields that are empty after trimming', () => {
     expect(buildRoleAdditionalText({ nickname: '   ', tone: 'calm', other: '' })).toBe(
-      'Respond in a calm tone.',
+      'Respond calm.',
     );
   });
 });

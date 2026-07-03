@@ -1533,3 +1533,50 @@ export async function installUpdate(): Promise<void>;  // 无参，自解析 res
 1. `define` 块和 `alwaysBundle` 配置分开——alwaysBundle 在第 50 行，在冲突区外，自动保留
 2. 上游新增的构建版本变量不影响本地功能，全部接受即可
 
+### 踩坑 #42：TruncationTracker 并行竞争——同步多工具环境误增 blockCount（Phase24.2 修复 — 2026-07-02）
+
+**症状**：同一步内 AI 调用两个非只读工具（如 Write + Edit），第一个工具在 guard 中 recover 并 markRecovered(key) 删除了 entry，第二个工具发现 key 已不在 pendingKeys 中 → recover 返回 undefined → 误认为恢复失败 → incrementBlockCount() 触发熔断。
+
+**根因**：TruncationTracker.entries 是全局 Map，markRecovered 直接 delete(key)。同步环境多个工具在同一步内共用同一个 TruncationTracker 实例，第一个 markRecovered 后 key 消失，第二个工具无法判断"这个 key 是被别人 recover 了还是本来就不可恢复"。
+
+**修复**（Phase24.2）：新增 stepRecovered Map（`Map<number, Set<string>>`）:
+- `markStepRecovered(key, step)`：在 markRecovered 同时记录"本步已 recover 此 key"
+- `isAlreadyRecoveredThisStep(key, step)`：第二个工具调用时先查此记录，true 则跳过
+- `clearStepRecovered(step)`：每步 afterStep 结束时清理
+
+**教训**：
+1. Map.delete() 后调用方无法区分"被删"和"不存在"——需要独立的状态追踪
+2. 所有"跨工具同步状态"都要考虑并行竞争，不只 TruncationTracker
+3. 测试必须模拟两工具同一步的场景
+
+### 踩坑 #43：Guard 注入内容二次截断——auto-recover 后 inject 仍 slice(2000)（Phase24.2 修复 — 2026-07-02）
+
+**症状**：Phase24.1 guard 虽然正确 recover 了完整数据，但在拼装 inject 内容时用了 `text.slice(0, 2000)`，导致 AI 看到的仍然是截断版数据——自动恢复系统自相矛盾。
+
+**根因**：设计失误。Phase24.1 的目标是"自动恢复完整数据"，但 inject 的格式化代码沿用了早期阶段的截断习惯，没有意识到注入内容不应被规避性截断。
+
+**修复**（Phase24.2）：替换为诊断式预览：
+- ≤200 字符 → 全部显示
+- >200 字符 → 显示前 200 字符 + `\n…(共 N 字符，已跳过 M 字符)` 的明确提示
+
+**教训**：
+1. "自动恢复完整数据"和"注入时截断"是矛盾的——系统不能一边恢复一边截断
+2. 诊断式预览让 AI 知道数据确实完整可用，只是上下文窗口不适合全部展示
+3. 所有 context inject 点都要审视是否有类似的自我矛盾
+
+### 踩坑 #44：READ_ONLY_TOOLS 硬编码不可扩展——只读工具列表无法配置（Phase24.2 修复 — 2026-07-02）
+
+**症状**：只读工具列表在 `turn/index.ts` 中以模块级常量 `const READ_ONLY_TOOLS = new Set<string>(['Bash'])` 定义。测试或其他场景需要不同的只读工具集合时无法覆盖——只能修改源文件。
+
+**根因**：Phase24.1 设计时为了快速实现，将配置放在了常量而非可注入参数中。TruncationTracker 构造函数应承担"可配置策略"的角色。
+
+**修复**（Phase24.2）：将 readOnlyTools 移至 TruncationTrackerConfig：
+- `TruncationTrackerConfig.readOnlyTools`：可选的 Set<string>
+- 默认值：`new Set(['Bash'])`（保持向后兼容）
+- 访问方式：`this.turnTruncation.isReadOnly(name)` 替代 `READ_ONLY_TOOLS.has(name)`
+
+**教训**：
+1. "快速实现"时放常量的设计，要预留未来迁移到配置的接口
+2. 构造函数接收配置比模块常量更灵活、更可测试
+3. 迁移步骤：定义配置接口 → 构造函数注入 → 消模块常量
+

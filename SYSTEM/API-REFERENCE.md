@@ -105,7 +105,7 @@ See §9.5 **ResNet injection scheduling** for the full variant configuration tab
 | — reset | — | Edit on code file + LSP.references both called | `editWithoutLookupCount = 0` |
 | — no-op | — | Edit on non-code file (.md/.json/.yaml etc) | skip (not a function/API change) |
 
-### Deviation chain (toxicity intercept)
+### Deviation chain (偏差链检测 — 原名"toxicity intercept")
 
 ```
 editWithoutLookupCount ≥ 3 → deviationChainActive = true
@@ -536,7 +536,7 @@ type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
 | guard_feedback_rule_2 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
 | guard_feedback_rule_3 | **0.8** | 0.85 | 0.35 | 4 | **2** | S→S ×2 → deviation chain (higher W + lower threshold) |
 | guard_feedback_rule_4 | 0.7 | 0.85 | 0.35 | 4 | **3** | S→S ×3 → deviation chain |
-| system_ref_stuck | 0.5 | 0.85 | 0.30 | 3 | — | Phase21: 痛点感知，取代旧 system-ref 无脑周期注入 |
+| system_ref_stuck | 0.7 | 0.85 | 0.35 | 5 | — | Phase21/23: 痛点感知，取代旧 system-ref 无脑周期注入（Phase23 修正参数激活） |
 | scene_memory_recall | 0.8 | 0.88 | 0.30 | 5 | **3** | S→S ×3 → deviation chain |
 | intent_* (all 6) | 0.7-0.9 | 0.88-0.92 | 0.30 | 0 | — | Injected once at turn start |
 
@@ -1552,4 +1552,83 @@ export function collectInjectorFacts(
 
 ### 22.9 测试
 
-详见 `test/agent-core/agent/agent.injection.test.ts`：19 个测试用例覆盖 manager/plan-mode/plugin-session-start。\r\n
+详见 `test/agent-core/agent/agent.injection.test.ts`：19 个测试用例覆盖 manager/plan-mode/plugin-session-start。
+
+---
+
+## §23 Phase24: 截断数据自动恢复系统（Phase24.1 / Phase24.2）
+
+> 从"拦截报错"演进为"自动 recover + inject + 放行"。AI 零感知，全链路零阻塞。
+
+### 23.1 TruncationTracker 类（Phase24.2 增强版）
+
+**文件**：`agent/turn/truncation-tracker.ts`
+
+```typescript
+export interface TruncationEntry {
+  readonly key: string;
+  readonly toolName: string;
+  readonly step: number;
+  readonly originalLength?: number;   // Phase24.2: 截断前原始长度
+  readonly truncatedLength?: number;  // Phase24.2: 截断后实际长度
+}
+
+export interface TruncationTrackerConfig {
+  maxStepAge?: number;            // 默认 40
+  maxConsecutiveBlocks?: number;  // 默认 3
+  readOnlyTools?: Set<string>;   // Phase24.2: 默认 new Set(['Bash'])
+}
+```
+
+**核心方法**：
+
+| 方法 | 用途 | 引入 |
+|------|------|------|
+| `register(key, toolName, step, originalLength?, truncatedLength?)` | 注册截断数据 | Phase24.1 |
+| `isReadOnly(toolName)` | Phase24.2: 查询工具是否为只读（基于配置） | Phase24.2 |
+| `hasUnrecovered()` | 是否存在未 recover 的截断数据 | Phase24 |
+| `pendingKeys()` | 获取未 recover 的 key 列表 | Phase24 |
+| `markRecovered(key)` | 标记 key 已恢复 | Phase24.1 |
+| `markStepRecovered(key, step)` | Phase24.2: 步级标记，防并行重复 | Phase24.2 |
+| `isAlreadyRecoveredThisStep(key, step)` | Phase24.2: 查询本步是否已 recover | Phase24.2 |
+| `clearStepRecovered(step)` | Phase24.2: 清理指定步的 recover 记录 | Phase24.2 |
+| `forceResume(reason?)` | 熔断逃生：清空 entries + stepRecovered | Phase24.1 |
+| `dispose()` | 安全清理：解绑 static current + 清空 entries + stepRecovered | Phase24.1 |
+| `prune(currentStep, maxStepAgeOverride?)` | 清理过期条目（含 stepRecovered） | Phase24 |
+
+### 23.2 turn/index.ts 自动恢复 Guard
+
+**文件**：`agent/turn/index.ts`
+
+**prepareToolExecution guard 逻辑**（Phase24.2 完整版）：
+
+```
+if (hasUnrecovered && step > 1 && !isReadOnly(toolName)):
+  1. 遍历 pendingKeys
+  2. 每 key: 检查 isAlreadyRecoveredThisStep → 跳过已恢复的
+  3. 未恢复: ContentArchive.recover(key) → 生成诊断式预览
+  4. 诊断预览: >200 字符则显示前 200 + 总长度，否则全部显示
+  5. inject() 预览到上下文 → markRecovered + markStepRecovered
+  6. 仍有 unrecovered → incrementBlockAndCheck() 熔断检查
+```
+
+**finalizeToolResult 注册**（Phase24.2）：
+
+```
+truncated === true →
+  register(key, toolName, step, output.length, output.length)
+  含 originalLength / truncatedLength 字段
+```
+
+**afterStep 清理**（Phase24.2）：
+
+```
+clearStepRecovered(currentStep)  // 每步结束后清理步级记录
+prune(currentStep)
+```
+
+### 23.3 测试
+
+- Phase24.1：`test/agent/truncation-tracker-phase24-1.test.ts` — 7 个测试（register/markRecovered/hasUnrecovered/pendingKeys/forceResume/dispose/prune/consecutiveBlocks）
+- Phase24.2：`test/agent/truncation-tracker-phase24-2.test.ts` — 16 个测试（readOnlyTools 配置/Entry 长度字段/stepRecovered 步级保护/并行竞争模拟/forceResume+dispose 清理 stepRecovered/prune 过期清理）
+- **总计 23 个测试，全部通过**。\r\n

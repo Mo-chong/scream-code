@@ -27,7 +27,7 @@
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
 | **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler + **残差注意力门控 R=W×D^Δs** + QUOTA_TABLE per-conversation 配额 |
-| **Guard 规则引擎** | `SYSTEM/guard-engine.md` | afterStep 后处理检查，confabulationBlocked → 收敛门拦截 |
+| **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖，Phase 11 已实现 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl`。**§11.4 Phase20 Bash 降噪**：builder 级 ANSI 剥离 + 重复行去重 + quality 简洁指令 |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ maskToolObservations（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
@@ -130,6 +130,10 @@
 | **两套 ResNet 对比** | **`ZHU/DECISIONS/Phase21.1-深度分析-系统引用重构方案.md` §四** |
 | sqlite-vec 初始化 | store.ts §_doInit + `@photostructure/sqlite-vec` |
 | 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
+| **TruncationTracker 自动恢复** | **截断数据自动 recover + inject + 放行，废弃 hard block** | **SYSTEM/API-REFERENCE.md §23** | **Phase24.1/24.2** |
+| **stepRecovered 并行竞争保护** | **同步多工具环境防误增 blockCount** | **SYSTEM/API-REFERENCE.md §23.2** | **Phase24.2** |
+| **诊断式注入预览** | **注入内容显示长度不截断** | **SYSTEM/API-REFERENCE.md §23.2** | **Phase24.2** |
+| **readOnlyTools 配置** | **只读工具白名单可配置（默认 Bash）** | **SYSTEM/API-REFERENCE.md §23.1** | **Phase24.2** |
 
 ### 决策文档 / ADR（ZHU/DECISIONS/）
 
@@ -222,3 +226,4 @@ CLI/TUI 源码:
 | `SYSTEM-INDEX.md` | INDEX | 本索引文件 |
 | `ZHU/DECISIONS/INDEX.md` | DECISIONS INDEX | 决策演化追踪 |
 | `ZHU/DECISIONS/*.md` | (文件名自动提取) | 各 Phase 决策文档 |
+| `agent/turn/truncation-tracker.ts` | truncation tracker | Phase24 截断自动恢复（含 stepRecovered 并行保护） |

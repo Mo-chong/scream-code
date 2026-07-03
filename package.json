@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "bash scripts/build-dev.sh",
     "build:dev": "bash scripts/build-dev.sh",
     "build:packages": "pnpm -r --filter './packages/*' run build",
     "dev:cli": "pnpm -C apps/scream-code run dev",

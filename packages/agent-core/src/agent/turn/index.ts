@@ -41,6 +41,7 @@ import { detectIntent } from './detectors/intent';
 import { injectIntentGuidance } from './injectors/intent';
 import { InjectBudget } from './injectors/budget';
 import { checkGuard, type StepToolSummary } from './guard-engine';
+import { TruncationTracker } from './truncation-tracker';
 import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendingDoc, formatPendingDocInject } from './memory-rules';
 import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
@@ -84,6 +85,8 @@ const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
   kind: 'system_trigger',
   name: 'goal_continuation',
 };
+
+// Phase24.2: 只读工具集合移至 TruncationTrackerConfig.readOnlyTools
 
 /** Phase 14: 收敛条件接口 — 每个条件是一个 check 函数 + 优先级 */
 interface ConvergenceCondition {
@@ -176,6 +179,9 @@ export class TurnFlow {
   // ── Phase 14: 正反馈每回合一次 ─────────────────────────────────
   private positiveFeedbackGivenThisTurn = false;
 
+  // ── Phase 24: 截断数据强制恢复 ─────────────────────────────────
+  readonly turnTruncation = new TruncationTracker({ maxConsecutiveBlocks: 3 });
+
   // ── Phase 14: 收敛条件数组（可组合） ───────────────────────────
   private convergenceConditions: ConvergenceCondition[] = [];
 
@@ -213,6 +219,7 @@ export class TurnFlow {
   private eventBuffer!: EventSnapshotBuffer;
 
   constructor(protected readonly agent: Agent) {
+    TruncationTracker.current = this.turnTruncation;
     this.eventBuffer = new EventSnapshotBuffer(agent);
     // 🆕 Phase15+: variantRegistry 行为观察回调 → 记录 behavior_feedback 事件
     this.variantRegistry.onBehaviorObserved = (v, observed) => {
@@ -409,6 +416,7 @@ export class TurnFlow {
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
+      this.turnTruncation.dispose();
     }
   }
 
@@ -1054,6 +1062,41 @@ export class TurnFlow {
                 };
               }
 
+              // ── Phase24.2: 截断数据自动恢复 ─────────────────────────
+              if (this.turnTruncation.hasUnrecovered() && this.currentStep > 1) {
+                // 只读工具不触发拦截和 forceResume
+                if (!this.turnTruncation.isReadOnly(ctx.toolCall.name)) {
+                  const keys = this.turnTruncation.pendingKeys();
+                  const recoverResults: string[] = [];
+                  for (const key of keys) {
+                    // Phase24.2: 并行竞争保护 — 同一步已由其他工具 recover 的 key 跳过
+                    if (this.turnTruncation.isAlreadyRecoveredThisStep(key, this.currentStep)) {
+                      continue;
+                    }
+                    const data = this.agent.contentArchive.recover(key);
+                    if (data !== undefined) {
+                      const text = typeof data === 'string' ? data : JSON.stringify(data);
+                      const preview = text.length > 200
+                        ? text.slice(0, 200) + `\n…(共 ${text.length} 字符，已跳过 ${text.length - 200} 字符)`
+                        : text;
+                      recoverResults.push(`[${key}]: ${preview}`);
+                      this.turnTruncation.markRecovered(key);
+                      this.turnTruncation.markStepRecovered(key, this.currentStep);
+                    }
+                  }
+                  if (recoverResults.length > 0) {
+                    this.inject(
+                      `检测到 ContentArchive 中有截断数据，已自动恢复。内容预览：\n${recoverResults.join('\n')}`,
+                      { kind: 'injection', variant: 'truncation_recover_guard' },
+                    );
+                  }
+                  // 未 recover 到的 key 走熔断检查
+                  if (this.turnTruncation.hasUnrecovered()) {
+                    this.turnTruncation.incrementBlockAndCheck();
+                  }
+                }
+              }
+
               return undefined;
             },
             authorizeToolExecution: async (ctx) => {
@@ -1251,6 +1294,15 @@ export class TurnFlow {
                     success: true,
                     durationMs: 0,
                   });
+                }
+
+                // 🆕 Phase24.2: 截断数据注册 — 工具输出被截断时登记（含长度信息）
+                if ('truncated' in ctx.result && ctx.result.truncated === true) {
+                  const key = `tool:${ctx.toolCall?.id ?? ''}`;
+                  const output = ctx.result?.output ?? '';
+                  const originalLength = typeof output === 'string' ? output.length : 0;
+                  const truncatedLength = originalLength;  // 已截断，truncatedLength 即为当前长度
+                  this.turnTruncation.register(key, ctx.toolCall?.name ?? '', this.currentStep, originalLength, truncatedLength);
                 }
               }
               // Track LSP.references specifically for C1 upgrade detection
@@ -1633,6 +1685,19 @@ export class TurnFlow {
     );
     await this.runGuardDetection();
     await this.injectBehaviorRulesAfterStep();
+
+    // ── Phase24.2: 截断数据提醒（仅当自动恢复失败时）──────────────
+    if (this.turnTruncation.hasUnrecovered() && !this.turnTruncation.remindedThisTurn) {
+      this.inject(
+        `有截断数据在 ContentArchive 中但自动恢复未找到对应内容，建议使用 archive_recover 手动获取。`
+        + ` Pending keys: [${this.turnTruncation.pendingKeys().join(', ')}]`,
+        { kind: 'injection', variant: 'truncation_recover_guard' },
+      );
+      this.turnTruncation.markReminded();
+    }
+    // Phase24.2: 清理当前步的 stepRecovered 记录
+    this.turnTruncation.clearStepRecovered(this.currentStep);
+    this.turnTruncation.prune(this.currentStep);
 
     // Step 6: 正反馈 + CodeRef
     this.injectPositiveFeedbackThisTurn();

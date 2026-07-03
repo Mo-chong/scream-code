@@ -95,9 +95,23 @@ VariantMeta.weight ← 基础权重
 
 ### 当前使用者
 
-| 注入器 | 注册变体 | 等级 |
-|--------|---------|------|
-| `stuck.ts` (痛点感知) | `system_ref_stuck` | D |
+`variant-registry.ts` 共注册 **31 个变体**，分为 11 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
+
+| 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
+|--------|------------|-------------|-------------------|-----------|
+| `system_trigger_*` | 3 | 0.15 | 0.95 | 系统触发 |
+| `deviation_chain_*` | 3 | 1.20 | 0.90 | 偏差链检测 |
+| `intent_*` | 6 | 0.50 | 0.50 | intent.ts |
+| `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
+| `post_*` | 6 | 0.20 | 0.50 | 6 个注入器 |
+| `step_after_*` | 3 | 0.20 | 0.50 | 6 个注入器 |
+| `guard_feedback_*` | 4 | 0.40 | 0.85 | 行为反馈 |
+| `scene_memory_*` | 1 | 0.50 | 0.80 | scene_memory |
+| `system_ref_stuck` | 1 | 0.50 | 0.85 | stuck.ts |
+| `code_quality_*` | 1 | 0.30 | 0.80 | 代码质量 |
+| `truncation_recover_guard` | 1 | 0.50 | 0.80 | 截断恢复 |
+
+详情见 `variant-registry.ts:277-331`。
 
 ---
 

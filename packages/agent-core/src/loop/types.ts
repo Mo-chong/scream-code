@@ -80,6 +80,11 @@ export interface ExecutableToolSuccessResult {
    * leave it undefined and renderers fall back to text.
    */
   readonly display?: ToolResultDisplay | undefined;
+  /**
+   * 工具输出被截断并存入 ContentArchive 时的存档 key。
+   * 侧通道——不污染 output 数据流，渲染层可据此决定是否提示 AI 调用 archive_recover。
+   */
+  readonly archiveKey?: string | undefined;
 }
 
 export interface ExecutableToolErrorResult {

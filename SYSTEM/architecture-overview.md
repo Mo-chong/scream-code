@@ -105,7 +105,8 @@ agent/
 │   │   ├── stuck.ts             ← ☑ Phase21: 痛点感知注入
 │   │   └── base.ts              ← 注入器基类
 │   ├── signature.ts             ← 签名
-│   └── variant-registry.ts      ← 残差注意力注册表
+│   ├── variant-registry.ts      ← 残差注意力注册表
+│   └── truncation-tracker.ts    ← Phase24: 截断数据追踪器（自动恢复）
 ├── injection/                   ← 注入系统
 │   ├── manager.ts               ← InjectionManager（5个injector）
 │   └── injector.ts              ← DynamicInjector（基类）
@@ -218,6 +219,21 @@ Phase22 对架构做了以下补充：
 **数据流新增**：turn 步末 → `VariantScheduler.shouldInject` 检查配额/冷却/窗口 → 通过后注入 → `afterInject` 记录 → compaction 时 `protected` 消息跳过。
 
 相关文档：`SYSTEM/injection-system.md`
+
+### Phase24 变更（2026-07-02）
+
+Phase24 对架构做了以下补充：
+
+| 组件 | 所属层级 | 职责 |
+|------|----------|------|
+| `TruncationTracker` | turn/truncation-tracker.ts（回合层） | 截断数据自动 recover + inject + 放行 |
+| `stepRecovered` Map | turn/truncation-tracker.ts（回合层） | Phase24.2: 同步多工具并行竞争保护 |
+| `readOnlyTools` 配置 | TruncationTrackerConfig（回合层） | Phase24.2: 只读工具白名单可配置 |
+| 诊断式注入预览 | turn/index.ts guard（回合层） | Phase24.2: 替代 slice(2000) 二次截断 |
+
+**数据流变更**：工具输出截断 → `finalizeToolResult` 注册到 TruncationTracker → 后续工具步入 guard 时自动 recover + inject 诊断式预览 + 放行 → 步末 `afterStep` 清理 stepRecovered。
+
+相关文档：`SYSTEM/API-REFERENCE.md §23`
 
 ---
 

@@ -325,6 +325,9 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // ── Phase 21: 痛点感知（stuck 检测 → 文档导航）────────────────
   system_ref_stuck:          { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 5 },
+
+  // ── Phase 24: 截断数据强制恢复 ────────────────────────────────
+  truncation_recover_guard:  { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 1 },
 };
 
 /**

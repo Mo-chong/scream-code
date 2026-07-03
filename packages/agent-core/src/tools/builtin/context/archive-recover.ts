@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { toInputJsonSchema } from '../../support/input-schema';
 import type { BuiltinTool } from '../../../agent/tool/types';
 import type { ExecutableToolContext, ExecutableToolResult } from '../../../loop';
+import { TruncationTracker } from '../../../agent/turn/truncation-tracker';
 
 // ── Schema ──
 
@@ -33,6 +34,10 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
       execute: async (_ctx: ExecutableToolContext): Promise<ExecutableToolResult> => {
         if (args.key) {
           const content = this.contentArchive.recover(args.key);
+          // Phase24: 通知截断跟踪器该 key 已回收
+          if (content && TruncationTracker.current) {
+            TruncationTracker.current.markRecovered(args.key);
+          }
           return { output: content ?? '未找到该 key 对应的存档内容' };
         }
 

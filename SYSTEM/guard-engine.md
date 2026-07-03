@@ -1,7 +1,8 @@
 # Guard 规则引擎 — 行为矫正后处理
 
 > 计划文件: `DECISIONS/行为矫正系统-完整实战方案.md`
-> 未实现，计划 Phase 11
+> 已实现（Phase 11），源码见 `turn/guard-engine.ts`（139 行，4 条规则全量编码）
+> 测试覆盖：`test/agent/turn/guard-engine.test.ts`（14 用例，全部通过）
 
 ---
 
