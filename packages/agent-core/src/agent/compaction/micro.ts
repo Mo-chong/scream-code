@@ -17,7 +17,7 @@ export interface MicroCompactionConfig {
 }
 
 const DEFAULT_CONFIG: MicroCompactionConfig = {
-  keepRecentMessages: 20,
+  keepRecentMessages: 30,
   minContentTokens: 100,
   minContextUsageRatio: 0.5,
   truncatedMarker: '[Old tool result content cleared]',

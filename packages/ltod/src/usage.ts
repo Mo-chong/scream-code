@@ -13,6 +13,10 @@ export interface TokenUsage {
   inputCacheRead: number;
   /** Input tokens written into the provider's prompt cache. */
   inputCacheCreation: number;
+  /** DeepSeek: tokens served from KV cache hit. */
+  cacheHitTokens?: number;
+  /** DeepSeek: tokens not found in KV cache. */
+  cacheMissTokens?: number;
 }
 
 /**

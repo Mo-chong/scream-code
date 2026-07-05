@@ -694,3 +694,21 @@ The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps
 **构建链**：agent-core → scream-code(alwaysBundle 打包)，改 agent-core 源码后必须重建两段。
 
 **githooks 前置检查**：`.git/hooks/pre-commit` → `check-all.sh` → 4 个 guard（pnpm env、bundle stale、config build、alwaysBundle 完整性）
+
+## SYSTEM 文档格式规范
+
+编辑 `SYSTEM/*.md` 文件时按以下规则维护格式。每行是一个文件类型的格式契约。
+
+| 文件 | 结构规则 | 踩坑在哪 | 禁止内容 | 新增条目方式 |
+|------|---------|---------|---------|------------|
+| `SYSTEM-INDEX.md` | `##` 索引表 + `###` 快速查找域（每个 `###` 需独立 knowledge chunk） | - | 踩坑详情/更新日志/版本标记/人类说明 | 归入对应 `####` 子域 |
+| `API-REFERENCE.md` | 10 个 `##` 域固定编号 + `###` 列表化（≤20 行） | pitfalls.md | 踩坑/版本历史/散文说明 | 归入对应 `##` 域 |
+| `pitfalls.md` | `##` 域 + `###` 单条（现象→根因→解决→教训四要素，≤15 行） | - | 目录/人类说明/非四要素的文字 | 归入已有 `##` 域，不建新域 |
+| `memory-store.md` | `##` 功能分区 | pitfalls.md | 踩坑/版本历史 | 归入对应 `##` 分区 |
+| `architecture-overview.md` | `## 第 N 层` 分层固定 | pitfalls.md | 类实现细节 | 归入对应层级 |
+| `attention-management.md` | `##` 功能域 | pitfalls.md | 踩坑/版本历史 | 归入对应域 |
+| `mcp-server.md` | `##` 配置域 | pitfalls.md | 踩坑/版本历史 | - |
+| `dream.md` | `##` 流程域 | pitfalls.md | 踩坑/版本历史 | - |
+| `interception.md` | `##` 拦截通道 | pitfalls.md | 踩坑/版本历史 | - |
+| `turn-control.md` | `##` 生命周期域 | pitfalls.md | 踩坑/版本历史 | - |
+| `cli-tui.md` | `##` 命令域 | pitfalls.md | 踩坑/版本历史 | - |

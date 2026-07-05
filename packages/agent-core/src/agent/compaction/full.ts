@@ -66,6 +66,8 @@ export class FullCompaction {
   private consecutiveCompactionFailures = 0;
   private _shouldInjectSessionSummary = false;
   private compactionTimedOut = false;
+  /** Tokens saved by the most recent compaction (tokensBefore - tokensAfter), or 0. */
+  lastCompactedTokens = 0;
   protected compacting: {
     abortController: AbortController;
     promise: Promise<void>;
@@ -427,6 +429,7 @@ export class FullCompaction {
         tokensBefore,
         tokensAfter,
       };
+      this.lastCompactedTokens = tokensBefore - tokensAfter;
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);

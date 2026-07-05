@@ -1,110 +1,174 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Scream Code 系统架构索引
 
-> 说明书索引文件 | **构建工具** | `scripts/build-dev.sh` | agent-core → scream-code 两段构建链，绕过 pnpm lifecycle 直调 tsdown | 只放链接和一句话定位
-> 详细描述在 `SYSTEM/*.md`，按子系统拆分
+> **AI 说明书索引** — 按功能域分组，每组一个独立 chunk。找文件路径→查索引表。找具体问题→查对应 domain 子表。详细描述在 `SYSTEM/*.md`，版本历史在 `SYSTEM/CHANGELOG.md`。**维护规范：索引表只放路径+一句话定位（不超过 20 字）；快速查找按 `####` 子域独立，新增条目归入对应子域；禁止放入踩坑/更新日志的详细描述。**
+
+> **整体架构分层图 → `SYSTEM/architecture-overview.md`**（第0层 Monorepo → 第4层外部系统，看完再查子系统）
 
 ---
 
-## 如何用这个索引
+## 模块层级关系
 
 ```
-你问系统问题 → 查这个索引找到对应文件
-→ 读 SYSTEM/xxx.md 获取完整描述
-→ 不需要每次从零查源码
+├─ 接口手册        API-REFERENCE.md
+├─ 执行架构
+│   ├─ 回合控制    turn-control.md
+│   ├─ 注入系统    injection-system.md
+│   ├─ 注意力管理  attention-management.md
+│   ├─ Guard引擎   guard-engine.md
+│   └─ 工具执行    prompt-assembly.md
+├─ 上下文管理
+│   ├─ 总架构      context-management.md
+│   ├─ 压缩策略    compaction.md
+│   └─ 缓存感知    phase26-cache-aware.md
+├─ 记忆系统
+│   ├─ 核心存储    memory-store.md
+│   └─ Dream整理   dream.md
+├─ MCP服务器集成   mcp-server.md
+├─ CLI/TUI         cli-tui.md
+├─ 拦截日志        interception.md
+├─ 经验库
+│   ├─ 踩坑记录    pitfalls.md
+│   ├─ 变更日志    CHANGELOG.md
+│   └─ 维护SOP    系统说明书维护SOP.md
+└─ 专题/Phase文档
+    ├─ Phase14     phase14-可执行优化.md
+    └─ Phase15     phase15-行为偏差拦截通道.md
 ```
 
-> **整体架构分层图 → `SYSTEM/architecture-overview.md`**（第0层Monorepo→第4层外部系统，看完再查子系统）
-
----
+完整层级地图 → `SYSTEM/MAP.md`
 
 ## 索引表
 
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
 | **整体架构(分层图)** | `SYSTEM/architecture-overview.md` | ☑ **优先读这个**：0→4层完整分层，大架构套小架构，看完再查具体模块 |
-| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中；**v0.6.10: 标签质量四层优化（统一路由+后备+黑名单+动态预算+偏差链+新鲜度+质量统计）**；**recallCount 增强：记录召回次数、降级保护（baohu/ding/yongjiu/chundu）、search blend (relevance×0.7 + heatScore×0.3)、recalcRecallCountFromLog 运维工具**；**§十五: 12痛点修复（2026-06-28）**：CJK Bigram 中文召回、usageBoost NaN 防御、TIER_RANK 模块常量、splitClaims 12分割符、critical 豁免淘汰、CLAIMS_OVERLAP 阈值提升+单字保护、scope:'all' 跨项目参数、向量漂移告警、TAG_CONFIG 扩容、toLowerCase 大小写不敏感、promote 双计数 bug 修复、tier+recalledAt 排序防御 |
+| **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
-| **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环；**v0.6.10: Phase16 工具优先级（codegraph优先、收敛门用代码文件计数、LSP双层fallback修复）** |
-| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler + **残差注意力门控 R=W×D^Δs** + QUOTA_TABLE per-conversation 配额 |
-| **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖，Phase 11 已实现 |
-| **上下文管理** 🆕 | `SYSTEM/context-management.md` | **四层架构**（Phase19 落地）：maskToolObservations（每轮遮蔽旧 tool result，保留最近3条）+ ContentArchive（纯内存 LRU 2000 条/30min TTL/加权淘汰，新增 **sharedStore 静态缓存**实现跨子 agent 共享）+ MicroCompaction（3道关卡：BATCH_SIZE 8 / minContextUsageRatio 0.5 / keepRecentMessages 20，截断旧 tool.result + Supersede 旧 Read + Point B 存档到 ContentArchive）+ FullCompaction（LLM 总结→maskToolObservations→extractAndStoreMemos 写记忆库→applyCompaction）。**ArchiveRecover MCP 工具**：已放开为所有 agent 可用（不再限 main）。Flag 控制：`content-archive` (default: true)、`micro.batchSize` (env `SCREAM_CODE_MICRO_BATCH_SIZE`)。**FAA 审计注入**：tool 失败时自动注入最近 5 条审计记录帮 AI 查错。日志统一写 `wire.jsonl`。**§11.4 Phase20 Bash 降噪**：builder 级 ANSI 剥离 + 重复行去重 + quality 简洁指令 |
-| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；**v0.7 fork 新增：前缀稳定化（stabilizePrefix 提升 KV-cache 命中率）+ maskToolObservations（遮蔽旧工具输出省 token，压缩/对话双路径）+ MicroCompaction 批次门控（BATCH_SIZE，registry 默认 8，env SCREAM_CODE_MICRO_BATCH_SIZE 配置，internal surface, flags.asNumber('micro.batchSize')，三级回退：env→numDefault→0）+ pipeline counters（getMetrics(): microCompactCount/stabilizeHitCount，stabilizeHitCount 用 JSON.stringify 比较）** |
+| **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + InjectBudget 五级预算(S/A/B/C/D) + VariantScheduler 配额 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
+| **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler + 残差注意力门控 R=W×D^Δs + QUOTA_TABLE per-conversation 配额 |
+| **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
+| **上下文管理** 🆕 | `SYSTEM/context-management.md` | 四层架构：maskToolObservations + ContentArchive（LRU 2000 条/30min TTL，sharedStore 跨子 agent 共享）+ MicroCompaction（3 道关卡）+ FullCompaction（LLM 总结→记忆库）。ArchiveRecover MCP 工具已放开。Bash 降噪：ANSI 剥离 + 重复行去重 |
+| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
+| **System Prompt 装配** | `SYSTEM/prompt-assembly.md` | Template → Render → Inject → API 全链路，模板变量/AGENTS合并/user-prefs双路 |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
-| **Agent 类架构(细节)** | `SYSTEM/architecture.md` | Agent 类（agent/index.ts）组合所有子系统 |
-| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、**v0.7 升级合并踩坑、策略层防御模式、merge SOP、Observation Masking 压缩路径漏遮、构建卡 prepare 脚本、Phase22 4 坑（protected 字段炸 snapshot/getScore checkout 回滚/record 签名不匹配/全 protected 死循环）** |
+| **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、上游合并踩坑、merge SOP、Phase22 4 坑 |
 | **Phase14：可执行优化** 🆕 | `SYSTEM/Phase14-可执行优化.md` | afterStep 分段命名化 + 收敛条件数组化 + 跨回合标记 + 模块减肥 |
 | **Phase15：行为偏差拦截通道** 🆕 | `SYSTEM/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
+| **Phase26：缓存感知架构** 🆕 | `SYSTEM/phase26-cache-aware.md` | DeepSeek KV Cache 兼容，注入位置修正(A→head/feedback→tail)，实时缓存审计日志 ndjson，动态自适应压缩阈值(GrowthPredictor) |
+| **系统说明书维护SOP** 🆕 | `SYSTEM/系统说明书维护SOP.md` | AI 更新文档的标准流程：决策树→分类→执行→交叉验证，含每个文件的写入规范 |
 | **行为矫正方案** | `../DECISIONS/行为矫正系统-完整实战方案.md` | 融合 Guard + 记忆注入 + 收敛门的完整计划 |
 
 ---
 
 ## 快速查找
 
-### 常见问题 → 查哪个文件
-
+### 记忆系统
 | 问题 | 先查这个文件 |
 |------|-------------|
-| ContentArchive 扩容与加权淘汰 | `SYSTEM/API-REFERENCE.md` §18 |
-| FileActionAudit 文件审计日志 | `SYSTEM/API-REFERENCE.md` §19 |
-| ArchiveRecoverTool 内容存档恢复 | `SYSTEM/API-REFERENCE.md` §20 |
-| content-archive / file-action-audit flag | `flags/registry.ts` |
 | 记忆存在哪里/怎么搜 | `SYSTEM/memory-store.md` |
 | FTS5 索引了什么字段 | `SYSTEM/memory-store.md` §FTS5 |
 | 能不能按 tag 过滤 | `SYSTEM/memory-store.md` §Tags |
-| 注入有几种优先级 | `SYSTEM/injection-system.md` §优先级 |
-| system_trigger 是什么 | `SYSTEM/injection-system.md` §system_trigger |
-| 收敛门怎么拦住 AI | `SYSTEM/turn-control.md` §收敛门 |
-| Guard 什么时候触发 | `SYSTEM/guard-engine.md` §触发时机 |
-| **注入 ResNet 残差调度** | `SYSTEM/injection-system.md` §variant-registry L319-345 |
-| **VariantScheduler 配额调度** | `SYSTEM/API-REFERENCE.md` §22.5 |
-| **QUOTA_TABLE 配额表** | `SYSTEM/API-REFERENCE.md` §22.5 |
-| **protected compaction 保护** | `SYSTEM/API-REFERENCE.md` §22.1-22.4 |
-| **collectInjectorFacts** | `SYSTEM/API-REFERENCE.md` §22.8 |
-| **InjectionManager 占位方法** | `SYSTEM/API-REFERENCE.md` §22.7 |
-| **记忆 ResNet 衰减因子** | `SYSTEM/memory-store.md` §热冷升降 / `scoring.ts` §resNetFactors |
-| **两套 ResNet 什么关系** | `Phase21.1-深度分析-系统引用重构方案.md` §四 |
-| /memory + i 键的完整链路 | `SYSTEM/cli-tui.md` §memory-命令 |
-| 回合生命周期 | `SYSTEM/turn-control.md` §生命周期 |
-| AI 编造怎么检测 | `SYSTEM/guard-engine.md` §反事实检测 |
-| memory 选择器图标 | `SYSTEM/cli-tui.md` §新版图标 |
-| Dream 运行流程 | `SYSTEM/dream.md` §生命周期 |
+| 搜索评分 ding 权重 | `SYSTEM/memory-store.md` §dingBoost |
+| 记忆 ResNet 衰减因子 | `SYSTEM/memory-store.md` §热冷升降 / `scoring.ts` §resNetFactors |
 | 保护标签 baohu | `SYSTEM/dream.md` §保护标签 |
 | 置顶标签 ding | `SYSTEM/memory-store.md` §标签体系 |
 | 拼音标签体系 | `SYSTEM/memory-store.md` §标签体系 |
 | chundu 怎么过滤规则 | `SYSTEM/memory-store.md` §纯度控制 |
 | yongjiu 标签有什么用 | `SYSTEM/memory-store.md` §标签体系 |
-| 搜索评分 ding 权重 | `SYSTEM/memory-store.md` §dingBoost |
-| MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
-| 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
-| 数据库直接在哪里 | `SYSTEM/memory-store.md` §直接数据库操作 |
-| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 / `SYSTEM/context-management.md` §三、四 |
-| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction / `SYSTEM/context-management.md` §三 |
-| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction / `SYSTEM/context-management.md` §四 |
-| ContentArchive（保留缓冲区） | `SYSTEM/context-management.md` §二 |
-| ArchiveRecover MCP 工具 | `SYSTEM/context-management.md` §五 |
-| Bash 降噪/ANSI 剥离/sanitize | `SYSTEM/context-management.md` §11.4 / `SYSTEM/API-REFERENCE.md` §21 |
-| 上下文管理三层架构总览 | `SYSTEM/context-management.md` §一、七、十一 |
-| 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
-| 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
-| 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
-| MCP 连接失败（PATHEXT 被删） | `SYSTEM/pitfalls.md` §MCP 连接失败 |
-| yongjiu 不生效（构建链陷阱） | `SYSTEM/pitfalls.md` §yongjiu 标签不生效 |
-| 双构建链陷阱的验证方法 | `SYSTEM/pitfalls.md` §双构建链陷阱的验证方法 |
 | 标签质量优化原理/配置 | `SYSTEM/memory-store.md` §六点五、标签质量四层优化 |
 | 标签黑名单词有哪些 | `SYSTEM/memory-store.md` §TAG_CONFIG |
 | 动态预算公式 | `SYSTEM/memory-store.md` §动态预算公式 |
-| normalizeTags 为什么用 MAX_TAGS_ABSOLUTE | `SYSTEM/pitfalls.md` §坑 1：normalizeTags 硬编码 |
-| Dream 合并标签为什么不继承黑名单 | `SYSTEM/pitfalls.md` §坑 2：Dream 合并跳过 processTags |
 | 标签质量统计在哪 | `SYSTEM/memory-store.md` §六点五 → tag-stats.ts |
+| MemoryEdit 怎么启用 | `SYSTEM/memory-store.md` §MemoryEdit-工具 |
+| 改 agent.yaml 不生效 | `SYSTEM/memory-store.md` §构建链 |
+| 数据库直接在哪里 | `SYSTEM/memory-store.md` §直接数据库操作 |
+| zz 记忆选择器图标 | `SYSTEM/cli-tui.md` §新版图标 |
+| MemoryWrite 标签被过滤（baohu/ding） | `SYSTEM/pitfalls.md` §踩坑 #9 |
+| MemoryEdit id 要带 memo- 前缀 | `SYSTEM/pitfalls.md` §踩坑 #9 |
+| promote 双计数 bug | `SYSTEM/pitfalls.md` §踩坑 #11 |
+| claimsOverlap 大小写不敏感 | `SYSTEM/pitfalls.md` §踩坑 #12 |
+| search() scope:'all' 是否新功能 | `SYSTEM/pitfalls.md` §踩坑 #10 |
+| Dream 运行流程 | `SYSTEM/dream.md` §生命周期 |
+| Dream 合并标签为什么不继承黑名单 | `SYSTEM/pitfalls.md` §坑 2：Dream 合并跳过 processTags |
+| yongjiu 不生效（构建链陷阱） | `SYSTEM/pitfalls.md` §yongjiu 标签不生效 |
+| 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
+
+### 上下文管理
+| 问题 | 先查这个文件 |
+|------|-------------|
+| ContentArchive 扩容与加权淘汰 | `SYSTEM/API-REFERENCE.md` §18 |
+| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 / `SYSTEM/context-management.md` §三、四 |
+| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction / `SYSTEM/context-management.md` §三 |
+| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction / `SYSTEM/context-management.md` §四 |
+| FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
+| ContentArchive（保留缓冲区） | `SYSTEM/context-management.md` §二 |
+| ArchiveRecover MCP 工具 | `SYSTEM/context-management.md` §五 |
+| ArchiveRecoverTool 内容存档恢复 | `SYSTEM/API-REFERENCE.md` §20 |
+| Bash 降噪/ANSI 剥离/sanitize | `SYSTEM/context-management.md` §11.4 / `SYSTEM/API-REFERENCE.md` §21 |
+| 上下文管理四层架构总览 | `SYSTEM/context-management.md` §一、七、十一 |
+| content-archive / file-action-audit flag | `flags/registry.ts` |
+| FileActionAudit 文件审计日志 | `SYSTEM/API-REFERENCE.md` §19 |
+
+### 注入系统
+| 问题 | 先查这个文件 |
+|------|-------------|
+| 注入有几种优先级 | `SYSTEM/injection-system.md` §优先级 |
+| system_trigger 是什么 | `SYSTEM/injection-system.md` §system_trigger |
+| 注入 ResNet 残差调度 | `SYSTEM/injection-system.md` §variant-registry L319-345 |
+| VariantScheduler 配额调度 | `SYSTEM/API-REFERENCE.md` §22.5 |
+| QUOTA_TABLE 配额表 | `SYSTEM/API-REFERENCE.md` §22.5 |
+| protected compaction 保护 | `SYSTEM/API-REFERENCE.md` §22.1-22.4 |
+| collectInjectorFacts | `SYSTEM/API-REFERENCE.md` §22.8 |
+| InjectionManager 占位方法 | `SYSTEM/API-REFERENCE.md` §22.7 |
+| 两套 ResNet 什么关系 | `Phase21.1-深度分析-系统引用重构方案.md` §四 |
+| normalTags 为什么用 MAX_TAGS_ABSOLUTE | `SYSTEM/pitfalls.md` §坑 1：normalizeTags 硬编码 |
+
+### 回合控制 + Guard
+| 问题 | 先查这个文件 |
+|------|-------------|
+| 收敛门怎么拦住 AI | `SYSTEM/turn-control.md` §收敛门 |
+| Guard 什么时候触发 | `SYSTEM/guard-engine.md` §触发时机 |
+| AI 编造怎么检测 | `SYSTEM/guard-engine.md` §反事实检测 |
+| 回合生命周期 | `SYSTEM/turn-control.md` §生命周期 |
 | 代码探索用什么工具优先 | `SYSTEM/turn-control.md` §工具优先级 |
 | LSP 报 spawn EINVAL / npx fallback 失败 | `SYSTEM/pitfalls.md` §LSP 故障 #2：bundle 环境双重 fallback 失败 |
 | bundle 环境 PATH 极简，外部命令找不到 | `SYSTEM/pitfalls.md` §LSP 故障 #2 → bundle env 的 PATH 构成 |
+
+### TruncationTracker（Phase24）
+| 问题 | 先查这个文件 |
+|------|-------------|
+| TruncationTracker 自动恢复 | `SYSTEM/API-REFERENCE.md §23` |
+| stepRecovered 并行竞争保护 | `SYSTEM/API-REFERENCE.md §23.2` |
+| 诊断式注入预览 | `SYSTEM/API-REFERENCE.md §23.2` |
+| readOnlyTools 配置 | `SYSTEM/API-REFERENCE.md §23.1` |
+
+### MCP + 构建
+| 问题 | 先查这个文件 |
+|------|-------------|
 | MCP 工具有几种/怎么配 | `SYSTEM/mcp-server.md` |
 | codegraph 索引了什么 | `SYSTEM/mcp-server.md` §codegraph |
 | 内置工具和 MCP 工具有权重差吗 | `SYSTEM/mcp-server.md` §工具类型与权重 |
 | 安装新 MCP server 怎么配置 | `SYSTEM/mcp-server.md` §配置格式 |
+| MCP 连接失败（PATHEXT 被删） | `SYSTEM/pitfalls.md` §MCP 连接失败 |
+| 开发构建怎么跑 | `scripts/build-dev.sh` |
+| 双构建链陷阱的验证方法 | `SYSTEM/pitfalls.md` §双构建链陷阱的验证方法 |
+| 构建卡 prepare 脚本（node 不在 PATH） | `SYSTEM/pitfalls.md` §构建卡在 prepare 脚本 |
+
+### 踩坑与经验
+| 问题 | 先查这个文件 |
+|------|-------------|
+| 踩坑记录在哪里 | `SYSTEM/pitfalls.md` |
+| 数据库备份找错系统 | `SYSTEM/pitfalls.md` §踩坑 #8 |
+| 拦截日志写在磁盘哪里 | `SYSTEM/interception.md` §刷盘策略 |
+| 拦截日志有没有 CLI 命令 | 暂无，参考 `SYSTEM/interception.md` §关键限制 |
+
+### Git 与上游合并
+| 问题 | 先查这个文件 |
+|------|-------------|
 | 作者 force-push 后怎么合并 | `SYSTEM/pitfalls.md` §Git 与仓库管理 |
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
 | 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |
@@ -114,28 +178,10 @@
 | 策略层防御模式（install-strategy.ts） | `SYSTEM/pitfalls.md` §策略层防御模式 |
 | 合并 v0.7 的真实冲突经验 | `SYSTEM/pitfalls.md` §合并上游 v0.7 的真实冲突复盘 |
 | installUpdate 签名不匹配 | `SYSTEM/pitfalls.md` §踩坑点总结 |
-| 构建卡 prepare 脚本（node 不在 PATH） | `SYSTEM/pitfalls.md` §构建卡在 prepare 脚本 |
-| 数据库备份找错系统 | `SYSTEM/pitfalls.md` §踩坑 #8 |
-| MemoryWrite 标签被过滤（baohu/ding） | `SYSTEM/pitfalls.md` §踩坑 #9 |
-| MemoryEdit id 要带 memo- 前缀 | `SYSTEM/pitfalls.md` §踩坑 #9 |
-| search() scope:'all' 是否新功能 | `SYSTEM/pitfalls.md` §踩坑 #10 |
-| promote 双计数 bug | `SYSTEM/pitfalls.md` §踩坑 #11 |
-| claimsOverlap 大小写不敏感 | `SYSTEM/pitfalls.md` §踩坑 #12 |
-| 开发构建怎么跑 | `scripts/build-dev.sh` |
-| FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
-| vec0 向量搜索原理 | store.ts §searchByVectorVec0 + memory-lookup.ts §vec0搜索冷热fallback |
-| 热冷升降触发条件 | store.ts §promote/demote/autoDemote/autoPromote |
-| ResNet 衰减因子（记忆） | scoring.ts §resNetFactors + store.ts §autoDemoteIfNeeded |
-| **ResNet 残差调度（注入）** | **variant-registry.ts §shouldInjectByResidual (L319-345, R = W × D^Δs)** |
-| **两套 ResNet 对比** | **`ZHU/DECISIONS/Phase21.1-深度分析-系统引用重构方案.md` §四** |
-| sqlite-vec 初始化 | store.ts §_doInit + `@photostructure/sqlite-vec` |
-| 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
-| **TruncationTracker 自动恢复** | **截断数据自动 recover + inject + 放行，废弃 hard block** | **SYSTEM/API-REFERENCE.md §23** | **Phase24.1/24.2** |
-| **stepRecovered 并行竞争保护** | **同步多工具环境防误增 blockCount** | **SYSTEM/API-REFERENCE.md §23.2** | **Phase24.2** |
-| **诊断式注入预览** | **注入内容显示长度不截断** | **SYSTEM/API-REFERENCE.md §23.2** | **Phase24.2** |
-| **readOnlyTools 配置** | **只读工具白名单可配置（默认 Bash）** | **SYSTEM/API-REFERENCE.md §23.1** | **Phase24.2** |
 
-### 决策文档 / ADR（ZHU/DECISIONS/）
+---
+
+## 决策文档 / ADR
 
 先看 `DECISIONS/INDEX.md` 分类索引（ADR/方案/分析/执行记录全分类）。
 
@@ -144,9 +190,9 @@
 | `DECISIONS/INDEX.md` | DECISIONS/ 目录的全量分类索引 |
 | `DECISIONS/行为矫正系统-完整实战方案.md` | 融合方案总设计 |
 | `DECISIONS/Guard规则引擎-实战执行方案.md` | Guard 执行细节 |
-| `DECISIONS/分析-长期记忆系统外挂方案-开源调查与适配分析.md` 🆕 | 12 方案全面分析，结论：无需外挂，缺沉淀策略 |
+| `DECISIONS/分析-长期记忆系统外挂方案-开源调查与适配分析.md` | 12 方案全面分析，结论：无需外挂，缺沉淀策略 |
 | `DECISIONS/扩展方向-架构进化路线-行为学习与闭环.md` | 未来方向：P0反馈/P1学习/P2沙盒 |
-| `DECISIONS/分析-ContentArchive-参数优化与FileActionAudit融合计划-最终执行方案.md` 🆕 | ContentArchive v2 升级+FileActionAudit+ArchiveRecoverTool 三阶段实现 |
+| `DECISIONS/分析-ContentArchive-参数优化与FileActionAudit融合计划-最终执行方案.md` | ContentArchive v2 升级+FileActionAudit+ArchiveRecoverTool 三阶段实现 |
 
 ---
 
@@ -170,7 +216,7 @@
     models.ts                     → MemoryMemo 数据模型
     scoring.ts                    → 混合评分(60% keyword + 40% vector) × ResNet 因子
     consolidator.ts               → Dream 去重合并 + demote 归档
-  
+
 CLI/TUI 源码:
   apps/scream-code/src/
     tui/commands/memory.ts        → /memory 命令处理
@@ -196,34 +242,5 @@ CLI/TUI 源码:
 | system_trigger 穿透预算 | turn/index.ts:1356-1359 | 收敛门注入不受 budget 限制 |
 | sendNormalUserInput ≠ inject | context/index.ts:75-80 vs 83-91 | 前者是普通用户消息，后者是 <system-reminder> |
 | inject('injection') 受 5 重限制 | turn/index.ts:1368-1419 | 重复衰减→残差→去重→预算→注册 |
-| **system-ref 废弃 → stuck 注入器 (Phase21)** | turn/injectors/stuck.ts + turn/index.ts:1579-1598 + variant-registry.ts:313 | 旧 system-ref.ts DynamicInjector 绕过所有 guard 被删除；替代为 stuck 注入器走残差系统。检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步），受 budget/dedup/残差三重门控。验收中修复残差起始值 bug（currentStep→0）并清理 3 处死代码 |
+| **system-ref 废弃 → stuck 注入器 (Phase21)** | turn/injectors/stuck.ts + turn/index.ts:1579-1598 + variant-registry.ts:313 | 旧 system-ref.ts DynamicInjector 绕过所有 guard 被删除；替代为 stuck 注入器走残差系统。检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步），受 budget/dedup/残差三重门控 |
 | **ResNet 双系统** | variant-registry.ts L319-345 + store.ts:1281-1287 + scoring.ts:162-163 | 记忆 ResNet（天级幂衰减）+ 注入调度 ResNet（步级幂衰减），公式均为 R = W×D^Δs |
-
----
-
-## 关键词 → 文档映射表 (Phase21 动态生成)
-
-> 关键词为文件名去扩展名+去连字符后自动提取。原 `detectSystemRefIssue` 已于 Phase21.2 清理中删除；
-> 保留此表作为 SYTEM/ZHU 文档结构参考。
-
-| 文件名 | 自动关键词 | 说明 |
-|--------|-----------|------|
-| `SYSTEM/context-management.md` | context management | 四层架构核心文档 |
-| `SYSTEM/API-REFERENCE.md` | API REFERENCE | API 签名索引（§1-§22） |
-| `SYSTEM/architecture.md` | architecture | 整体架构 |
-| `SYSTEM/cli-tui.md` | cli tui | CLI/TUI 层 |
-| `SYSTEM/compaction.md` | compaction | 上下文压缩（旧版） |
-| `SYSTEM/dream.md` | dream | Dream 整理系统 |
-| `SYSTEM/guard-engine.md` | guard engine | Guard 规则引擎 |
-| `SYSTEM/injection-system.md` | injection system | 注入系统 |
-| `SYSTEM/interception.md` | interception | 拦截日志 |
-| `SYSTEM/mcp-server.md` | mcp server | MCP 服务器集成 |
-| `SYSTEM/memory-store.md` | memory store | 记忆系统 |
-| `SYSTEM/pitfalls.md` | pitfalls | 踩坑记录 |
-| `SYSTEM/turn-control.md` | turn control | 回合控制 |
-| `SYSTEM/Phase14-可执行优化.md` | Phase14 可执行优化 | Phase14 文档 |
-| `SYSTEM/Phase15-行为偏差拦截通道.md` | Phase15 行为偏差拦截通道 | Phase15 文档 |
-| `SYSTEM-INDEX.md` | INDEX | 本索引文件 |
-| `ZHU/DECISIONS/INDEX.md` | DECISIONS INDEX | 决策演化追踪 |
-| `ZHU/DECISIONS/*.md` | (文件名自动提取) | 各 Phase 决策文档 |
-| `agent/turn/truncation-tracker.ts` | truncation tracker | Phase24 截断自动恢复（含 stepRecovered 并行保护） |

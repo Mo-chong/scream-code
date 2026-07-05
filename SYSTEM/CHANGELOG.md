@@ -1,11 +1,84 @@
 ---
 tags: [type/changelog, status/final, domain/system]
 ---
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+
+## v0.8.3 — AGENTS.md 加载验证与 prompt-assembly 修复（2026-07-05）
+
+### 发现问题
+- **AGENTS.md 32KB 预算分配方向相反** — 收集顺序（全局→项目）与预算分配顺序（项目→全局）方向相反，导致 ScreamCode 根 55KB AGENTS.md 独占总预算，全局 AGENTS.md 0 字节注入
+- **prompt-assembly.md §3 漏 3 个模板变量** — `SCREAM_WORK_DIR` / `SCREAM_WORK_DIR_LS` / `SCREAM_ADDITIONAL_DIRS_INFO` 未在变量表中列出
+- **prompt-assembly.md §6 加载逻辑有误** — 错写为 `resolve.ts → loadAgentsMd()`，实际来源为 `context.ts → collectAgentsFiles() + renderAgentFiles()`；缺预算分配、截断逻辑和实测数据
+
+### 验证手段
+- 三组新对话实地测试：ScreamCode根(41.4KB)、allgzmulu根(12.4KB)、D:/(14.4KB) 对比 systemPromptChars
+- 日志 `scream-code.log` 的 `systemPromptChars` 字段交叉验证
+- 每个对话 AI 报告 AGENTS From: 来源确认加载差异
+
+### 文档修复
+- `SYSTEM/prompt-assembly.md` — §3 模板变量表补全 3 个缺失变量；§6 重写为合并+截断逻辑，含实测数据表；§10 风险点补预算分配方向、32KB 总预算说明、SCREAM_WORK_DIR 与 projectRoot 区分
+- `ZHU/DECISIONS/AGENTS-MD加载验证报告与结论.md` — 完整验证报告
+
+### 关键数据
+| 场景 | systemPromptChars | AGENTS 可见来源 |
+|------|------------------|----------------|
+| ScreamCode根 | 41,431 | 根 55KB（截断前 ~32KB），全局 0 |
+| allgzmulu根 | 12,369 | 全局 7.6KB（全部） |
+| D:/根 | 14,419 | 全局 7.6KB（全部） |
+
+---
 
 # Scream Code 版本更新记录
 
 > 记录上游 LIUTod/scream-code 各版本的新功能、修复和 API 变更，以及二开 fork (Mo-chong/scream-code) 的本地定制改动。
-> 当前本地版本：v0.7.6（合并于 2026-06-30）
+> 当前本地版本：v0.8.1（合并于 2026-07-03）
+
+## v0.8.2 — 本地 Phase26: 缓存感知架构与统一压缩方案（2026-07-04）
+
+### 新增模块
+- **content-cache** — `src/agent/turn/content-cache.ts` 跨步内容去重
+  - `isDuplicate(variant, content)` — 前缀 60 字符 hash 对比，同 variant 同内容跳过
+  - compaction 后 `reset()` 失效全部缓存
+- **event-log.agentType** — `src/agent/turn/event-log.ts` 注入事件增加 `agentType` 字段
+  - 所有 `eventLog.record()` 调用注入 `this.agent.type`（'main' | 'sub' | 'independent'）
+  - 主子 agent 注入行为可区分分析
+
+### 优化改动
+- **position-strategy** — A 级从 'near_head' 升级为 'head'，feedback/post 从 'near_head' 降级为 'tail'
+- **GrowthPredictor** — 简单平均 → EMA（α=0.4），时间间隔归一化
+- **AttentionPositionStrategy** — 新增未知 variant 告警（console.warn，每个 variant 仅一次）
+- **AuditLogWriter** — Phase26 新增审计日志系统
+
+### 文档
+- `SYSTEM/phase26-cache-aware.md` — 缓存感知架构与审查日志系统说明
+- `ZHU/DECISIONS/系统模块协调诊断与缓存优先级的统一架构方案.md` — 架构方案（v3.3）
+- `API-REFERENCE.md` — 补 GrowthPredictor(EMA) / ContentHashCache / InterceptionEvent.agentType
+
+---
+
+### 本地新功能
+- **guard-engine** — 4 条 AI 行为 Guard 规则全量，14 测试覆盖
+  - 路径：`packages/agent-core/src/agent/turn/guard-engine.ts`
+  - 规则：exit code 矛盾阻断 / 无证据声称标记 / 无编辑声错误修改 / 记忆仅代码断言门控
+- **TUI 美化** — DOM diff 安全渲染、双层调试防护、CJK 字符滚动修复、spinner 层级优化
+- **MoE 配置** — 上下文记忆注入标签配置：`should-consult-memory` 和 `memory-consulted` 作为 MoE 门控
+
+### 上游 v0.7.7-v0.8.0 合并
+- **Knowledge Store**（上游 v0.8.0 新增子包 `packages/knowledge/`）：
+  - SQLite (node:sqlite) 知识库：chunks/events/entities/relations 四表 + FTS5 全文索引
+  - ingestFile()：md/txt → chunk → embedding (fastembed bge-small-zh-v1.5) → LLM 事件抽取
+  - multiSearch()：7 步检索链路（embedding → Entity Recall → BFS 100 → Coarse Rank 50 → LLM Rerank 5 → Dedup）
+  - KnowledgeLookupTool：AI Agent built-in 工具，知识库查询能力
+  - **依赖**：Python + fastembed 包，首次加载自动下载 ~30MB 模型
+  - **限制**：只支持 .md/.txt；无增量更新（改文件需删掉重录）；每 chunk 1 次 LLM 调用
+- **响应格式修正** — like.ts 文本简化、测试断言同步
+- **能力清单修正** — agent 能力声明格式调整
+- **凑整优化** — 响应精简
+
+### 合并信息
+- 分支：`mochong/liuyiyi` + `origin/main`（v0.7.2→v0.8.1，5 个版本跨版本合并）
+- 冲突 5 个：like.ts(取上游+重应用文本)、like.test.ts(取上游改断言)、system.md(--ours)、agent/index.ts(互补合并)、agent/tool/index.ts(互补合并)
+- 验证：guard-engine 14/14 + like.test 8/8 通过，alwaysBundle 完好
 
 ---
 
@@ -84,3 +157,32 @@ tags: [type/changelog, status/final, domain/system]
 ## v0.7.2 — 二开 fork 基点
 
 上次成功合并上游的版本，也是本二开 fork (Mo-chong/scream-code) 的主要分叉点。
+
+---
+
+## 二开发日志（Mo-chong fork）
+
+### Phase26 — 缓存感知架构与审查日志系统（2026-07-04）
+
+#### 新功能
+- **注入位置修正**（P0）— `position-strategy.ts:29` A 级 `near_head→head`，`:38` feedback_/post_ `near_head→tail`。缓存破坏范围缩小 55%。对所有有前缀缓存的模型有效
+- **DeepSeek KV 缓存字段解析**（P0）— `openai-common.ts:242-254` 解析 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` → `ltod/usage.ts` TokenUsage 的 `cacheHitTokens?`/`cacheMissTokens?`
+- **缓存审计日志**（P1）— 新建 `audit-log.ts`（163 行），每轮写入 `workspace/cache-audit.ndjson`。含 CacheMetrics 计算 + 告警规则（hitRatio<0.2 告警，>0.8 静默）
+- **动态自适应压缩阈值**（P1）— 新建 `predictor.ts` GrowthPredictor（38 行），记录最近 5 轮 token 增长，预测下次压缩时机（均值×1.2）。`strategy.ts` 集成：shouldCompact 优先用 predictor，fallback triggerRatio
+- **FullCompaction token 量跟踪**（P1）— `full.ts:70,432` 新增 `lastCompactedTokens`，审计日志记录每次压缩释放量
+- **keepRecentMessages 扩到 30**（P1）— `micro.ts:20` 20→30
+
+#### 修复
+- **recordRound 集成缺口**（2026-07-04 修复）— `strategy.ts:58-60` 定义了 `recordRound` 但 `turn/index.ts` 未调用。Grep 全项目仅定义本身 1 个匹配。修复：`turn/index.ts:1733-1738` 加 `this.strategy.recordRound(totalInput)`
+
+#### 测试
+- 新增 3 个测试文件 15 个测试全通过：`cache-audit.test.ts(5)` / `predictor.test.ts(6)` / `strategy-threshold.test.ts(4)`
+- `CompactionStrategy` 接口新增 `recordRound` 方法签名
+
+#### 文档
+- 新建 `SYSTEM/phase26-cache-aware.md`（compact notation，AI 可读）
+- `SYSTEM-INDEX.md` 索引表挂载 Phase26 条目
+- `SYSTEM/CHANGELOG.md` 本日志追加二开发记录
+
+#### 未实现
+- P2 TUI usage-panel 缓存命中率展示（格式：`⚡ usage: 12.4K in / 1.2K out | 缓存命中率: 66%`）

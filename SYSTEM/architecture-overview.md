@@ -1,193 +1,161 @@
-# ScreamCode 整体架构总览
+# 整体架构
 
-> 架构层级图：从 monorepo 到每一行代码的分层结构。
-> 核心原则：大架构套小架构，每层职责清晰，可独立维护、可独立替换。
-
----
-
-## 第0层：Monorepo 顶层
-
-```
-ScreamCode/                      ← pnpm workspace root
-├── package.json                 ← workspace 定义（*）
-├── vitest.workspace.ts          ← 跨包测试
-├── SYSTEM/                      ← 系统说明书（三件套之一）
-├── ZHU/DECISIONS/               ← 决策历史（三件套之二）
-├── apps/                        ← 可执行应用
-│   └── scream-code/             ← CLI 入口（含 TUI）
-├── packages/                    ← 功能包
-│   ├── agent-core/              ← 核心引擎（主要）
-│   ├── memory/                  ← 记忆系统
-│   ├── skill-compiler/          ← Skill 编译器
-│   ├── jian/                    ← 文件系统抽象层
-│   └── ...其他                  ← plugin、rpc 等
-└── .scream-code/                ← 本地配置 + skills
-```
-
-**职责**：定义包间依赖、统一测试、统一构建。
+> 0→4 层分层图。每 `##` 独立 knowledge chunk。Agent 类结构在本文件第 2 层。踩坑/版本历史在 `SYSTEM/pitfalls.md`。
 
 ---
 
-## 第0.1层：packages/memory — 记忆系统
+## 第 0 层：Monorepo 包结构
 
-```
-packages/memory/
-├── src/
-│   ├── store.ts               ← MemoStore（SQLite + FTS5 + vec0）
-│   ├── scoring.ts             ← 残差评分 R = W × D^Δs
-│   ├── archive.ts             ← 记忆归档/恢复
-│   └── migrations/            ← 数据库迁移
-├── test/
-└── package.json
-```
+| 包 | 位置 | 职责 |
+|----|------|------|
+| `agent-core` | `packages/agent-core/` | 回合控制、注入、检测器、Guard、工具执行、上下文管理、拦截日志、压缩 |
+| `memory` | `packages/memory/` | 记忆存储（SQLite + FTS5 + vec0）、热冷升降、Dream 合并、评分 |
+| `scream-code`（入口） | `apps/scream-code/` | CLI + TUI、命令分发、Agent 实例化、MCP 客户端 |
+| `knowledge` | `packages/knowledge/` | 知识库（SQLite + fastembed + LLM 事件抽取）、multiSearch、ingest |
+| `ltod` | `packages/ltod/` | LLM 提供商（Anthropic/Ollama/OpenAI）、max_tokens 天花板、请求构建 |
 
-**作用**：全局记忆持久化，通过 `memoStore`（可选）挂载到 Agent。写操作 tools 在 `agent-core/tools/builtin/memory/`。
+**构建链：** `tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` → 修改任意 `@scream-*` 包必须两段构建 `pnpm build（agent-core/knowledge/memory）→ pnpm build（scream-code）`
 
 ---
 
-## 第0.2层：packages/skill-compiler — Skill 编译器
+## 第 1 层：agent-core 包结构
 
 ```
-packages/skill-compiler/
-├── src/
-│   └── compiler.ts            ← 从 SKILL.md → SkillPackage（类型检查、路径解析）
-├── test/
-└── package.json
-```
-
-**作用**：把可读的 SKILL.md 编译成系统可注册的 `SkillPackage`。调用关系：`MakeSkillApplyTool` → `SkillPackageWriter` → `skill-compiler`。
-
----
-
-## 第1层：packages/agent-core — 核心引擎
-
-```
-packages/agent-core/
-├── src/
-│   ├── agent/                   ← Agent 主体（第2层）
-│   ├── tools/                   ← 内置工具（第3层）
-│   ├── loop/                    ← 运行时循环
-│   ├── skill/                   ← Skill 系统
-│   ├── tui/                     ← 终端 UI
-│   └── rpc/                     ← RPC API
-├── test/                        ← 测试
-└── package.json
-```
-
-**核心入口**：`apps/scream-code/` 启动 → `agent-core` 创建 Agent → 进入 `turn/index.ts` 回合循环。
-
----
-
-## 第2层：Agent 主体内部（第1层的 agent/ 目录）
-
-```
-agent/
-├── index.ts                     ← Agent 类（容器，746行）
-│   ├── 组合: turnController     ← 回合控制（核心）
-│   ├── 组合: injectionManager   ← 注入管理器
-│   ├── 组合: context            ← 对话上下文
-│   ├── 组合: toolManager        ← 工具管理
-│   ├── 组合: skillManager       ← Skill 管理
-│   ├── 组合: mcpManager         ← MCP 连接
-│   ├── 组合: memoStore          ← 记忆系统（可选）
-│   ├── 组合: backgroundManager  ← 后台任务
-│   ├── 组合: cronManager        ← 定时任务
-│   ├── 组合: workingSet         ← 文件追踪
-│   ├── 组合: permissionManager  ← 权限
-│   ├── 组合: records            ← 持久化
-│   └── 组合: logger             ← 日志
-├── turn/                        ← 回合控制器（第2.1层）
-│   ├── index.ts                 ← TurnController（2150行核心）
-│   ├── injectors/               ← 注入器集合
-│   │   ├── anti_confabulation.ts ← 防编造注入
-│   │   ├── budget.ts            ← 预算注入
-│   │   ├── quality.ts           ← 简洁指令注入
-│   │   ├── stuck.ts             ← ☑ Phase21: 痛点感知注入
-│   │   └── base.ts              ← 注入器基类
-│   ├── signature.ts             ← 签名
-│   ├── variant-registry.ts      ← 残差注意力注册表
-│   └── truncation-tracker.ts    ← Phase24: 截断数据追踪器（自动恢复）
-├── injection/                   ← 注入系统
-│   ├── manager.ts               ← InjectionManager（5个injector）
-│   └── injector.ts              ← DynamicInjector（基类）
-├── compaction/                  ← 上下文压缩
-│   ├── micro.ts                 ← MicroCompaction
-│   └── full.ts                  ← FullCompaction
-├── goal/                        ← Goal 系统
-├── plan/                        ← 计划模式
-├── wolfpack/                    ← Wolfpack 批量模式
-└── permission/                  ← 权限管理
+packages/agent-core/src/
+├── agent/
+│   ├── index.ts           ← Agent 类（所有子系统的容器，见第 2 层）
+│   ├── turn/
+│   │   ├── index.ts       ← 回合控制核心（runOneTurn → afterStep → shouldContinueAfterStop）
+│   │   ├── guard-engine.ts← 4 条 AI 行为 Guard 规则
+│   │   ├── truncation-tracker.ts ← 截断自动恢复 + 步级竞争保护
+│   │   └── variant-registry.ts   ← VariantScheduler + QUOTA_TABLE 配额
+│   ├── context/
+│   │   ├── index.ts       ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
+│   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条/30min TTL）
+│   │   ├── masking.ts     ← maskToolObservations（遮蔽旧 tool result）
+│   │   └── stabilize.ts   ← stabilizePrefix（KV-cache 命中率提升）
+│   ├── injection/
+│   │   ├── manager.ts     ← InjectionManager（5 个注入器容器）
+│   │   └── goal.ts        ← GoalInjector（计划模式）
+│   ├── detection/
+│   │   ├── scene-memory.ts     ← SceneMemoryDetector
+│   │   ├── code-ref.ts         ← CodeRefDetector
+│   │   ├── code-quality.ts     ← CodeQualityDetector
+│   │   ├── confabulation.ts    ← ConfabulationDetector
+│   │   └── quality.ts          ← QualityDetector（5 种信号）
+│   ├── interception/
+│   │   └── event-log.ts        ← 环形缓冲区 + 磁盘持久化
+│   └── audit/
+│       └── file-action-audit.ts ← FAA（刷盘 / 熔断 / 查错注入）
+├── tools/
+│   └── builtin/
+│       ├── code/    ← Edit/Read/Write/Glob/Grep/Bash/LSP
+│       ├── memory/  ← MemoryLookup/MemoryWrite/MemoryEdit
+│       ├── context/ ← ArchiveRecoverTool
+│       └── knowledge/ ← KnowledgeLookupTool
+├── permission/        ← 权限管理
+└── context/
+    ├── types.ts       ← ContextMessage.protected
+    └── compaction/
+        ├── micro.ts   ← MicroCompaction
+        ├── full.ts    ← FullCompaction（含 _maxTries 安全门控）
+        └── ...
 ```
 
 ---
 
-## 第2.1层：回合控制 — 每步执行流程
+## 第 2 层：Agent 类组合
+
+**文件**: `packages/agent-core/src/agent/index.ts`
+
+### 组合属性
+
+| 属性 | 类型 | 可选 | 说明 |
+|------|------|------|------|
+| `modelProvider` | `LlmCaller` | 否 | LLM 调用接口 |
+| `tools` | `ToolCollection` | 否 | 注册的工具集合 |
+| `history` | `ContextMessage[]` | 否 | 完整对话历史 |
+| `convergenceGate` | object | 否 | 收敛检查 + 注入 + 停止 |
+| `injectionManager` | `InjectionManager` | 否 | 注入管线 |
+| `turnController` | 内置 | 否 | 回合控制器 |
+| `permission` | `PermissionManager` | 否 | 权限管理 |
+| `memoStore` | `MemoryMemoStore` | **是** | 记忆存储（sub agent 没有） |
+| `knowledgeStore` | `KnowledgeStore` | **是** | 知识库（sub agent 没有） |
+| `knowledgeAvailable` | boolean | **是** | 知识库可用性 |
+| `sceneMemoryDetector` | `SceneMemoryDetector` | 否 | 场景记忆检测 |
+| `codeRefDetector` | `CodeRefDetector` | 否 | 代码引用检测 |
+| `codeQualityDetector` | `CodeQualityDetector` | 否 | 代码质量检测 |
+| `confabulationDetector` | `ConfabulationDetector` | 否 | 反事实检测 |
+| `qualityDetector` | `QualityDetector` | 否 | 质量检测 |
+| `fileActionAudit` | `FileActionAudit` | **是** | FAA（sub agent 没有） |
+| `eventLog` | `InterceptionEventLog` | **是** | 拦截日志（sub agent 没有） |
+
+### 回合控制流
 
 ```
-TurnController.handleAfterStep()  ← 每步的"下班"处理
-│
-├── 1. 更新 injector 步号
-├── 2. 运行 injectors (按顺序):
-│   ├── anti_confabulation     ← 防编造
-│   ├── budget                  ← 预算控制
-│   ├── quality                 ← 简洁指令
-│   └── stuck                   ← ☑ 痛点检测（Phase21 新增）
-├── 3. injectStuckInjector()   ← 检测3种stuck模式
-├── 4. GuardEngine 规则检测    ← 偏差链拦截
-├── 5. resetInjectorStepState()
-└── 6. shouldContinueAfterStop()
+turnController.step(stepTool) →
+  convergenceGate.beforeStep() → injectors → LLM → executeTool →
+  afterStep() → [detectors run] → shouldContinueAfterStop() →
+    [stopped → return | continued → loop]
 ```
 
-**数据流每步**: 
-```
-Edit/Write → 记 editFileThisStep
-Bash 报错 → 记 toolErrorThisStep = ctx.toolCall.name
-步末 → handleAfterStep → injectStuckInjector(editFileThisStep, toolErrorThisStep, ...)
-     → 检测连续模式 → dedup/残差/间隔门控 → inject(stuckMsg)
-     → resetInjectorStepState → 清空单步标记
-```
+### afterStep 流程
 
----
+1. `afterStep(lastToolResult, stepToolSummary)`
+2. 更新 injector 步号
+3. 运行 injectors（按顺序：anti_confabulation → budget → quality → stuck）
+4. `injectStuckInjector()` — 检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步）
+5. Guard 规则检测（guard-engine.ts）
+6. `resetInjectorStepState()`
+7. `shouldContinueAfterStop()` — 检查是否应该停止
 
-### FAA 收敛门（Phase22 后新增）
+### FAA 收敛门
 
 ```
 步末 → convergence_gate 检查器队列
   └─ FAA checker: lastToolFailure?.isExploratory === false && !hasPassed
-       ├─ BLOCKER: verifyFailedThisStep === true → "验证失败，不要跳过" + FAA audit
+       ├─ BLOCKER: verifyFailedThisStep === true  → "验证失败" + FAA audit
        ├─ CRITICAL: lastBashExitCode ∈ {137, 124} → "OOM/超时" + FAA audit
-       └─ WARNING: 其他错误 → "检查输出修复" + FAA audit
+       └─ WARNING: 其他错误                       → "检查输出修复" + FAA audit
 ```
 
-FAA（File Action Audit）是**步末收敛检查**的一部分，不属于注入管线。它在步内错误信息（`lastBashExitCode`、`verifyFailedThisStep`）记录后执行三级分类，针对错误类型选择注入模板。
+FAA 是步末收敛检查的一部分，不属于注入管线。在步内错误信息记录后执行三级分类，针对错误类型选注入模板。
 
----
-
-## 第3层：内置工具（第1层的 tools/ 目录）
+### 数据流（每步）
 
 ```
-tools/
-├── builtin/
-│   ├── collaboration/         ← SkillTool（skill 调用工具）
-│   ├── memory/                ← MemoryRead/MemoryWrite/MemoryEdit
-│   ├── skill/                 ← Skill 创建安装
-│   ├── code/                  ← 代码类工具
-│   └── ...
-└── support/                   ← 工具支持库
+Edit/Write → filed 记 editFileThisStep
+Bash 报错 → 记 toolErrorThisStep
+步末 → injectors → Guard → detectors → shouldContinueAfterStop
+     → 未停止 → 下一回合
 ```
 
 ---
 
-## 第4层：外部系统
+## 第 3 层：内置工具
 
 ```
-ScreamCode Agent
-├──→ MCP 服务器（codegraph / anysearch / context7 / ...）
-│   └── 通过 mcp.json 三层配置（用户级→父目录→项目级）
-├──→ LLM（通过 modelProvider 接口）
-├──→ 记忆存储（SQLite + FTS5 + vec0）
-└──→ 文件系统（通过 jian 抽象层）
+tools/builtin/
+├── collaboration/    ← SkillTool（skill 调用）
+├── memory/          ← MemoryLookup/MemoryWrite/MemoryEdit
+├── code/            ← Edit/Read/Write/Glob/Grep/Bash/LSP
+├── context/         ← ArchiveRecoverTool
+└── knowledge/       ← KnowledgeLookupTool
 ```
+
+**工具注册两步骤：** ① 代码中 `new ToolName()` 注册 ② `agent.yaml` 列出工具名。缺一不可。工具执行统一 3 阶段：`prepareToolExecution → execute → finalizeToolResult`。详见 `SYSTEM/API-REFERENCE.md §2`。
+
+---
+
+## 第 4 层：外部系统
+
+| 外部系统 | 连接方式 | 说明 |
+|---------|---------|------|
+| LLM | `modelProvider` 接口 | Anthropic/Ollama/OpenAI，通过 `ltod` 包 |
+| MCP 服务器 | `mcp.json` 三层配置 | codegraph / anysearch / context7 |
+| SQLite 存储 | `better-sqlite3` / `node:sqlite` | 记忆库（FTS5+vec0）/ 知识库（FTS5） |
+| 文件系统 | `jian` 抽象层 | 文件读写 |
+| Python 运行时 | `child_process` | fastembed（知识库 embedding） |
 
 ---
 
@@ -197,50 +165,6 @@ ScreamCode Agent
 |------|------|
 | **Agent 是容器** | Agent 类本身不处理业务，业务在 turn/index.ts |
 | **插件化 injector** | injectors/ 每个文件一个检测器，增减不影响其他 |
-| **残差注意力门控** | 所有注入通过 VariantMeta（W, D, threshold, minStepGap）控制频率，不刷屏 |
-| **可选子系统** | memoStore 只有主 agent 有，sub agent 没有 |
+| **残差注意力门控** | 所有注入通过 VariantMeta（W, D, threshold, minStepGap）控制频率 |
+| **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
 | **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删不影响其他层 |
-
-### Phase22 变更（2026-06-29）
-
-Phase22 对架构做了以下补充：
-
-| 组件 | 所属层级 | 职责 |
-|------|----------|------|
-| `ContextMessage.protected` | context/types.ts（上下文层） | compaction 保护标记 |
-| `protectHighLevelReminders` | context/index.ts（上下文层） | 自动标记 S/A 级消息为 protected |
-| `_maxTries` 安全门控 | compaction/full.ts（上下文层） | 防止全 protected 死循环 |
-| `VariantScheduler` | turn/variant-registry.ts（回合层） | 注入配额 + 冷却 + 窗口调度 |
-| `QUOTA_TABLE` | turn/variant-registry.ts（回合层） | default/low 两档配额 |
-| `canInject/afterInject/onTurnReset` | injection/manager.ts（注入层） | 注入管线阀门占位 |
-| `collectInjectorFacts` | turn/injectors/facts.ts（注入层） | 注入调度事实收集（待门控接入） |
-| `injection-system.md` | SYSTEM/（文档） | 指令权重 S/A/B/C/D 全局说明书 |
-
-**数据流新增**：turn 步末 → `VariantScheduler.shouldInject` 检查配额/冷却/窗口 → 通过后注入 → `afterInject` 记录 → compaction 时 `protected` 消息跳过。
-
-相关文档：`SYSTEM/injection-system.md`
-
-### Phase24 变更（2026-07-02）
-
-Phase24 对架构做了以下补充：
-
-| 组件 | 所属层级 | 职责 |
-|------|----------|------|
-| `TruncationTracker` | turn/truncation-tracker.ts（回合层） | 截断数据自动 recover + inject + 放行 |
-| `stepRecovered` Map | turn/truncation-tracker.ts（回合层） | Phase24.2: 同步多工具并行竞争保护 |
-| `readOnlyTools` 配置 | TruncationTrackerConfig（回合层） | Phase24.2: 只读工具白名单可配置 |
-| 诊断式注入预览 | turn/index.ts guard（回合层） | Phase24.2: 替代 slice(2000) 二次截断 |
-
-**数据流变更**：工具输出截断 → `finalizeToolResult` 注册到 TruncationTracker → 后续工具步入 guard 时自动 recover + inject 诊断式预览 + 放行 → 步末 `afterStep` 清理 stepRecovered。
-
-相关文档：`SYSTEM/API-REFERENCE.md §23`
-
----
-
-## 相关文档
-
-- `SYSTEM-INDEX.md` — 系统索引表（入口）
-- `SYSTEM/architecture.md` — Agent 类结构细节
-- `SYSTEM/API-REFERENCE.md` — 接口签名参考
-- `SYSTEM/pitfalls.md` — 踩坑记录
-- `ZHU/DECISIONS/INDEX.md` — 决策历史

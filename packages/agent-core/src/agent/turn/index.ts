@@ -47,6 +47,8 @@ import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
 import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
 import { AttentionPositionStrategy } from '../injection/position-strategy';
+import { ContentHashCache } from './content-cache';
+import { AuditLogWriter, computeCacheMetrics, buildAuditEntry } from '../usage/audit-log';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -114,6 +116,8 @@ export class TurnFlow {
 
   // ── Injection injector fields ────────────────────────────────
   private stepInjectedVariants = new Set<string>();
+  /** 跨步内容去重缓存 (Optim C) */
+  private contentHashCache = new ContentHashCache();
   private hasCalledLspReferencesThisStep = false;
   private searchHadResultsThisStep = false;
   private verifyFailedThisStep = false;
@@ -215,12 +219,19 @@ export class TurnFlow {
   // ── Interception event log (Phase 10) ──────────────────────────
   private readonly eventLog = new TurnEventLog();
 
+  // ── Phase 26: 缓存审计日志 ─────────────────────────────────────
+  private auditLogger = new AuditLogWriter();
+  private _lastUsage: import('@scream-code/ltod').TokenUsage | null = null;
+  private _lastModel: string = '';
+
   // ── Event snapshot persistence (Phase 10+) ─────────────────────
   private eventBuffer!: EventSnapshotBuffer;
 
   constructor(protected readonly agent: Agent) {
     TruncationTracker.current = this.turnTruncation;
     this.eventBuffer = new EventSnapshotBuffer(agent);
+    // Phase 26: init audit log asynchronously (swallow errors — never crash turn)
+    this.auditLogger.init().catch(() => {});
     // 🆕 Phase15+: variantRegistry 行为观察回调 → 记录 behavior_feedback 事件
     this.variantRegistry.onBehaviorObserved = (v, observed) => {
       this.eventLog.record({
@@ -811,6 +822,8 @@ export class TurnFlow {
             afterStep: async ({ usage }) => {
               this.agent.usage.record(model, usage, 'turn');
               await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage));
+              this._lastUsage = usage;
+              this._lastModel = model;
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
 
@@ -1540,6 +1553,7 @@ export class TurnFlow {
             kind: 'injection_skipped', variant, action: 'skipped_residual',
             step: this.currentStep, turnId: this.currentTurnId,
             reason: `R≥T for ${variant}`,
+            agentType: this.agent.type,
           });
           return;
         }
@@ -1556,10 +1570,22 @@ export class TurnFlow {
         kind: 'injection_skipped', variant, action: 'skipped_dedup',
         step: this.currentStep, turnId: this.currentTurnId,
         reason: `Dedup skip: ${variant} already injected this step`,
+        agentType: this.agent.type,
       });
       return;
     }
     if (variant) this.stepInjectedVariants.add(variant);
+
+    // 🆕 Phase26 Optim C: 跨步内容去重 — 与上一步相同 variant 内容一致则跳过
+    if (variant && this.contentHashCache.isDuplicate(variant, text)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_content_dedup',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Content dedup: ${variant} content unchanged from last injection`,
+        agentType: this.agent.type,
+      });
+      return;
+    }
 
     // Phase22.3: 变体配额调度 — 委托 VariantScheduler
     if (variant && !this.agent.injection.canInject(variant, this.currentStep)) {
@@ -1567,6 +1593,7 @@ export class TurnFlow {
         kind: 'injection_skipped', variant, action: 'skipped_quota',
         step: this.currentStep, turnId: this.currentTurnId,
         reason: `Quota denies ${variant} (count=${this.agent.injection.getInjectionCount(variant)})`,
+        agentType: this.agent.type,
       });
       return;
     }
@@ -1583,6 +1610,7 @@ export class TurnFlow {
         step: this.currentStep, turnId: this.currentTurnId,
         reason: `Injected interception_log (lv=${effectiveLevel})`,
         level: effectiveLevel, tokenEstimate: estimatedTokens,
+        agentType: this.agent.type,
       });
       return;
     }
@@ -1596,6 +1624,7 @@ export class TurnFlow {
         step: this.currentStep, turnId: this.currentTurnId,
         reason: `Budget denies ${variant ?? 'unknown'} (t≈${estimatedTokens}, lv=${effectiveLevel})`,
         level: effectiveLevel, tokenEstimate: estimatedTokens,
+        agentType: this.agent.type,
       });
       return;
     }
@@ -1630,6 +1659,7 @@ export class TurnFlow {
       step: this.currentStep, turnId: this.currentTurnId,
       reason: `Injected ${variant ?? 'unknown'} (lv=${effectiveLevel})`,
       level: effectiveLevel, tokenEstimate: estimatedTokens,
+      agentType: this.agent.type,
     });
   }
 
@@ -1708,6 +1738,27 @@ export class TurnFlow {
 
     // Step 7: 重置
     this.resetInjectorStepState();
+
+    // ── Phase 26: 缓存审计日志写入 + GrowthPredictor 数据投喂 ──
+    if (this._lastUsage && (this._lastUsage.cacheHitTokens !== undefined || this._lastUsage.cacheMissTokens !== undefined)) {
+      const metrics = computeCacheMetrics(this._lastUsage);
+      const compacted = this.agent.fullCompaction.lastCompactedTokens > 0;
+      const compactedTokens = compacted ? this.agent.fullCompaction.lastCompactedTokens : 0;
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, metrics, compacted, compactedTokens);
+      this.auditLogger.write(entry);
+      // 若发生了 compaction，内容缓存失效，重置去重状态
+      if (compacted) this.contentHashCache.reset();
+      // Reset so next turn starts fresh
+      this.agent.fullCompaction.lastCompactedTokens = 0;
+    }
+    // Phase26: 每轮喂 token 数据给 GrowthPredictor
+    if (this._lastUsage) {
+      const totalInput = (this._lastUsage.inputOther || 0) +
+        (this._lastUsage.inputCacheRead || 0) +
+        (this._lastUsage.inputCacheCreation || 0);
+      this.agent.fullCompaction.strategy.recordRound(totalInput);
+    }
+    this._lastUsage = null;
   }
 
   /** C组: 步级反馈注入 — 基于当前步工具调用模式注入对应提醒 */

@@ -29,6 +29,8 @@ export interface InterceptionEvent {
   level?: string;
   /** 🆕 Phase15+: 预算估值（仅 budget skip 事件有效） */
   tokenEstimate?: number;
+  /** 🆕 Phase26: 主体类型 — 'main' | 'sub' | 'independent' */
+  agentType?: string;
 }
 
 const MAX_EVENTS = 200;
