@@ -25,7 +25,8 @@
 
 ├─ 记忆系统
 │   ├─ memory-store.md            — SQLite+FTS5+vec0存储/混合评分/热冷升降
-│   └─ dream.md                   — Dream整理/保护标签/合并流程
+│   ├─ dream.md                   — Dream整理/保护标签/合并流程
+│   └─ classifiers/               — 价值分类器(v0.8.5) + 类别标签推断
 
 ├─ MCP + 构建
 │   └─ mcp-server.md              — MCP server配置/工具类型/权重

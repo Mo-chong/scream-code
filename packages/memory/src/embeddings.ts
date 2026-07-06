@@ -76,6 +76,7 @@ export function createFastEmbedEngine(cacheDir?: string): EmbeddingEngine {
 function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let embedder: FastembedModel | null = null;
   let initPromise: Promise<FastembedModel | null> | null = null;
+  let loadFailed = false;
 
   // Pre-warm: eagerly load the model on construction.
   // The Agent caller (agent/index.ts) creates the engine during startup,
@@ -164,7 +165,7 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
 import { createRequire } from 'node:module';
 
 /** Timeout for FlagEmbedding.init() model download. 5min for cold cache on slow connections. */
-const EMBED_INIT_TIMEOUT_MS = 300_000;
+const EMBED_INIT_TIMEOUT_MS = 600_000;
 
 /**
  * Resolve the package root directory from import.meta.url.
@@ -196,43 +197,44 @@ async function initWithTimeout<T>(
 }
 
 /**
- * Clean all known model cache locations for BGESmallZH.
- * Called when TAR_BAD_ARCHIVE or zlib error indicates a corrupt partial download.
- * Cleans both the project-local cache and the global HF Hub / fastembed fallback caches.
+ * Clean model cache directories known to hold BGESmallZH.
+ * If `specificDir` is provided (the actual cacheDir in use), clean that first.
+ * Then also clean known fallback locations.
  */
-function cleanFastembedCache(): void {
-  // 1. Project-local cache (where we point cacheDir to)
-  const localDir = getLocalCacheDir();
-  const localModelDir = path.join(localDir, 'fast-bge-small-zh-v1.5');
-  try {
-    if (existsSync(localModelDir)) {
-      rmSync(localModelDir, { recursive: true, force: true });
-      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${localModelDir}\n`);
-    }
-  } catch { /* best-effort */ }
+function cleanFastembedCache(specificDir?: string): void {
+  const modelName = 'fast-bge-small-zh-v1.5';
+  const dirsToClean: string[] = [];
 
-  // 2. HuggingFace Hub cache
-  const hfHubDefault = path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+  // 1. The actual cacheDir in use (most important — caller's specific dir)
+  if (specificDir !== undefined) {
+    dirsToClean.push(path.join(specificDir, modelName));
+  }
+
+  // 2. Project-local cache (fallback when no cacheDir passed)
+  dirsToClean.push(path.join(getLocalCacheDir(), modelName));
+
+  // 3. Scream Home cache (used by agent/index.ts: embedCacheDir)
+  if (process.env.SCREAM_HOME) {
+    dirsToClean.push(path.join(process.env.SCREAM_HOME, 'cache', 'fastembed', modelName));
+  }
+
+  // 4. HuggingFace Hub cache
   const hfHub = process.env['HF_HOME']
     ? path.join(process.env['HF_HOME'], 'hub')
-    : hfHubDefault;
-  const hfModelDir = path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5');
-  try {
-    if (existsSync(hfModelDir)) {
-      rmSync(hfModelDir, { recursive: true, force: true });
-      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${hfModelDir}\n`);
-    }
-  } catch { /* best-effort */ }
+    : path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+  dirsToClean.push(path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5'));
 
-  // 3. Fastembed fallback cache (~/.cache/fastembed/)
-  const feDefault = path.join(os.homedir(), '.cache', 'fastembed');
-  const feModelDir = path.join(feDefault, 'models--Xenova--bge-small-zh-v1.5');
-  try {
-    if (existsSync(feModelDir)) {
-      rmSync(feModelDir, { recursive: true, force: true });
-      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${feModelDir}\n`);
-    }
-  } catch { /* best-effort */ }
+  // 5. Fastembed default fallback (~/.cache/fastembed/)
+  dirsToClean.push(path.join(os.homedir(), '.cache', 'fastembed', modelName));
+
+  for (const dir of dirsToClean) {
+    try {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+        process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${dir}\n`);
+      }
+    } catch { /* best-effort */ }
+  }
 }
 
 async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
@@ -266,7 +268,7 @@ async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
           || errMsg.includes('zlib:')
           || errMsg.includes('tokenizer.json');
         if (isCorruptCache) {
-          cleanFastembedCache();
+          cleanFastembedCache(effectiveCacheDir);
           continue;
         }
 

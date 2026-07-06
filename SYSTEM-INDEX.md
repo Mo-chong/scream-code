@@ -215,6 +215,10 @@
   packages/memory/src/
     store.ts                      → MemoryMemoStore（SQLite + FTS5 + vec0 向量 + 热冷升降，~1485 行）
     models.ts                     → MemoryMemo 数据模型
+    embeddings.ts                 → 向量引擎 (engine cache + sidecar 自动补全)
+    classifiers/
+      value-classifier.ts         → 记忆价值自动分类 (v0.8.5 新增)
+      category-tagger.ts          → 类别标签推断 (v0.8.5 新增)
     scoring.ts                    → 混合评分(60% keyword + 40% vector) × ResNet 因子
     consolidator.ts               → Dream 去重合并 + demote 归档
 

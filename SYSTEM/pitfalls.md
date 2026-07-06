@@ -261,6 +261,16 @@ cmd.exe /c "ftype NodeJSFile=\"C:\Program Files\nodejs\node.exe\" \"%1\" %*"
 | toLowerCase 大小写不敏感 | claims 比较 `"Learn"` vs `"learn"` 判为不重叠 | 比较前统一 `.toLowerCase()` |
 | tier+recalledAt 排序防御 | 同 score 的记录返回顺序不稳定 | `ORDER BY tier DESC, recalledAt DESC` 二级排序 |
 
+### 向量模型下载反复失败 — 超时+清错目录+sidecar 缺 onnx（2026-07-06）
+
+**现象**：新对话触发向量模型下载，300s 超时→zlib 损坏文件→清缓存→tokenizer 找不到→sidecar 补 4 文本→init 仍缺 onnx→下轮对话再下载循环。
+
+**根因**：`cleanFastembedCache()` 只清理 `local_cache/` 不清理 `SCREAM_HOME/cache/fastembed/`（实际 cacheDir），导致脏文件残留；`EMBED_INIT_TIMEOUT_MS=300_000` 不够（33% 已花 602s）；`ensureFastembedModelSidecars()` 只补 4 文本配置不补 `model.onnx`（30MB），清缓存重试后 onnx 仍缺席。
+
+**解决**：`cleanFastembedCache(specificDir?)` 参数化，优先清理实际 `effectiveCacheDir` + `SCREAM_HOME/cache/fastembed/` + HF Hub + `~/.cache/fastembed/`；超时增至 `600_000`（10min）。
+
+**教训**：多目录缓存清理类函数必须参数化传入当前在用目录，不能硬编码假设。网络波动下模型下载超时阈值取日志峰值 ×1.5。
+
 ---
 
 ## 回合控制
