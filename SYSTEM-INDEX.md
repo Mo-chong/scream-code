@@ -11,6 +11,8 @@
 
 ```
 ├─ 接口手册        API-REFERENCE.md
+├─ AGENTS 架构
+│   └─ 三层加载链  agents-hierarchy.md
 ├─ 执行架构
 │   ├─ 回合控制    turn-control.md
 │   ├─ 注入系统    injection-system.md
@@ -46,12 +48,13 @@
 | **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
-| **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + InjectBudget 五级预算(S/A/B/C/D) + VariantScheduler 配额 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
+| **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + W/D/T 三级参数 + VariantScheduler 残差门控 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
-| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler + 残差注意力门控 R=W×D^Δs + QUOTA_TABLE per-conversation 配额 |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler 残差公式 R=W×D^Δs + 阈值衰减防脱敏 |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | 四层架构：maskToolObservations + ContentArchive（LRU 2000 条/30min TTL，sharedStore 跨子 agent 共享）+ MicroCompaction（3 道关卡）+ FullCompaction（LLM 总结→记忆库）。ArchiveRecover MCP 工具已放开。Bash 降噪：ANSI 剥离 + 重复行去重 |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
+| **AGENTS 分层设计** 🆕 | `SYSTEM/agents-hierarchy.md` | 三层加载链(findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget) + 四维评估框架 + 语言设计规范 + 55KB 提取方法论 |
 | **System Prompt 装配** | `SYSTEM/prompt-assembly.md` | Template → Render → Inject → API 全链路，模板变量/AGENTS合并/user-prefs双路 |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
@@ -119,11 +122,9 @@
 | 注入有几种优先级 | `SYSTEM/injection-system.md` §优先级 |
 | system_trigger 是什么 | `SYSTEM/injection-system.md` §system_trigger |
 | 注入 ResNet 残差调度 | `SYSTEM/injection-system.md` §variant-registry L319-345 |
-| VariantScheduler 配额调度 | `SYSTEM/API-REFERENCE.md` §22.5 |
-| QUOTA_TABLE 配额表 | `SYSTEM/API-REFERENCE.md` §22.5 |
+| VariantScheduler 残差调度 | `SYSTEM/injection-system.md` §7 |
+| 残差公式与阈值衰减 | `SYSTEM/injection-system.md` §7 |
 | protected compaction 保护 | `SYSTEM/API-REFERENCE.md` §22.1-22.4 |
-| collectInjectorFacts | `SYSTEM/API-REFERENCE.md` §22.8 |
-| InjectionManager 占位方法 | `SYSTEM/API-REFERENCE.md` §22.7 |
 | 两套 ResNet 什么关系 | `Phase21.1-深度分析-系统引用重构方案.md` §四 |
 | normalTags 为什么用 MAX_TAGS_ABSOLUTE | `SYSTEM/pitfalls.md` §坑 1：normalizeTags 硬编码 |
 
@@ -204,7 +205,7 @@
     agent/index.ts                → Agent 类（所有子系统的容器）
     agent/turn/index.ts           → 回合控制核心（1737 行）
     agent/context/index.ts        → appendUserMessage / appendSystemReminder
-    agent/injection/manager.ts    → InjectionManager（5 个 injector，Phase21 移除 system-ref）
+    agent/injection/manager.ts    → InjectionManager（10 个 DynamicInjector，Phase21 移除 system-ref）
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
     tools/builtin/memory/

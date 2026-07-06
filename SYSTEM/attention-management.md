@@ -7,7 +7,7 @@ tags: [type/reference, domain/system, status/final]
 > 注意力管理是系统对模型注意力"往哪看、看多久、是否真的看了"的显式干预机制。
 > 与上下文管理（"往上下文窗口塞什么"）是互补但不同的维度。
 >
-> 核心管控链路：ResNet 残差调度（Phase 9）→ InjectBudget 预算（Phase 9）→ VariantScheduler 配额（Phase 22.3）→ Behavior 观察闭环（Phase 15）
+> 核心管控链路：ResNet 残差调度（Phase 9）→ InjectBudget 预算（Phase 9）→ VariantScheduler 残差（取代旧配额）→ Behavior 观察闭环（Phase 15）
 
 ---
 
@@ -40,7 +40,7 @@ tags: [type/reference, domain/system, status/final]
 ├─ [复读衰减] repeatDecay()                                │
 │   同变体本回合触发 ≥5 次 → 自动跳过                     │
 │                                                          │
-├─ [VariantScheduler] 配额调度（Phase 22.3）               │
+├─ [VariantScheduler] 残差调度 + 阈值衰减               │
 │   injection/manage.ts                                    │
 │   每变体配额 = floor(perTurnMax / priority)              │
 │   超配额 → skip（quota-based throttling）                │
@@ -123,11 +123,11 @@ R = W × D^Δs
 
 已观察到的行为 → 重置同变体的跨回合违规计数，降低后续注入强度。
 
-### 3. VariantScheduler 配额调度（Phase 22.3）
+### 3. VariantScheduler 残差调度（取代旧配额系统）
 
 **文件：** `injection/manage.ts`
 
-**机制：** 每个变体有配额上限（per-turn 最大注入次数）。超配额后自动 skip，防止单变体注入风暴。整个对话维护每个变体的注入计数。
+**机制：** 每个变体有残差参数（W/D/T），残差公式 `R = W × D^Δs` 决定触发时机。低于阈值 T 才触发，注入后 T 降低。无硬性 quota，靠阈值衰减自然防脱敏。
 
 ### 4. InjectBudget 回合级预算
 

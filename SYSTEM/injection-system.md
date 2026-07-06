@@ -45,7 +45,7 @@ export interface VariantMeta {
 }
 ```
 
-### 当前注册表
+### 当前注册表（31 变体，见 variant-registry.ts:277-331）
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
@@ -71,7 +71,7 @@ export function getScore(variant: string, stepDelta: number): number {
 
 ## 3. 残差注意力系统 (Residual Attention System)
 
-残差注意力是其核心门控机制：每次注入后，同一变体的"注意力残差"随时间指数衰减。只有当残差值 ≥ threshold 时，才会允许再次注入。
+残差注意力是其核心门控机制：每次注入后，同一变体的注意力残差随时间指数衰减。只有当残差值 **低于** threshold 时（R < T），代表该规则的记忆已足够淡化，才会允许再次注入。
 
 ### 全链路判定流程
 
@@ -80,18 +80,17 @@ VariantMeta.weight ← 基础权重
   ×
   decayPerStep ^ (currentStep - lastInjectedStep)
   = 残差 R
-  ≥ threshold?
-    → 注入
-    < threshold?
-    → 跳过 (skipped_residual)
+  < T (当前阈值)?
+    → 注入（R 低于阈值，规则已被遗忘）
+    ≥ T?
+    → 跳过（R 仍在阈值之上，规则还在生效）
 ```
 
 ### 附加门控
 
 1. **Dedup 门控** (skipped_dedup): 同一 step 内已注入过同一变体 → 跳过
 2. **MinStepGap 门控**: Δs < minStepGap → 跳过
-3. **Budget 门控** (skipped_budget): 本步注入预算已耗尽 → 跳过
-4. **配额门控** (Phase22.3): 变体已达到 per-conversation 配额 → 跳过
+3. **perStepLimit 门控** (skipped_perStepLimit): 本步注入已达到上限 → 跳过
 
 ### 当前使用者
 
@@ -137,7 +136,7 @@ export class InjectionManager {
   /** 压缩后重建注入器状态 */
   onContextCompacted(compact: (text: string, meta: Record<string, unknown>) => void): void;
 
-  // ── Phase22.3: 变体配额调度 ─────────────────────────────────
+  // ── Phase? 变体残差调度 ─────────────────────────────
 
   /**
    * 检查变体是否在配额限制内。
@@ -215,9 +214,21 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 
 ### 当前注入器
 
-| 文件 | 变体 | 等级 | 触发条件 | 注入内容 |
-|------|------|------|---------|---------|
-| `injectors/stuck.ts` | `system_ref_stuck` | D | 同一文件连续编辑≥3步 或 同一工具连续报错≥2步 ± 残差门控通过 | 文档导航提示 |
+| 文件 | 变体数 | 等级 | 触发条件 | 注入内容 |
+|------|-------|------|---------|---------|
+| `goal.ts` | 3 | C | 计划模式 step | 计划目标提醒 |
+| `memory-rules.ts` | 2 | C | 场景记忆匹配 | 记忆规则提示 |
+| `permission-mode.ts` | 4 | A/B | 权限模式切换 | 模式限制说明 |
+| `plan-mode.ts` | 5 | B | 计划模式行为 | 计划行为约束 |
+| `plugin-session-start.ts` | 2 | C | 插件会话启动 | 会话初始提醒 |
+| `todo-list.ts` | 3 | C | todo 列表变化 | todo 状态更新 |
+| `user-prefs.ts` | 1 | S | 每轮（路径 B） | 用户偏好 |
+| `wolfpack.ts` | 2 | C | WolfPack 调用 | WolfPack 行为说明 |
+| `working-set.ts` | 6 | B/C | working set 变化 | 文件关注提醒 |
+| `stuck.ts` | 1 | D | 同一文件连续编辑≥3步 | 文档导航提示 |
+
+> **活跃总数**: 10 个注入器，约 29 变体。`quality.ts / confabulation.ts` 已弃用（功能迁移到 turn/index.ts 硬编码注入）。
+> **注意**: 路径 B（turn/index.ts 硬编码注入）绕过 VariantScheduler 调度，计划迁移回 DynamicInjector 体系。详见 [注入系统融合计划](../workspace/注入系统融合计划.md)。
 
 ### 预留注入器（Phase22 规划）
 
@@ -229,29 +240,35 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 
 ---
 
-## 7. 配额系统 (Quota System) — Phase22.3（已实现）
+## 7. 自适应调度 (Adaptive Scheduling) — v2（取代旧配额系统）
 
-定义于 `variant-registry.ts`，通过 `VariantScheduler` 管理。
-自 v0.6.10+ 起，`InjectionManager` 的三个方法已接入 `VariantScheduler`，配额调度实际生效。
+定义于 `variant-registry.ts` 的 `VariantScheduler`。自 v0.6.10+ 起取代了旧版 QUOTA_TABLE（配额系统已完全移除）。
 
-### QUOTA_TABLE
+### 核心公式
 
-```typescript
-export interface VariantQuota {
-  /** 整轮对话中该变体最大注入次数 */
-  maxPerConversation: number;
-  /** 注入后的冷却步数（该步数内不再次注入该变体） */
-  cooldownSteps: number;
-  /** 滑动窗口大小（步数），用于控制注入频率 */
-  windowSize?: number;
-}
-
-// 默认配额配置
-const QUOTA_TABLE: Record<string, VariantQuota> = {
-  default: { maxPerConversation: 20, cooldownSteps: 1, windowSteps: 100 },
-  low:     { maxPerConversation: 8,  cooldownSteps: 3, windowSteps: 50 },
-};
 ```
+R = W × D^Δs           ← 残差
+触发条件: Δs ≥ minStepGap 且 R < T
+注入后: T = T × thresholdDecay   ← 阈值衰减（防脱敏）
+```
+
+- **W**: 基础权重 — 越大覆盖轮次越广
+- **D**: 衰减率 — D<1 指数衰减，越大衰减越慢（覆盖更久）
+- **T**: 当前阈值 — R 低于 T 才触发，每次注入后降低
+- **thresholdDecay**: 阈值衰减系数（初定 0.65）
+- **minStepGap**: 硬性最短间隔
+
+### 防脱敏机制（无 quota 硬上限）
+
+不再有 `maxPerConversation / cooldownSteps` 硬上限。防脱敏靠三要素自然配合：
+
+| 机制 | 作用 | 效果 |
+|------|------|------|
+| 残差衰减 R = W × D^Δs | 每次注入后 R 重置为 W，逐渐衰减到 T 以下才再触 | 自然间隔 ~15-22 步 |
+| 阈值衰减 T = T × thresholdDecay | 每次注入后 T 降低 | 第 2 次间隔拉长到 ~22 步，第 3 次 ~30+ |
+| minStepGap | 硬性最短步数 | 防止连续步数刷屏 |
+
+同一变体在整场 session 自动「密集→渐疏→极疏」，不会脱敏。
 
 ### VariantScheduler 接口
 
@@ -269,18 +286,18 @@ export class VariantScheduler {
 ```
 TurnFlow.inject(variant, text)
   → InjectionManager.canInject(variant, currentStep)
-    → VariantScheduler.shouldInject(variant, currentStep)    ← 四层配额检查
-      → ① minStepGap（距上次注射步数）
-      → ② cooldownSteps（冷却期）
-      → ③ maxPerConversation（对话总次数上限）
-      → ④ 滑动窗口（最近 N 步内已注入次数）
-  ↓ 超限 → 跳过注入，记录 injection_skipped 事件
-  ↓ 通过 → 继续注入 + afterInject(variant, step)
-    → VariantScheduler.record(variant, currentStep)
+    → VariantScheduler.shouldInject(variant, currentStep)
+      → ① Δs ≥ minStepGap?  ← 硬性最短间隔
+      → ② R < T?             ← 残差低于当前阈值
+    ↓ 不满足 → 跳过，记录 skipped_residual / skipped_minStep
+    ↓ 满足   → 继续注入 + afterInject(variant, step)
+      → VariantScheduler.record(variant, currentStep)
+        → T = T × thresholdDecay  ← 阈值衰减
   ↓ 回合结束
 TurnFlow.resetForTurn()
   → InjectionManager.resetForTurn()
     → VariantScheduler.reset()
+      → T 恢复 T₀
 ```
 
 ---

@@ -28,15 +28,25 @@ packages/agent-core/src/
 │   │   ├── index.ts       ← 回合控制核心（runOneTurn → afterStep → shouldContinueAfterStop）
 │   │   ├── guard-engine.ts← 4 条 AI 行为 Guard 规则
 │   │   ├── truncation-tracker.ts ← 截断自动恢复 + 步级竞争保护
-│   │   └── variant-registry.ts   ← VariantScheduler + QUOTA_TABLE 配额
+│   │   └── variant-registry.ts   ← VariantScheduler（残差公式 R=W×D^Δs）
 │   ├── context/
 │   │   ├── index.ts       ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
 │   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条/30min TTL）
 │   │   ├── masking.ts     ← maskToolObservations（遮蔽旧 tool result）
 │   │   └── stabilize.ts   ← stabilizePrefix（KV-cache 命中率提升）
 │   ├── injection/
-│   │   ├── manager.ts     ← InjectionManager（5 个注入器容器）
-│   │   └── goal.ts        ← GoalInjector（计划模式）
+│   │   ├── manager.ts           ← InjectionManager（DynamicInjector 注册表）
+│   │   ├── injector.ts          ← DynamicInjector 抽象基类
+│   │   ├── position-strategy.ts ← system-reminder 位置策略
+│   │   ├── user-prefs.ts        ← 用户偏好注入（路径 B）
+│   │   ├── goal.ts              ← 计划模式注入
+│   │   ├── memory-rules.ts      ← 场景记忆注入
+│   │   ├── permission-mode.ts   ← 权限模式注入
+│   │   ├── plan-mode.ts         ← 计划行为注入
+│   │   ├── plugin-session-start.ts ← 插件会话注入
+│   │   ├── todo-list.ts         ← Todo 列表注入
+│   │   ├── wolfpack.ts          ← WolfPack 行为注入
+│   │   └── working-set.ts       ← Working Set 注入
 │   ├── detection/
 │   │   ├── scene-memory.ts     ← SceneMemoryDetector
 │   │   ├── code-ref.ts         ← CodeRefDetector
@@ -168,3 +178,61 @@ tools/builtin/
 | **残差注意力门控** | 所有注入通过 VariantMeta（W, D, threshold, minStepGap）控制频率 |
 | **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
 | **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删不影响其他层 |
+
+---
+
+## 注入子系统架构图
+
+```mermaid
+flowchart TD
+    subgraph "Paths"
+        A1["路径 A: DynamicInjector 体系<br/>11 注入器文件"]
+        A2["路径 B: 硬编码注入<br/>turn/index.ts 内联"]
+        A3["路径 C: 守卫引擎<br/>guard-engine.ts 偏差链"]
+    end
+
+    subgraph "调度"
+        B["VariantScheduler<br/>R = W × D^Δs<br/>31 变体 · S/A/B/C/D"]
+    end
+
+    subgraph "位置"
+        C["PositionStrategy<br/>system-reminder 格式"]
+    end
+
+    subgraph "目标"
+        D["LtodLlm.systemPrompt<br/>固化缓存"]
+    end
+
+    A1 --> B
+    A2 -. "❌ 绕过调度" .-> C
+    A3 -. "❌ 绕过调度" .-> C
+    B --> C --> D
+
+    style A2 stroke:#f44,stroke-dasharray:5
+    style A3 stroke:#f44,stroke-dasharray:5
+```
+
+**红色虚线** = 当前绕过调度的注入路径（需迁移到 DynamicInjector）。详见 `workspace/注入系统融合计划.md`。
+
+### 注入生命周期
+
+```mermaid
+sequenceDiagram
+    participant T as turn/index.ts
+    participant I as InjectionManager
+    participant V as VariantScheduler
+    participant P as PositionStrategy
+    participant L as LtodLlm
+
+    T->>I: register context
+    I->>V: canInject(variant, step)
+    V-->>I: R < T ? true / false
+    
+    alt canInject == true
+        I->>I: getContent(variant)
+        I->>V: record(variant, step)
+        V->>V: lastInjectionStep=step, T*=thresholdDecay
+        I->>P: format(content)
+        P->>L: append system-reminder
+    end
+```

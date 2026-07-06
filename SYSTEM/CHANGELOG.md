@@ -186,3 +186,42 @@ tags: [type/changelog, status/final, domain/system]
 
 #### 未实现
 - P2 TUI usage-panel 缓存命中率展示（格式：`⚡ usage: 12.4K in / 1.2K out | 缓存命中率: 66%`）
+
+### Phase27 — ScreamCode 全盘目录清理与 .git 重建（2026-07-05）
+
+#### 背景
+`D:\AI\allgzmulu` 集合目录下 .git 是大杂烩，意外跟踪了 8 个不相干项目（ScreamCode/ZHU/、Reasonix/、WorkBuddy/等）。ScreamCode 项目目录内杂项堆积：Obsidian vault 混在根目录、workspace 分散 3 处、system.md 外的 AGENTS.md 冗余。
+
+#### 目录清理（ScreamCode 边界内）
+- **Obsidian 搬迁** — `.obsidian/` + `docs/*` → 统一迁入 `ScreamCode/obsidian/`（移除根下 Obsidian 配置污染）
+- **隔离删除** — `.scream-code/AGENTS.md`（含 Obsidian wiki 规则，干扰 AGENTS.md 层级设计）、根下杂文件 `L0-decisions.md` `reasonix-backup.map.md`
+- **SYSTEM 链接撤销** — `obsidian/SYSTEM` 符号链接从 ScreamCode 根搬到 obsidian/ 后因 Git Bash `rm -rf` 跟随链接误删源目录，从 ScreamCode 独立仓库 `git checkout HEAD -- SYSTEM/` 恢复
+- **回收站安全规则** — AGENTS.md（home + ZHU）写入硬性规则：禁止 `rm`，统一走 PowerShell 回收站
+- **workspace 统一** — `ScreamCode/workspace/` 为唯一工作区；`ZHU/workspace/` 和 `docs/workspace/` 清理；`allgzmulu/workspace/` 的 ScreamCode 产物拉回（15 文件），其余 22 个记忆系统一次性文件整目录清回收站
+- **ZHU 残留清理** — `ZHU/.workbuddy/`（WorkBuddy 缓存）清回收站
+
+#### .git 重建
+- **大杂烩解除** — `allgzmulu/.git` 跟踪 8 个项目。ScreamCode/ZHU/ 从大仓库 `git rm --cached` 解除跟踪，`.gitignore` 防反弹
+- **ZHU 独立仓库** — `ScreamCode/ZHU/` 新建 `git init`，提交 109 个文件（`0df9535`）
+- **清大杂烩** — `allgzmulu/.git` 全回收站。Reasonix 系列因自有独立 .git 完全不受影响
+- **`.mempalace-shared/` 迁回** — 从 allgzmulu 根搬到 `Reasonix/.mempalace-shared/`
+
+#### 决策记录
+- `ZHU/DECISIONS/ScreamCode目录清理与工作计划.md` — 目录整理全流程执行记录（Phase1→验收）
+- `ZHU/DECISIONS/全盘目录修复方案.md` — 五大痛点诊断 + .git 重建方案
+
+### Phase28: AGENTS.md 分层架构设计与实现 [2026-07-05]
+
+#### 新增
+- **`SYSTEM/agents-hierarchy.md`** — 全新专题文档，完整定义三层AGENTS加载链（.git→findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget） + 四维评估框架 + 语言设计规范 + 55KB提取方法论
+- **`ScreamCode/AGENTS.md`** — L1 项目集合级 AGENTS.md（4.5KB/149行），含 §1 目录地图/§2 决策门槛/§3 框架认知/§4 注意力地图/§5 通用规则/§6 回退锚点
+- **`ZHU/AGENTS.md`** — L2 增强版（6.3KB/208行，原80行），新增 §2 格式契约/§4 L1-L2 协同/§5 ZHU 命令速查/§6 防降智检查
+
+#### 变更
+- `SYSTEM/MAP.md` / `SYSTEM-INDEX.md` / `SYSTEM/INDEX.md` — 追加 agents-hierarchy.md 索引
+
+#### 框架源码引用
+- `packages/agent-core/src/profile/context.ts` L42-170 — 加载链源码验证（findProjectRoot/dirsRootToLeaf/collectAgentsFiles/renderAgentFiles 精确行号）
+
+#### 设计文档
+- `DECISIONS/AGENTS-MD分层方案-当前真实状态.md` — 完整迭代（3版本：去重导向→能力增强→语言规范整合）

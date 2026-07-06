@@ -59,7 +59,7 @@ inject(content, origin):
   1. 重复衰减检查（相同内容最近 3 步内已注入 → 跳过）
   2. 残差调度检查（R = W×D^Δs < threshold → 跳过）
   3. 去重检查（已存在完全相同的 content → 跳过）
-  4. 预算检查（canInject() → QUOTA_TABLE 配额 → 超限跳过）
+  4. 预算检查（canInject() → VariantScheduler 残差 → 超限跳过）
   5. 注册（afterInject() → 记录步号+计数）
   6. 注入为 <system-reminder> 消息
 ```
@@ -175,30 +175,39 @@ class InjectionManager {
 }
 ```
 
-### 3.2 5 个注入器
+### 3.2 10 个注入器
 <!-- ref: injectors -->
 
-| 注入器 | 文件 | 触发条件 | 注入内容 |
-|--------|------|---------|---------|
-| MemoryRulesInjector | `agent/injection/memory-rules.ts` | 场景记忆匹配 | 记忆规则指令 |
-| QualityInjector | `agent/injection/quality.ts` | 质量检测触发 | 质量约束指令 |
-| ConfabulationInjector | `agent/injection/confabulation.ts` | 反事实检测触发 | 反事实纠正指令 |
-| StuckInjector | `agent/injection/stuck.ts` | 同文件编辑≥3步/同工具报错≥2步 | 偏差纠正指令 |
-| MemoryGoalInjector | `agent/injection/goal.ts` | 计划模式 | 目标指令 |
+| 注入器 | 源文件 | 变体数 | 触发条件 |
+|--------|--------|--------|---------|
+| GoalInjector | `agent/injection/goal.ts` | 3 | 计划模式 |
+| MemoryRulesInjector | `agent/injection/memory-rules.ts` | 2 | 场景记忆匹配 |
+| PermissionModeInjector | `agent/injection/permission-mode.ts` | 4 | 权限模式切换 |
+| PlanModeInjector | `agent/injection/plan-mode.ts` | 5 | 计划模式行为 |
+| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 2 | 插件会话启动 |
+| TodoListInjector | `agent/injection/todo-list.ts` | 3 | Todo 列表变化 |
+| UserPrefsInjector | `agent/injection/user-prefs.ts` | 1 | 每轮（路径 B） |
+| WolfPackInjector | `agent/injection/wolfpack.ts` | 2 | WolfPack 调用 |
+| WorkingSetInjector | `agent/injection/working-set.ts` | 6 | Working Set 变化 |
+| StuckInjector | `agent/injection/stuck.ts` | 1 | 同文件编辑≥3步 |
 
-### 3.3 VariantScheduler + QUOTA_TABLE
+> **已弃用**: QualityInjector (`quality.ts`), ConfabulationInjector (`confabulation.ts`) — 功能迁移到 turn/index.ts 硬编码注入，计划下一步迁回 DynamicInjector。
+> **完整变体列表见** §10 All Registered Variants。
+
+### 3.3 VariantScheduler（残差调度，取代旧 QUOTA_TABLE）
 <!-- ref: VariantScheduler -->
 
+自 v0.6.10+ 起取代旧版 QUOTA_TABLE（配额系统已完全移除）。
+
 ```typescript
-export const QUOTA_TABLE: Record<string, QuotaConfig> = {
-  default: { maxPerConversation: 20, cooldownSteps: 1, windowSteps: 100 },
-  low:     { maxPerConversation: 10, cooldownSteps: 3, windowSteps: 50 },
-}
+/* 核心公式: R = W × D^Δs
+   触发条件: Δs ≥ minStepGap 且 R < T
+   注入后:   T = T × thresholdDecay  */
 
 class VariantScheduler {
-  shouldInject(variant: string, currentStep: number): boolean
-  record(variant: string, currentStep: number): void
-  reset(): void
+  shouldInject(variant: string, currentStep: number): boolean  // 残差调度检查
+  record(variant: string, currentStep: number): void           // 注入后记录
+  reset(): void                                                 // 恢复 T₀
   getInjectionCount(variant: string): number
   getLastStep(variant: string): number | undefined
 }
@@ -206,25 +215,16 @@ class VariantScheduler {
 
 | 方法 | 检查条件 |
 |------|---------|
-| shouldInject | 配额未超 + 冷却已过 + 窗口频率未超 |
-| record | 更新计数 + 最后步号 |
-| reset | 清空所有记录 |
+| shouldInject | minStepGap 未过 + R < T |
+| record | 更新 lastInjectionStep + T = T × thresholdDecay |
+| reset | T 恢复 T₀ |
 
-### 3.4 collectInjectorFacts
+> **旧版迁移**: QUOTA_TABLE 的 `maxPerConversation` / `cooldownSteps` / `windowSteps` 已由残差公式 + 阈值衰减 + minStepGap 三要素取代。详见 `SYSTEM/injection-system.md §7`。
+
+### 3.4 collectInjectorFacts（已弃用）
 <!-- ref: collectInjectorFacts -->
 
-```typescript
-function collectInjectorFacts(
-  variantRegistry: { getInjectionCount, getLastStep },
-  getScore: (variant: string, stepDelta: number) => number,
-  currentStep: number,
-  variantMeta: Record<string, VariantMeta>,
-  budgetRemaining: number,
-  stepInjectionCount: number,
-): string
-```
-
-当前占位，未接入 handleAfterStep。
+旧版占位函数，未接入 handleAfterStep。功能已由 `VariantScheduler.getInjectionCount` + `InterceptionEvent` 日志取代。
 
 ### 3.5 ContextMessage.protected
 <!-- ref: ContextMessageProtected -->

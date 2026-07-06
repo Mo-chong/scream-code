@@ -1,0 +1,4 @@
+# cache-audit — Phase26 缓存命中审计日志
+# format: JSON Lines (ndjson), one entry per turn
+# fields: turn,model,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts
+# started: 2026-07-06T01:20:51.605Z

@@ -1,3 +1,7 @@
+import { existsSync, rmSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import type { MemoryMemo } from './models.js';
 
 /**
@@ -34,28 +38,36 @@ interface FastembedModel {
 
 /**
  * Create an embedding engine backed by fastembed.
- * Lazily loads the model on first use so startup is not blocked.
+ * Pre-warms the model eagerly so first call is fast.
+ * loadFailed is retryable — next embedBatch attempt re-loads.
  */
 export function createFastEmbedEngine(): EmbeddingEngine {
   let embedder: FastembedModel | null = null;
   let initPromise: Promise<FastembedModel | null> | null = null;
-  let loadFailed = false;
+
+  // Pre-warm: eagerly load the model on construction.
+  // The Agent caller (agent/index.ts) creates the engine during startup,
+  // so the model download/load happens in background before user interacts.
+  initPromise = loadEmbedder().then(m => { embedder = m; return m; });
 
   return {
     get available(): boolean {
-      return !loadFailed;
+      return embedder !== null || initPromise !== null;
     },
 
     async embedBatch(texts: string[]): Promise<Float32Array[] | null> {
-      if (loadFailed) return null;
       if (texts.length === 0) return [];
 
       try {
+        // Reuse existing initPromise; never start a second concurrent download.
+        // Parallel loadEmbedder() calls corrupt the shared HF Hub cache.
         if (embedder === null) {
-          initPromise ??= loadEmbedder();
+          if (initPromise === null) {
+            initPromise = loadEmbedder();
+          }
           embedder = await initPromise;
+          initPromise = null; // consumed — next failure triggers fresh attempt
           if (embedder === null) {
-            loadFailed = true;
             return null;
           }
         }
@@ -69,8 +81,12 @@ export function createFastEmbedEngine(): EmbeddingEngine {
           }
         }
         return vectors.length > 0 ? vectors : null;
-      } catch {
-        loadFailed = true;
+      } catch (e) {
+        // loadFailed is retryable: clear initPromise so next call retries.
+        // Surface the real error for diagnosis instead of silent null.
+        process.stderr.write(`[embedBatch] error: ${e instanceof Error ? e.stack || e.message : String(e)}\n`);
+        embedder = null;
+        initPromise = null;
         return null;
       }
     },
@@ -92,37 +108,132 @@ export function createFastEmbedEngine(): EmbeddingEngine {
 }
 
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+
+/** Timeout for FlagEmbedding.init() model download. 5min for cold cache on slow connections. */
+const EMBED_INIT_TIMEOUT_MS = 300_000;
+
+/**
+ * Resolve the package root directory from import.meta.url.
+ * packages/memory/dist/ → D:\AI\ScreamCode\ (monorepo root)
+ */
+function getScreamCodeRoot(): string {
+  const pkgDir = path.dirname(fileURLToPath(import.meta.url));
+  // packages/memory/dist/ => up 3 levels to monorepo root
+  return path.resolve(pkgDir, '..', '..', '..');
+}
+
+/**
+ * Absolute path to the project-local model cache directory.
+ * e.g. D:\AI\ScreamCode\local_cache\
+ */
+function getLocalCacheDir(): string {
+  return path.join(getScreamCodeRoot(), 'local_cache');
+}
+
+async function initWithTimeout<T>(
+  factory: () => Promise<T>,
+  label: string,
+  ms: number = EMBED_INIT_TIMEOUT_MS,
+): Promise<T> {
+  const timer = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+  );
+  return await Promise.race([factory(), timer]);
+}
+
+/**
+ * Clean all known model cache locations for BGESmallZH.
+ * Called when TAR_BAD_ARCHIVE or zlib error indicates a corrupt partial download.
+ * Cleans both the project-local cache and the global HF Hub / fastembed fallback caches.
+ */
+function cleanFastembedCache(): void {
+  // 1. Project-local cache (where we point cacheDir to)
+  const localDir = getLocalCacheDir();
+  const localModelDir = path.join(localDir, 'fast-bge-small-zh-v1.5');
+  try {
+    if (existsSync(localModelDir)) {
+      rmSync(localModelDir, { recursive: true, force: true });
+      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${localModelDir}\n`);
+    }
+  } catch { /* best-effort */ }
+
+  // 2. HuggingFace Hub cache
+  const hfHubDefault = path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+  const hfHub = process.env['HF_HOME']
+    ? path.join(process.env['HF_HOME'], 'hub')
+    : hfHubDefault;
+  const hfModelDir = path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5');
+  try {
+    if (existsSync(hfModelDir)) {
+      rmSync(hfModelDir, { recursive: true, force: true });
+      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${hfModelDir}\n`);
+    }
+  } catch { /* best-effort */ }
+
+  // 3. Fastembed fallback cache (~/.cache/fastembed/)
+  const feDefault = path.join(os.homedir(), '.cache', 'fastembed');
+  const feModelDir = path.join(feDefault, 'models--Xenova--bge-small-zh-v1.5');
+  try {
+    if (existsSync(feModelDir)) {
+      rmSync(feModelDir, { recursive: true, force: true });
+      process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${feModelDir}\n`);
+    }
+  } catch { /* best-effort */ }
+}
 
 async function loadEmbedder(): Promise<FastembedModel | null> {
-  try {
-    // Primary: resolve from bundle location via createRequire.
-    // This works when the bundle is inside the project's node_modules tree.
-    const distRequire = createRequire(import.meta.url);
-    const fePath = distRequire.resolve('fastembed/package.json');
-    const feDir = dirname(fePath);
-    const { FlagEmbedding, EmbeddingModel } = await import(feDir);
-    return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
-  } catch {
+  // ═══ 根因修复：传绝对路径 cacheDir 给 fastembed ═══
+  // fastembed v1.x 默认 'local_cache' 是相对路径基于 CWD 解析。
+  // CWD != monorepo 根时路径错位 → tokenizer.json not found。
+  const cacheDir = getLocalCacheDir();
+
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Fallback 1: bare import for dev/run-from-project-root mode.
       const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
-      return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
-    } catch {
-      try {
-        // Fallback 2: SCREAMCODE_NODE_PATH env hint (manual override).
-        const hintPath = process.env['SCREAMCODE_NODE_PATH'];
-        if (hintPath) {
-          const hintRequire = createRequire(hintPath + '/package.json');
-          const fePath = hintRequire.resolve('fastembed/package.json');
-          const feDir = dirname(fePath);
-          const { FlagEmbedding, EmbeddingModel } = await import(feDir);
-          return await FlagEmbedding.init({ model: EmbeddingModel.BGESmallZH });
-        }
-      } catch {
-        // All paths failed
+      const model = await initWithTimeout(
+        () => FlagEmbedding.init({
+          model: EmbeddingModel.BGESmallZH,
+          cacheDir,
+        }),
+        'FlagEmbedding.init(BGESmallZH)',
+      );
+      return model;
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`[loadEmbedder] attempt ${attempt}/${maxRetries} failed: ${errMsg}\n`);
+
+      // Corrupt cache from partial download — clean and retry.
+      const isCorruptCache = errMsg.includes('TAR_BAD_ARCHIVE')
+        || errMsg.includes('Unrecognized archive')
+        || errMsg.includes('zlib:')
+        || errMsg.includes('tokenizer.json');
+      if (isCorruptCache) {
+        cleanFastembedCache();
+        continue; // retry after cache cleanup
       }
-      return null;
+
+      // On last attempt, try the createRequire fallback before giving up.
+      // Note: fastembed v1.x restricts exports; createRequire resolve typically fails
+      // for the package.json path. This is a best-effort fallback.
+      if (attempt >= maxRetries) {
+        try {
+          const distRequire = createRequire(import.meta.url);
+          const fePath = distRequire.resolve('fastembed');
+          const { FlagEmbedding, EmbeddingModel } = await import(fePath);
+          return await initWithTimeout(
+            () => FlagEmbedding.init({
+              model: EmbeddingModel.BGESmallZH,
+              cacheDir,
+            }),
+            'FlagEmbedding.init(fallback)',
+          );
+        } catch (fallbackErr) {
+          process.stderr.write(`[loadEmbedder] fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}\n`);
+          return null;
+        }
+      }
     }
   }
+  return null;
 }

@@ -10,10 +10,13 @@
 
 ├─ 执行架构
 │   ├─ turn-control.md            — 回合生命周期/收敛门/工具优先级
-│   ├─ injection-system.md        — 注入优先级/配额/ResNet调度
+│   ├─ injection-system.md        — 注入/残差调度/阈值衰减
 │   ├─ attention-management.md    — 注意力管理
 │   ├─ guard-engine.md            — Guard触发时机/反事实检测
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
+
+├─ AGENTS 架构
+│   └─ agents-hierarchy.md         — 三层加载链(.git→projectRoot→dirs→collect→budget) + 四维评估 + 语言规范
 
 ├─ 上下文管理
 │   ├─ context-management.md      — 四层架构总览(Archive/Micro/Full/Bash降噪)

@@ -314,8 +314,8 @@ USER PREFERENCES REMINDER: ...
 | | prompt-assembly.md（本文） | injection-system.md |
 |---|---|---|
 | 关注点 | **编译时**模板装配 + **session 启动时**渲染 | **运行时**系统提醒注入 |
-| 核心机制 | Jinja2 渲染 → 一次缓存 | DynamicInjector + 残差 + 配额（每轮） |
-| 变量 | 9 个模板变量 + 3 个条件 | 变体向量 + 预算配额 |
+| 核心机制 | Jinja2 渲染 → 一次缓存 | DynamicInjector + 残差公式（每轮） |
+| 变量 | 9 个模板变量 + 3 个条件 | 变体向量 + 残差 R=W×D^Δs |
 | 数据流 | source → rendered string → 缓存 | 缓存的字符串 → 每轮注入 segments |
 | 修改频率 | 低（改模板/变量需要构建 + 重启 session） | 中（调权重/配运行时参数） |
 

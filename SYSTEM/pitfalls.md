@@ -494,3 +494,31 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 **调试路径**：源代码 → 修改文件 → 构建 dist → 最终 bundle → 运行测试 → 反复。
 
 **教训**：永远从最终 bundle 开始查，不要从源代码开始查。bundle 没有的，源代码再对也没用。
+
+### fastembed embedding 引擎初始化失败 — tokenizer.json not found
+
+**现象**：`[loadEmbedder] attempt 1/2 failed: Tokenizer file not found at local_cache\fast-bge-small-zh-v1.5\tokenizer.json`。文件在本地实际存在，仍报 not found。
+
+**根因（4 层嵌套错误）**：
+
+1. **没传 `cacheDir` 参数**: `FlagEmbedding.init({ model })` 不传 `cacheDir` → fastembed v1.x 用默认相对路径 `"local_cache"`，基于 `process.cwd()` 解析 → CWD 不符时路径错位。这是根本原因。
+2. **环境变量无人读**: 设 `FASTEMBED_CACHE` 尝试修复 → fastembed v1.x **不读这变量**，死代码。
+3. **清错缓存目录**: `cleanFastembedCache()` 只删 `~/.cache/huggingface/hub/` 和 `~/.cache/fastembed/` → 模型实际在 `local_cache/fast-bge-small-zh-v1.5/` → retry 永远清不掉真正的问题。
+4. **验证错位**: 全程验证 `packages/memory/dist/` 而非实际运行的 app bundle → tsdown config 把 `@scream-code/memory` alias 到源码 → app 跑的是 `apps/scream-code/dist/app-*.mjs` 内联版，不重建 bundle 就没用。
+
+**修复（5 处改动）**：
+
+| 改动 | 文件 |
+|------|------|
+| `FlagEmbedding.init({ model, cacheDir: absolutePath })` | `embeddings.ts` |
+| `fileURLToPath(import.meta.url)` 替代 `.pathname` 修 Windows 双盘符 | `embeddings.ts` |
+| `cleanFastembedCache()` 加清 `local_cache/fast-bge-small-zh-v1.5/` | `embeddings.ts` |
+| 删除死代码 `ensureAbsoluteCachePath()` + `FASTEMBED_CACHE` | `embeddings.ts` |
+| 重建 `apps/scream-code` 的 app bundle | `tsdown` |
+
+**预防**：
+- 调第三方库 API 时，**必须追库源码确认参数和环境变量是否真有效**，不假设名字对的就有效。
+- monorepo 打包场景下，**验证必须跑最终 bundle**（`apps/*/dist/`），不走中间包（`packages/*/dist/`）。
+- Bundle alias 配置（`tsdown.config.ts` 的 `resolve` 别名）决定实际运行代码源 — 改代码后要先追 alias 链。
+- 错误信息提示的路径如果是相对路径（无盘符），说明调用方没传绝对路径参数。
+- 嵌套错误的特征：每次修复后出现**不同表现的新错误**，说明根因没动，只是暴露了下一层。
