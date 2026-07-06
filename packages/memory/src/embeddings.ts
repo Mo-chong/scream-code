@@ -1,4 +1,5 @@
-import { existsSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -44,18 +45,42 @@ interface FastembedModel {
 }
 
 /**
- * Create an embedding engine backed by fastembed.
- * Pre-warms the model eagerly so first call is fast.
- * loadFailed is retryable — next embedBatch attempt re-loads.
+ * Cache of created engines keyed by cacheDir.
+ * Guarantees that all callers sharing the same cacheDir reuse the same engine
+ * instance and the same in-flight model download/load — avoiding duplicate
+ * downloads and file-corruption races when /memory and /knowledge both start
+ * before the model is cached.
  */
-export function createFastEmbedEngine(): EmbeddingEngine {
+const engineCache = new Map<string, EmbeddingEngine>();
+
+/**
+ * Create an embedding engine backed by fastembed.
+ * Lazily loads the model on first use so startup is not blocked.
+ * Engines are cached by cacheDir so repeated calls with the same cacheDir
+ * return the same instance, sharing model state and download progress.
+ * Pre-warms eagerly when created during agent startup so model download
+ * happens in background before user interacts.
+ * @param cacheDir Absolute path for model cache (e.g. ~/.scream-code/cache/fastembed).
+ *                 Defaults to "local_cache" (CWD-relative) if not provided — prefer
+ *                 passing an explicit path so the cache doesn't duplicate across CWDs.
+ */
+export function createFastEmbedEngine(cacheDir?: string): EmbeddingEngine {
+  const key = cacheDir ?? '';
+  const cached = engineCache.get(key);
+  if (cached !== undefined) return cached;
+  const engine = createFastEmbedEngineImpl(cacheDir);
+  engineCache.set(key, engine);
+  return engine;
+}
+
+function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let embedder: FastembedModel | null = null;
   let initPromise: Promise<FastembedModel | null> | null = null;
 
   // Pre-warm: eagerly load the model on construction.
   // The Agent caller (agent/index.ts) creates the engine during startup,
   // so the model download/load happens in background before user interacts.
-  initPromise = loadEmbedder().then(m => { embedder = m; return m; });
+  initPromise = loadEmbedder(cacheDir).then(m => { embedder = m; return m; });
 
   return {
     get available(): boolean {
@@ -69,9 +94,7 @@ export function createFastEmbedEngine(): EmbeddingEngine {
         // Reuse existing initPromise; never start a second concurrent download.
         // Parallel loadEmbedder() calls corrupt the shared HF Hub cache.
         if (embedder === null) {
-          if (initPromise === null) {
-            initPromise = loadEmbedder();
-          }
+          initPromise ??= loadEmbedder(cacheDir);
           embedder = await initPromise;
           initPromise = null; // consumed — next failure triggers fresh attempt
           if (embedder === null) {
@@ -113,9 +136,16 @@ export function createFastEmbedEngine(): EmbeddingEngine {
     },
 
     async ensureReady(): Promise<boolean> {
-      if (embedder !== null) return true;
+      if (embedder !== null) {
+        loadFailed = false;
+        return true;
+      }
       try {
-        initPromise ??= loadEmbedder();
+        // Reuse in-flight load, or start a fresh one. If a previous load
+        // resolved to null (loadFailed), clear it first so we actually retry.
+        if (loadFailed || initPromise === null) {
+          initPromise = loadEmbedder(cacheDir);
+        }
         embedder = await initPromise;
         if (embedder === null) {
           initPromise = null;
@@ -205,59 +235,121 @@ function cleanFastembedCache(): void {
   } catch { /* best-effort */ }
 }
 
-async function loadEmbedder(): Promise<FastembedModel | null> {
-  // ═══ 根因修复：传绝对路径 cacheDir 给 fastembed ═══
-  // fastembed v1.x 默认 'local_cache' 是相对路径基于 CWD 解析。
-  // CWD != monorepo 根时路径错位 → tokenizer.json not found。
-  const cacheDir = getLocalCacheDir();
+async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
+  // Fallback to absolute path when no cacheDir provided (local enhancement)
+  const effectiveCacheDir = cacheDir ?? getLocalCacheDir();
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
-      const model = await initWithTimeout(
-        () => FlagEmbedding.init({
-          model: EmbeddingModel.BGESmallZH,
-          cacheDir,
-        }),
-        'FlagEmbedding.init(BGESmallZH)',
-      );
-      return model;
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      process.stderr.write(`[loadEmbedder] attempt ${attempt}/${maxRetries} failed: ${errMsg}\n`);
-
-      // Corrupt cache from partial download — clean and retry.
-      const isCorruptCache = errMsg.includes('TAR_BAD_ARCHIVE')
-        || errMsg.includes('Unrecognized archive')
-        || errMsg.includes('zlib:')
-        || errMsg.includes('tokenizer.json');
-      if (isCorruptCache) {
-        cleanFastembedCache();
-        continue; // retry after cache cleanup
+      if (effectiveCacheDir !== undefined) {
+        mkdirSync(effectiveCacheDir, { recursive: true });
       }
+      const model = EmbeddingModel.BGESmallZH;
+      const initOpts = effectiveCacheDir !== undefined
+        ? { model, cacheDir: effectiveCacheDir }
+        : { model };
 
-      // On last attempt, try the createRequire fallback before giving up.
-      // Note: fastembed v1.x restricts exports; createRequire resolve typically fails
-      // for the package.json path. This is a best-effort fallback.
-      if (attempt >= maxRetries) {
-        try {
-          const distRequire = createRequire(import.meta.url);
-          const fePath = distRequire.resolve('fastembed');
-          const { FlagEmbedding, EmbeddingModel } = await import(fePath);
-          return await initWithTimeout(
-            () => FlagEmbedding.init({
-              model: EmbeddingModel.BGESmallZH,
-              cacheDir,
-            }),
-            'FlagEmbedding.init(fallback)',
-          );
-        } catch (fallbackErr) {
-          process.stderr.write(`[loadEmbedder] fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}\n`);
-          return null;
+      try {
+        return await initWithTimeout(
+          () => FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]),
+          'FlagEmbedding.init(BGESmallZH)',
+        );
+      } catch (initError: unknown) {
+        const errMsg = initError instanceof Error ? initError.message : String(initError);
+        process.stderr.write(`[loadEmbedder] attempt ${attempt}/${maxRetries} failed: ${errMsg}\n`);
+
+        // Corrupt cache from partial download — clean and retry
+        const isCorruptCache = errMsg.includes('TAR_BAD_ARCHIVE')
+          || errMsg.includes('Unrecognized archive')
+          || errMsg.includes('zlib:')
+          || errMsg.includes('tokenizer.json');
+        if (isCorruptCache) {
+          cleanFastembedCache();
+          continue;
+        }
+
+        // Missing sidecars — download from HF mirror and retry
+        if (/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(errMsg)) {
+          try {
+            await ensureFastembedModelSidecars(String(model), effectiveCacheDir);
+            return await initWithTimeout(
+              () => FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]),
+              'FlagEmbedding.init(BGESmallZH, after sidecar)',
+            );
+          } catch {
+            // fall through to retry/fallback
+          }
+        }
+
+        // On last attempt, try createRequire fallback
+        if (attempt >= maxRetries) {
+          try {
+            const distRequire = createRequire(import.meta.url);
+            const fePath = distRequire.resolve('fastembed');
+            const { FlagEmbedding, EmbeddingModel } = await import(fePath);
+            return await initWithTimeout(
+              () => FlagEmbedding.init({
+                model: EmbeddingModel.BGESmallZH,
+                cacheDir: effectiveCacheDir,
+              }),
+              'FlagEmbedding.init(fallback)',
+            );
+          } catch (fallbackErr) {
+            process.stderr.write(`[loadEmbedder] fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}\n`);
+            return null;
+          }
         }
       }
+    } catch {
+      return null;
     }
   }
   return null;
+}
+
+/**
+ * Small config/tokenizer files that fastembed expects alongside model.onnx.
+ * If these are missing (e.g. GCS download partially failed), fastembed throws.
+ * We download them from HuggingFace so the model can load — this covers the
+ * case where the GCS tarball was incomplete but the HF repo is reachable.
+ */
+const FASTEMBED_SIDECARS = [
+  'config.json',
+  'tokenizer.json',
+  'tokenizer_config.json',
+  'special_tokens_map.json',
+] as const;
+
+const FASTEMBED_HF_REPOS: Record<string, string> = {
+  'fast-bge-small-zh-v1.5': 'BAAI/bge-small-zh-v1.5',
+};
+
+async function ensureFastembedModelSidecars(model: string, cacheDir?: string): Promise<void> {
+  const repo = FASTEMBED_HF_REPOS[model];
+  if (repo === undefined) return;
+  const baseDir = cacheDir ?? 'local_cache';
+  const modelDir = join(baseDir, model);
+  mkdirSync(modelDir, { recursive: true });
+
+  for (const fileName of FASTEMBED_SIDECARS) {
+    const target = join(modelDir, fileName);
+    try {
+      const { access } = await import('node:fs/promises');
+      await access(target);
+      continue; // file exists
+    } catch {
+      // file missing — download from HuggingFace
+    }
+    const hfUrl = `https://huggingface.co/${repo}/resolve/main/${fileName}`;
+    try {
+      const response = await fetch(hfUrl);
+      if (!response.ok) continue;
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(target, Buffer.from(await response.arrayBuffer()));
+    } catch {
+      // best-effort — if HF is also unreachable, just skip
+    }
+  }
 }

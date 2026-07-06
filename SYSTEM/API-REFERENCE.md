@@ -728,6 +728,45 @@ class GrowthPredictor {
 }
 ```
 
+	### 7.9 CompactionReport（v0.8.4 upstream）
+	<!-- ref: CompactionReport -->
+
+	**文件**: `agent/compaction/strategy.ts`
+
+	```typescript
+	interface CompactionReport {
+	  summary: string
+	  usage: TokenUsage | null
+	  tokensBefore: number
+	  tokensAfter: number
+	}
+	```
+
+	### 7.10 renderMessagesToText（v0.8.4 upstream）
+	<!-- ref: renderMessagesToText -->
+
+	**文件**: `agent/compaction/render-messages.ts`（新建）
+
+	```typescript
+	renderMessagesToText(messages: ContextMessage[], opts?: {
+	  includeRoleLabels?: boolean
+	}): string
+	  // 消息列表 → LLM 可消费的纯文本
+
+	countMessageTokens(text: string, model?: string): number
+	  // 文本 → token 计数
+	```
+
+	### 7.11 knowledge-web / knowledge-store（v0.8.4 upstream）
+	<!-- ref: knowledge-web -->
+
+	**文件**: `apps/scream-code/src/tui/commands/knowledge-web.ts`（新建）
+	**文件**: `apps/scream-code/src/tui/commands/knowledge-store.ts`（新建）
+
+	TUI 知识库 Web 管理命令，上游新增。
+
+	```
+
 ### 7.8 ContentHashCache（Phase26）
 <!-- ref: ContentHashCache -->
 
@@ -957,14 +996,29 @@ class KnowledgeLookupTool implements StepTool
 | 不适用场景 | 代码/文件操作 (MemoryLookup/Read/Grep) |
 
 ### 9.5 向量模型
-<!-- ref: EmbeddingModel -->
+<!-- ref: EmbeddingModel, createFastEmbedEngine, loadEmbedder -->
 
 | 属性 | 值 |
 |------|-----|
 | 模型 | BAAI/bge-small-zh-v1.5（384 维） |
-| 推理 | 本地 ONNX（fastembed Python 包） |
-| 首次加载 | 自动下载 ~30MB |
-| 可用性检查 | `packages/knowledge/src/index.ts:38` — 加载失败标记 `available=false` |
+| 推理 | 本地 ONNX（fastembed npm 包，FlagEmbedding） |
+| 缓存引擎 | `engineCache`（`packages/memory/src/embeddings.ts`）— 同一 cacheDir 共享 Engine 实例，防并发重复下载 |
+| 缓存路径 | `cacheDir` 参数可配置；默认 fallback `local_cache/`（绝对路径，基于 monorepo 根） |
+| 模型加载 | 惰性加载（首次 embedBatch 触发 `loadEmbedder(cacheDir)`），初始化前 `mkdirSync` 确保目录存在 |
+| 超时保护 | `initWithTimeout` 5min 超时（`EMBED_INIT_TIMEOUT_MS = 300_000`） |
+| 重试机制 | 失败后最多重试 3 次；`TAR_BAD_ARCHIVE`/`zlib`/`tokenizer.json` → `cleanFastembedCache()` 自动清理损坏缓存 |
+| Sidecar 补全 | `ensureFastembedModelSidecars()` — 缺失 tokenizer/config 文件自动从 HF mirror 下载 |
+| Fallback | `createRequire` 兜底尝试替换 fastembed 导入路径 |
+| 自动重试循环 | `store.ts` 中 `startEmbeddingLoadLoop()` — 加载失败后每 5 分钟重试直到成功 |
+| 可用性检查 | `packages/memory/src/embeddings.ts` — `loadFailed` 标记后可重试 |
+
+### 9.6 记忆价值分类器
+<!-- ref: value-classifier.ts, category-tagger.ts (v0.8.5 upstream) -->
+
+| 组件 | 路径 | 说明 |
+|------|------|------|
+| ValueClassifier | `packages/memory/src/classifiers/value-classifier.ts` | 自动判断记忆价值等级：`critical`/`valuable`/`normal`/`low` |
+| CategoryTagger | `packages/memory/src/classifiers/category-tagger.ts` | 自动推断记忆的类别标签 |
 
 ---
 

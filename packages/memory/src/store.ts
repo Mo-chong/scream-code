@@ -35,6 +35,8 @@ const TIERED_DEMOTION = {
 /** Tier priority for hot cap eviction — higher rank = more protected. */
 const TIER_RANK: Record<string, number> = { vital: 5, high: 4, normal: 3, low: 2, archive: 1, critical: 6 };
 
+const EMBEDDING_LOAD_RETRY_MS = 5 * 60 * 1000;
+
 export interface MemoryMemoStoreLogger {
   debug?: (message: string, ...args: unknown[]) => void;
   info?: (message: string, ...args: unknown[]) => void;
@@ -58,6 +60,7 @@ export class MemoryMemoStore {
   private lastEmbeddingError: Error | undefined;
   private lastAutoDemoteAt = 0;
   private static readonly AUTO_DEMOTE_INTERVAL_MS = 5 * 60 * 1000; // 5 min throttle
+  private embeddingLoadTimer: ReturnType<typeof setInterval> | undefined;
   private readonly log: MemoryMemoStoreLogger;
 
   /**
@@ -111,6 +114,10 @@ export class MemoryMemoStore {
 
   /** Close the database handle and checkpoint WAL. */
   close(): void {
+    if (this.embeddingLoadTimer !== undefined) {
+      clearInterval(this.embeddingLoadTimer);
+      this.embeddingLoadTimer = undefined;
+    }
     if (this.db !== undefined) {
       this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
       this.db.close();
@@ -925,6 +932,34 @@ export class MemoryMemoStore {
   /** Set the embedding engine. Call once after construction, before any writes. */
   setEmbeddingEngine(engine: EmbeddingEngine): void {
     this.embeddingEngine = engine;
+    this.startEmbeddingLoadLoop();
+  }
+
+  /**
+   * Background loop that retries model loading every 5 minutes until success.
+   * Covers the case where the model download fails on first use (network issue,
+   * GCS blocked, etc.) — without this, the engine stays loadFailed forever and
+   * all future memos fall back to keyword search silently.
+   * Stops itself once the model loads successfully.
+   */
+  private startEmbeddingLoadLoop(): void {
+    if (this.embeddingEngine === undefined) return;
+    if (this.embeddingLoadTimer !== undefined) return;
+    const attempt = async (): Promise<void> => {
+      if (this.embeddingEngine === undefined) return;
+      const ok = await this.embeddingEngine.ensureReady();
+      if (ok) {
+        if (this.embeddingLoadTimer !== undefined) {
+          clearInterval(this.embeddingLoadTimer);
+          this.embeddingLoadTimer = undefined;
+        }
+        this.embeddingDegraded = false;
+        return;
+      }
+    };
+    this.embeddingLoadTimer = setInterval(() => { void attempt(); }, EMBEDDING_LOAD_RETRY_MS);
+    this.embeddingLoadTimer.unref?.();
+    void attempt(); // fire first attempt after timer is assigned so cleanup works
   }
 
   /** Check whether the store has any vector embeddings. */

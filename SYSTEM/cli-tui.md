@@ -63,6 +63,10 @@
 |------|------|
 | `commands/memory.ts` | `/memory` 命令处理 + 格式化 |
 | `commands/dispatch.ts` | 所有斜杠命令调度 |
+| `commands/knowledge.ts` | 知识库管理命令 |
+| `commands/knowledge-web.ts` | 知识库 Web 管理命令（v0.8.4 upstream） |
+| `commands/knowledge-store.ts` | 知识库存储管理命令（v0.8.4 upstream） |
+| `commands/knowledge-filter.ts` | 知识库过滤命令（v0.8.5 upstream — 按标签/时间段过滤） |
 | `components/dialogs/memory-picker.ts` | TUI 选择器 UI + 键盘交互 |
 | `managers/dialog-manager.ts` | 弹窗管理 + onInject 回调 |
 | `scream-tui.ts` | TUI 主入口 |

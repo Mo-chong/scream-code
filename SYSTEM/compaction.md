@@ -1,9 +1,10 @@
 # 上下文压缩系统 — Compaction
 
-> 源码: `packages/agent-core/src/agent/compaction/`（6 个文件）
-> 核心: `full.ts` (~571 行), `micro.ts` (~204 行), `strategy.ts`
+> 源码: `packages/agent-core/src/agent/compaction/`（8 个文件）
+> 核心: `full.ts` (~630 行), `micro.ts` (~280 行), `strategy.ts`, `render-messages.ts`
 > **v0.7 fork 新增**: 前缀稳定化 `prefix-stabilizer.ts` + Observation Masking `mask-tool-observations.ts`
 > **v0.7 fork 新增**: MicroCompaction 批次门控（BATCH_SIZE=8 减少 cutoff 跳动）
+> **v0.8.4 上游**: `summarizeOnce` 封装 + `CompactionReport` + `render-messages.ts` + 双阶段 MicroCompaction
 
 ---
 
@@ -95,11 +96,20 @@ v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销*
 
 ### MicroCompaction（轻量级，不调 LLM）
 
-- `micro.ts:18-23` — 默认配置：保留最近 20 条消息，只处理 >100 token 的 tool result
+- `micro.ts:18-23` — 默认配置：保留最近 20 条消息 + 40K tokens + 回收阈值 20K
 - `micro.ts:82-83` — **BATCH_SIZE=8 批次门控**（v0.7 fork 新增）：减少 cutoff 跳动频率保护缓存
+- `v0.8.4` **两阶段过滤**：
+  - `isUseless` — `msg.useless === true`（由 `context/index.ts` `addToolResult` 自动标记）→ 替换为 `uselessMarker`
+  - `isOversizedTruncatable` — token 数 > `minContentTokens` → 截断 + 可选 content-archive 存档
 - 找到被覆盖的 Read 调用（第二次读同一个文件 → 第一次的可以删，标记 `[Superseded by a newer read of xxx]`）
-- 把超长 tool result 替换为 `[Old tool result content cleared]`
 - **不调 LLM，纯规则处理，毫秒级**
+
+### FullCompaction（重量级，调 LLM 做摘要）
+
+- `v0.8.4` 主循环重构为 `summarizeOnce` 封装（`full.ts:475-570`），`project` + `maskToolObservations` 移入其内
+- 上游新文件 `render-messages.ts`：`renderMessagesToText()` + `countMessageTokens()` 替代内联渲染
+- 新类型 `CompactionReport`（`strategy.ts`）：携带压缩前后统计信息
+- 新增 `lowWaterMark` 防反复触发 + `reactiveAttempted` 防 overflow 循环
 
 ### FullCompaction（重量级，调 LLM 做摘要）
 

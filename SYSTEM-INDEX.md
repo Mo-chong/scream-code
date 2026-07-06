@@ -53,7 +53,7 @@
 | **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler 残差公式 R=W×D^Δs + 阈值衰减防脱敏 |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | 四层架构：maskToolObservations + ContentArchive（LRU 2000 条/30min TTL，sharedStore 跨子 agent 共享）+ MicroCompaction（3 道关卡）+ FullCompaction（LLM 总结→记忆库）。ArchiveRecover MCP 工具已放开。Bash 降噪：ANSI 剥离 + 重复行去重 |
-| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（LLM 摘要）+ MicroCompaction（删覆盖 Read），自动缓解窗口溢出；前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
+| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（summarizeOnce 封装 + CompactionReport）+ MicroCompaction（isUseless/isOversizedTruncatable 两阶段）+ render-messages.ts。前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
 | **AGENTS 分层设计** 🆕 | `SYSTEM/agents-hierarchy.md` | 三层加载链(findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget) + 四维评估框架 + 语言设计规范 + 55KB 提取方法论 |
 | **System Prompt 装配** | `SYSTEM/prompt-assembly.md` | Template → Render → Inject → API 全链路，模板变量/AGENTS合并/user-prefs双路 |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |

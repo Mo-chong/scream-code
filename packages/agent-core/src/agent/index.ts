@@ -36,7 +36,7 @@ import { ContentArchive } from './context/content-archive';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, type EmbeddingEngine } from '@scream-code/memory';
 import { searchPendingDoc } from './turn/memory-rules';
 import { KnowledgeStore } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
@@ -138,6 +138,7 @@ readonly contentArchive: ContentArchive;
   readonly fileActionAudit: FileActionAudit;
 
   private lastLlmConfigLogSignature?: string;
+  private readonly sharedEmbeddingEngine: EmbeddingEngine;
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
@@ -153,6 +154,10 @@ readonly contentArchive: ContentArchive;
     this.subagentHost = options.subagentHost;
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
+    const embedCacheDir = options.screamHomeDir !== undefined
+      ? join(options.screamHomeDir, 'cache', 'fastembed')
+      : undefined;
+    this.sharedEmbeddingEngine = createFastEmbedEngine(embedCacheDir);
     this.log = options.log ?? log;
 
     this.blobStore = options.homedir
@@ -234,7 +239,7 @@ readonly contentArchive: ContentArchive;
         this.log.error('memory legacy migration failed', error);
       }
       try {
-        this.memoStore!.setEmbeddingEngine(createFastEmbedEngine());
+        this.memoStore!.setEmbeddingEngine(this.sharedEmbeddingEngine);
       } catch (error: unknown) {
         this.log.warn('embedding engine init failed; falling back to keyword search', error);
       }
@@ -250,7 +255,7 @@ readonly contentArchive: ContentArchive;
         this.log.error('knowledge store init failed', error);
       }
       try {
-        store.setEmbeddingEngine(createFastEmbedEngine());
+        store.setEmbeddingEngine(this.sharedEmbeddingEngine);
       } catch (error: unknown) {
         this.log.warn('knowledge embedding engine init failed', error);
       }

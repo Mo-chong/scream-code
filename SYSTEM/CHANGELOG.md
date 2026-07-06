@@ -3,6 +3,53 @@ tags: [type/changelog, status/final, domain/system]
 ---
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 
+## v0.8.5 — 合并上游 v0.8.5（2026-07-06）
+
+### 新功能
+- **memory/embeddings**: Engine cache 防并发重复下载，`cacheDir` 参数可配置模型缓存路径，HF sidecar 自动补全（缺失 tokenizer/config 文件自动从 mirror 下载），5min 超时保护，重试 3 次
+- **memory/classifiers**: `value-classifier.ts` 记忆价值自动分类（critical/valuable/normal/low），`category-tagger.ts` 自动推断类别标签
+- **memory/store**: 嵌入模型加载失败后 5 分钟自动重试循环（`startEmbeddingLoadLoop`）
+- **agent/index**: 暴露 `memorySearch()`/`memoryAppend()` EmbeddingSearch API，`/knowledge` 命令集成
+- **tui**: `/knowledge filter` 命令，按标签/时间段过滤知识图谱
+- **新建文件**: `knowledge-filter.ts`, `value-classifier.ts`, `category-tagger.ts`
+
+### 合并
+- 上游 v0.8.5 合入本地二开分支
+- `embeddings.ts` 手动合并：上游 engineCache 架构为基底 + 本地绝对路径 cache/超时/重试/清缓存/fallback
+- `agent/index.ts` 双保留：上游 EmbeddingEngine 类型 + 本地 PlanMode/pre-warm
+- `store.ts` 双保留：上游 embeddingLoadLoop + 本地 sqlite-vec/hot-cold/value-tier
+- 版本号: packages/*/package.json 0.8.4→0.8.5
+
+## v0.8.4 — 合并上游 v0.8.4（2026-07-06）
+
+### 新增模块
+- **render-messages.ts** — `packages/agent-core/src/agent/compaction/render-messages.ts` 新增
+  - `renderMessagesToText(messages, opts?)` — 消息列表 → 纯文本渲染
+  - `countMessageTokens(text, model?)` — token 计数
+- **knowledge-web / knowledge-store** — TUI 命令新增（上游 2 个新文件）
+- **CompactionReport** — `strategy.ts` 新增类型，携带压缩前后 token 统计信息
+
+### 重构（upstream）
+- **FullCompaction 主循环** — `full.ts:475-570` 扁平 while(true) → `summarizeOnce` 封装
+  - `project` + `maskToolObservations` 移入 summarizeOnce 内部
+  - 新增 `summarizeWithFallback()` 递归降级 + overflow 自动减量重试
+  - 新增 `COMPACTION_INSTRUCTION`/`COMPACTION_UPDATE_INSTRUCTION` 模板驱动 prompt
+- **MicroCompaction 两阶段过滤** — `micro.ts` 从单 `isUseless` 拆分为：
+  - `isUseless` — `msg.useless === true` → uselessMarker
+  - `isOversizedTruncatable` — token 数 > minContentTokens → 截断 + 可选 archive
+- **context/index.ts** — `addToolResult` 自动标记 `useless` 字段
+
+### 新字段
+- `ExecutableToolSuccessResult.useless?: boolean` — context/types.ts + loop/types.ts
+- `FullStrategy.lowWaterMark` — 防反复触发
+- `FullStrategy.reactiveAttempted` — 防 overflow 循环
+- `MicroConfig.keepRecentTokens: 40_000` + `pruneMinReclaimTokens: 20_000`
+
+### 合并信息
+- 分支：本地 main + `origin/main`（v0.8.1→v0.8.4，3 个版本）
+- 冲突 6 个：context/types.ts（互补）, loop/types.ts（互补）, embeddings.ts（互补）, models.ts（互补）, full.ts（逐行合并）, micro.ts（逐行合并）
+- 构建：agent-core + scream-code 两段编译链零错误
+
 ## v0.8.3 — AGENTS.md 加载验证与 prompt-assembly 修复（2026-07-05）
 
 ### 发现问题
@@ -31,7 +78,7 @@ tags: [type/changelog, status/final, domain/system]
 # Scream Code 版本更新记录
 
 > 记录上游 LIUTod/scream-code 各版本的新功能、修复和 API 变更，以及二开 fork (Mo-chong/scream-code) 的本地定制改动。
-> 当前本地版本：v0.8.1（合并于 2026-07-03）
+> 当前本地版本：v0.8.4（合并于 2026-07-06）
 
 ## v0.8.2 — 本地 Phase26: 缓存感知架构与统一压缩方案（2026-07-04）
 
