@@ -8,20 +8,60 @@ import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 export interface MicroCompactionConfig {
   /** Number of most recent messages to always keep untouched. */
   keepRecentMessages: number;
+  /** Token budget for the recent window. If the trailing N messages exceed
+   *  this many tokens, the cutoff moves further back until the window fits,
+   *  so a few giant tool results can't pin the cutoff behind them and starve
+   *  the prefix of reclaimable content. */
+  keepRecentTokens: number;
+  /** Only advance the cutoff if doing so reclaims at least this many tokens.
+   *  Stops micro-compaction from churning the prefix when there's nothing
+   *  left to gain (e.g. all old tool results already elided). */
+  pruneMinReclaimTokens: number;
   /** Only truncate tool results with at least this many tokens. */
   minContentTokens: number;
   /** Minimum context usage ratio (0-1) before micro-compaction triggers. */
   minContextUsageRatio: number;
   /** Placeholder text for truncated tool results. */
   truncatedMarker: string;
+  /** Placeholder text for tool results explicitly marked useless. */
+  uselessMarker: string;
 }
 
 const DEFAULT_CONFIG: MicroCompactionConfig = {
-  keepRecentMessages: 30,
+  keepRecentMessages: 20,
+  keepRecentTokens: 40_000,
+  pruneMinReclaimTokens: 20_000,
   minContentTokens: 100,
   minContextUsageRatio: 0.5,
   truncatedMarker: '[Old tool result content cleared]',
+  uselessMarker: '[Uneventful result elided]',
 };
+
+/**
+ * Compute the cutoff index: everything at index < cutoff is eligible for
+ * truncation. The default floor is `keepRecentMessages` (the message-count
+ * protection window). But if the trailing window exceeds `keepRecentTokens`,
+ * the cutoff walks forward (toward the tail) until the window fits — so a
+ * few giant tool results can't pin the cutoff behind them and starve the
+ * prefix of reclaimable content.
+ */
+function computeCutoff(
+  messages: readonly ContextMessage[],
+  config: MicroCompactionConfig,
+): number {
+  const messageFloor = Math.max(0, messages.length - config.keepRecentMessages);
+  // Walk forward from the floor while the trailing window is over budget.
+  // Accumulate tokens from the cutoff position toward the tail so we don't
+  // re-walk the whole suffix on every step.
+  let windowTokens = estimateTokensForMessages(messages.slice(messageFloor));
+  let cutoff = messageFloor;
+  while (cutoff < messages.length && windowTokens > config.keepRecentTokens) {
+    const removed = messages[cutoff]!;
+    windowTokens -= estimateTokensForMessages([removed]);
+    cutoff += 1;
+  }
+  return cutoff;
+}
 
 /**
  * Walk the message list and find Read tool calls whose file paths were
@@ -132,7 +172,19 @@ export class MicroCompaction {
         : 0;
     if (contextUsageRatio < config.minContextUsageRatio) return;
 
-    const nextCutoff = Math.max(0, history.length - config.keepRecentMessages);
+    const nextCutoff = computeCutoff(history, config);
+    // Idempotent: don't move the cutoff if it's already at or past the
+    // computed position. Re-running detect() in a single turn (full.ts
+    // beforeStep + context.messages) should not churn the record log or
+    // re-truncate already-truncated content.
+    if (nextCutoff <= this.cutoff) return;
+
+    // Gate: only advance when there's something to gain. If the new cutoff
+    // would reclaim fewer than pruneMinReclaimTokens, the prefix is already
+    // mostly markers — leave it alone and let full compaction take over.
+    const { beforeTokens, afterTokens } = this.measureEffect(history, nextCutoff);
+    if (beforeTokens - afterTokens < config.pruneMinReclaimTokens) return;
+
     this.apply(nextCutoff);
   }
 
@@ -140,7 +192,9 @@ export class MicroCompaction {
    * Apply micro-compaction to a message list: replace old tool results
    * before the cutoff line with truncated markers. Read results for files
    * that were re-read later get a supersede marker so the model knows
-   * the old content is stale.
+   * the old content is stale. Tool results explicitly marked useless are
+   * elided with a short notice regardless of size, since they carry no
+   * actionable information.
    */
   compact(messages: readonly ContextMessage[]): readonly ContextMessage[] {
     const config = this.config;
@@ -148,12 +202,22 @@ export class MicroCompaction {
     const result: ContextMessage[] = [];
     let i = 0;
     for (const msg of messages) {
-      if (
+      const isUseless =
         i < this.cutoff &&
         msg.role === 'tool' &&
         msg.toolCallId !== undefined &&
-        estimateTokensForMessages([msg]) >= config.minContentTokens
-      ) {
+        msg.useless === true;
+      const isOversizedTruncatable =
+        i < this.cutoff &&
+        msg.role === 'tool' &&
+        msg.toolCallId !== undefined &&
+        estimateTokensForMessages([msg]) >= config.minContentTokens;
+      if (isUseless) {
+        result.push({
+          ...msg,
+          content: [{ type: 'text', text: config.uselessMarker } as ContentPart],
+        } as ContextMessage);
+      } else if (isOversizedTruncatable) {
         // Point B: 存档原始工具结果（截断前保留完整内容）
         // gated by content-archive flag (default: true)
         if (flags.enabled('content-archive')) {
@@ -164,7 +228,7 @@ export class MicroCompaction {
                 ? msg.content.map((p) => ('text' in p ? p.text : '')).join('\n')
                 : '';
           this.agent.contentArchive?.archive(
-            `micro:${msg.toolCallId}`,
+            'micro:' + msg.toolCallId,
             textContent,
             { source: 'microCompact' },
           );
@@ -200,6 +264,7 @@ export class MicroCompaction {
     cutoff: number,
   ): { truncatedToolResultCount: number; beforeTokens: number; afterTokens: number } {
     let markerTokenCount: number | undefined;
+    let uselessMarkerTokenCount: number | undefined;
     let truncatedToolResultCount = 0;
     let beforeTokens = 0;
     let afterTokens = 0;
@@ -208,12 +273,20 @@ export class MicroCompaction {
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
 
       const contentTokens = estimateTokensForMessages([message]);
-      if (contentTokens < this.config.minContentTokens) continue;
+      const isUseless = message.useless === true;
+      if (!isUseless && contentTokens < this.config.minContentTokens) continue;
 
-      markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
-      truncatedToolResultCount += 1;
-      beforeTokens += contentTokens;
-      afterTokens += markerTokenCount;
+      if (isUseless) {
+        uselessMarkerTokenCount ??= estimateTokens(this.config.uselessMarker);
+        truncatedToolResultCount += 1;
+        beforeTokens += contentTokens;
+        afterTokens += uselessMarkerTokenCount;
+      } else {
+        markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
+        truncatedToolResultCount += 1;
+        beforeTokens += contentTokens;
+        afterTokens += markerTokenCount;
+      }
     }
     return { truncatedToolResultCount, beforeTokens, afterTokens };
   }

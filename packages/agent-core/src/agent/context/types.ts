@@ -80,6 +80,15 @@ export type ContextMessage = Message & {
   readonly isError?: boolean;
   /** compaction 时跳过此条消息 */
   readonly protected?: boolean;
+  /**
+   * Set on a tool result message whose content is unlikely to be referenced
+   * again (e.g. "no matches" from Grep, empty output from Bash). Micro
+   * compaction elides these aggressively with a short notice instead of
+   * keeping the original payload. The model never sees this flag; it only
+   * affects internal compaction decisions.
+   */
+  readonly useless?: boolean;
+
 };
 
 export interface UserMessageRecord {

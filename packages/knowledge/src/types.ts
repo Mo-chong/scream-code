@@ -129,6 +129,26 @@ export interface KnowledgeSearchOptions {
   skipRerank?: boolean;
 }
 
+/** One step in the multi-hop retrieval trace. */
+export interface KnowledgeSearchTraceStep {
+  step: string;
+  detail: string;
+  durationMs: number;
+  payload?: unknown;
+}
+
+/** Aggregated trace from multiSearch — exposed for debugging / agent context. */
+export interface KnowledgeSearchTrace {
+  steps: KnowledgeSearchTraceStep[];
+  /** Titles of events the LLM reranker selected (most relevant first). */
+  rerankedEventTitles: string[];
+  /** Final fallback reason if the multi-hop path was bypassed. */
+  fallbackReason: string | null;
+}
+
+/** Callback invoked at each retrieval step. Optional — used for trace collection. */
+export type KnowledgeSearchStepCallback = (step: KnowledgeSearchTraceStep) => void;
+
 /** Progress callback for ingest operations. */
 export type IngestProgress =
   | { stage: 'chunking'; message: string }
@@ -151,3 +171,25 @@ export interface LlmCaller {
 
 /** Re-export the embedding engine type for convenience. */
 export type { EmbeddingEngine };
+
+/** Graph data payload for the /knowledge web visualization. */
+export interface KnowledgeGraphData {
+  entities: Array<{
+    id: string;
+    sourceId: string;
+    type: string;
+    name: string;
+    normalizedName: string;
+    eventCount: number;
+  }>;
+  events: Array<{
+    id: string;
+    sourceId: string;
+    documentId: string;
+    title: string;
+    rank: number;
+    entityIds: string[];
+  }>;
+  edges: Array<{ entityId: string; eventId: string }>;
+  sources: Array<{ id: string; name: string }>;
+}

@@ -39,18 +39,28 @@ Scream Code 是一款省心的本地中文 AI Agent 助手。无需硬记代码�
   </tr>
   <tr>
     <td width="50%">
-      <h3>🧠 永久记忆备忘录+SAG知识库</h3>
-      <p><strong>痛点记忆结构化SQL提取</strong>，FTS5全文+Tag语义+向量三重检索不漂移。跨会话共享，越用越懂你。Ai时代-SAG知识库，随时导入你的专属知识，让Agent更懂你</p>
+      <h3>🧠 永久记忆备忘录</h3>
+      <p><strong>痛点记忆结构化SQL提取</strong>，FTS5全文+Tag语义+向量三重检索不漂移。跨会话共享，越用越懂你。</p>
     </td>
     <td width="50%">
-      <h3>🛡️ 效率级轻量底层</h3>
-      <p><strong>企业级安全</strong>，本地部署，高度自由可拓展，系统级调用能力。完全本地运行，无任何远程行为。</p>
+      <h3>📚 本地SAG图谱知识库</h3>
+      <p><strong>基于论文：https://arxiv.org/abs/2606.15971 构建复现SAG知识库</strong>（大幅提高多跳推理能力），随时导入你的本地知识，让Agent更懂你</p>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <h3>🔌 自定义拓展+多代理编排</h3>
-      <p><strong>MCP / Skill / 模型商</strong> /支持子Agent开启多代理编排可自定义模型。支持 DeepSeek、OpenAI、Anthropic 等。</p>
+      <h3>🛡️ 效率级轻量底层</h3>
+      <p><strong>企业级安全</strong>，本地部署，高度自由可拓展，系统级调用能力。完全本地运行，无任何远程行为。</p>
+    </td>
+    <td width="50%">
+      <h3>🔌 多维自定义拓展</h3>
+      <p><strong>MCP / Skill / 模型商</strong> 均可自由DIY配置，拓展你Scream的能力，内设主流国内外模型商超130+，也可自由配置。</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>⚡️ 多代理编排引擎</h3>
+      <p><strong>支持为子Agent开启多代理编排模式，可自定义配置子Agent模型。</strong>让不同模型，去做自己最擅长的工作。</p>
     </td>
     <td width="50%">
       <h3>📱 多渠道互联</h3>
@@ -74,7 +84,9 @@ npm install -g scream-code
 ```
 
 安装完成后，`scream` 命令自动加入 PATH。首次安装约需 2-5 分钟。
-
+TUI启动命令`scream`
+自动权限模式启动`scream --auto`
+自动批准模式启动`scream -y`
 
 ### 第二步：启动并配置 AI 服务
 

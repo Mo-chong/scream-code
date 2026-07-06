@@ -10,15 +10,19 @@ export type {
   KnowledgeEntityType,
   KnowledgeEvent,
   KnowledgeEventEntity,
+  KnowledgeGraphData,
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
+  KnowledgeSearchStepCallback,
+  KnowledgeSearchTrace,
+  KnowledgeSearchTraceStep,
   KnowledgeSource,
   LlmCaller,
 } from './types.js';
 export type { EmbeddingEngine } from './types.js';
 
 export { KnowledgeStore } from './store.js';
-export { chunkMarkdown, chunkText, stripMarkdown, estimateTokens } from './chunking.js';
+export { chunkMarkdown, chunkText, splitLargeSection, stripMarkdown, estimateTokens } from './chunking.js';
 export {
   ENTITY_TYPES,
   EXTRACTION_SYSTEM_PROMPT,
@@ -30,4 +34,4 @@ export {
   rerankEventsWithLlm,
 } from './extractor.js';
 export { ingestContent, ingestDirectory, ingestFile, isSupportedFile } from './ingest.js';
-export { multiSearch } from './search.js';
+export { multiSearch, multiSearchWithTrace } from './search.js';

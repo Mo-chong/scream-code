@@ -1,9 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 
-import { createFastEmbedEngine } from '@scream-code/memory';
 import {
-  KnowledgeStore,
   ingestDirectory,
   ingestFile,
   isSupportedFile,
@@ -14,6 +12,8 @@ import {
 } from '@scream-code/knowledge';
 
 import type { SlashCommandHost } from './dispatch';
+import { handleWeb } from './knowledge-web';
+import { getKnowledgeStore } from './knowledge-store';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -21,18 +21,6 @@ import {
   KnowledgeDocumentTree,
   type KnowledgeDocumentTreeEntry,
 } from '../components/dialogs/knowledge-document-tree';
-import { getDataDir } from '#/utils/paths';
-
-let knowledgeStoreInstance: KnowledgeStore | undefined;
-
-async function getKnowledgeStore(): Promise<KnowledgeStore> {
-  if (knowledgeStoreInstance === undefined) {
-    knowledgeStoreInstance = new KnowledgeStore(getDataDir());
-    await knowledgeStoreInstance.init();
-    knowledgeStoreInstance.setEmbeddingEngine(createFastEmbedEngine());
-  }
-  return knowledgeStoreInstance;
-}
 
 function promptTextInput(
   host: SlashCommandHost,
@@ -129,6 +117,19 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
 
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
+
+  const checkSpinner = host.showProgressSpinner('检查向量模型...');
+  const status = await store.ensureEmbeddingReady();
+  if (!status.ok) {
+    checkSpinner.stop({ ok: false, label: '向量模型下载失败' });
+    host.showNotice(
+      '向量模型下载失败',
+      '知识库需要中文向量模型 bge-small-zh-v1.5（约 95MB）才能进行语义检索。\n\n可能原因：\n• 网络不通，无法下载模型文件\n• onnxruntime native binding 加载失败\n\n请检查网络后重试。',
+    );
+    return;
+  }
+  checkSpinner.stop({ ok: true, label: '向量模型就绪' });
+
   const spinner = host.showProgressSpinner('开始摄入...');
   try {
     if (stats.isDirectory()) {
@@ -390,6 +391,11 @@ export async function handleKnowledgeCommand(
       label: '📊 统计信息',
       description: '查看知识库整体统计',
     },
+    {
+      value: 'web',
+      label: '🌐 知识图谱',
+      description: '在浏览器中查看交互式知识图谱',
+    },
   ];
 
   const showMenu = (): void => {
@@ -407,6 +413,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'search') await handleSearch(host);
             else if (value === 'delete') await handleDelete(host);
             else if (value === 'stats') await handleStats(host);
+            else if (value === 'web') await handleWeb();
           } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             host.showError(`操作失败: ${msg}`);
