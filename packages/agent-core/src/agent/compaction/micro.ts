@@ -119,8 +119,12 @@ function findSupersededPaths(
  *
  * Triggered automatically during context construction via {@link compact}.
  */
+/** Minimum steps between detect() evaluations to reduce cache-break churn. */
+const BATCH_SIZE = flags.asNumber('micro.batchSize');
+
 export class MicroCompaction {
   private cutoff = 0;
+  private stepsSinceLastDetect = 0;
   readonly config: MicroCompactionConfig;
 
   constructor(
@@ -131,8 +135,9 @@ export class MicroCompaction {
   }
 
   /** Reset the internal cutoff line (e.g. after a full compaction). */
-  reset(): void {
-    this.cutoff = 0;
+  reset(maxCutoff = 0): void {
+    this.cutoff = Math.min(this.cutoff, maxCutoff);
+    this.stepsSinceLastDetect = 0;
   }
 
   /** Advance the cutoff line and log the change. */
@@ -144,9 +149,19 @@ export class MicroCompaction {
     this.cutoff = cutoff;
   }
 
-  /** Check whether micro-compaction is warranted and advance the cutoff. */
-  detect(): void {
+  /** Check whether micro-compaction is warranted and advance the cutoff.
+   *
+   * Gated by a batch counter (BATCH_SIZE, registry default 8, configurable via
+   * SCREAM_CODE_MICRO_BATCH_SIZE) so the cutoff line changes
+   * infrequently, preserving KV-cache continuity. The `force` parameter
+   * bypasses the gate for full-compaction-driven resets. */
+  detect(force?: boolean): void {
     if (!flags.enabled('micro-compaction')) return;
+
+    this.stepsSinceLastDetect++;
+    if (!force && this.stepsSinceLastDetect < BATCH_SIZE) return;
+    this.stepsSinceLastDetect = 0;
+
     const config = this.config;
     const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;
@@ -203,6 +218,21 @@ export class MicroCompaction {
           content: [{ type: 'text', text: config.uselessMarker } as ContentPart],
         } as ContextMessage);
       } else if (isOversizedTruncatable) {
+        // Point B: 存档原始工具结果（截断前保留完整内容）
+        // gated by content-archive flag (default: true)
+        if (flags.enabled('content-archive')) {
+          const textContent =
+            typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? msg.content.map((p) => ('text' in p ? p.text : '')).join('\n')
+                : '';
+          this.agent.contentArchive?.archive(
+            `micro:${msg.toolCallId}`,
+            textContent,
+            { source: 'microCompact' },
+          );
+        }
         const marker =
           msg.toolCallId !== undefined && superseded.has(msg.toolCallId)
             ? `[Superseded by a newer read of ${superseded.get(msg.toolCallId)}]`

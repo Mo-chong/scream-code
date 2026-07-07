@@ -1,15 +1,28 @@
-export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListResult } from './models.js';
+export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListResult, MemoValueTier } from './models.js';
 export { createMemoryMemo, toSummary } from './models.js';
 export { MemoryMemoStore, type MemoryMemoStoreLogger } from './store.js';
 export { parseMemoryMemos, buildExitExtractionPrompt, EXIT_EXTRACTION_SYSTEM_PROMPT } from './extractor.js';
-export { computeRelevanceScore, rankMemos, extractKeywords, buildProjectTagCloud, detectQueryIntent, type ScoredMemo, type QueryIntent } from './scoring.js';
-export { normalizeTags, generateTags } from './tags.js';
+export {
+  computeRelevanceScore, rankMemos, extractKeywords, buildProjectTagCloud, detectQueryIntent,
+  computeMultiFieldSimilarity, isDuplicate, expandWithSynonyms,
+  type ScoredMemo, type QueryIntent,
+} from './scoring.js';
+export { classifyValueTier, buildMemoClassifyText, inferCategoryTags } from './classifiers/index.js';
+export type { CategoryRule } from './classifiers/index.js';
+export {
+  normalizeTags, generateTags, processTags, recommendTagsFromEmbedding,
+  computeTagBudget, computeJaccardSimilarity, deduplicateAgainstCorpus,
+  validateTag, computeTagSetQuality, TAG_CONFIG,
+  type ProcessTagsContext, type ProcessTagsStore,
+} from './tags.js';
 export {
   buildConsolidationPlan,
   applyConsolidation,
+  findStaleTags,
   type DuplicateGroup,
   type RelatedGroup,
   type ConsolidationPlan,
 } from './consolidator.js';
 export { DreamTracker, type DreamState } from './dream.js';
 export { buildEmbeddingText, createFastEmbedEngine, type EmbeddingEngine } from './embeddings.js';
+export { computeTagStats, computeStoreQualityWarnings, type TagGenerationStats } from './tag-stats.js';

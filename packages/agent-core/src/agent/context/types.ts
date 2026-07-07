@@ -86,6 +86,8 @@ export type ContextMessage = Message & {
    * affects internal compaction decisions.
    */
   readonly useless?: boolean;
+  /** compaction 时跳过此条消息 */
+  readonly protected?: boolean;
 };
 
 export interface UserMessageRecord {
@@ -96,9 +98,13 @@ export interface UserMessageRecord {
 export interface SystemReminderRecord {
   content: string;
   origin: PromptOrigin;
+  /** S/A 级 → true → compaction 跳过 */
+  protected?: boolean;
 }
 
 export interface AgentContextData {
   history: readonly ContextMessage[];
   tokenCount: number;
+  /** Reference to the ContentArchive instance, if one is attached to the Agent. */
+  readonly contentArchive?: import('./content-archive').ContentArchive | undefined;
 }

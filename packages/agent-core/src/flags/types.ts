@@ -1,7 +1,7 @@
 import type { FlagId } from './registry';
 
 /** Which layer consumes a flag — documentation/grouping only; not used in resolution. */
-export type FlagSurface = 'core' | 'tui' | 'both';
+export type FlagSurface = 'core' | 'tui' | 'both' | 'internal';
 
 /** Shape of a registry entry (id is a loose string so `as const satisfies` can validate it). */
 export interface FlagDefinitionInput {
@@ -9,6 +9,8 @@ export interface FlagDefinitionInput {
   /** Full environment variable name, e.g. `SCREAM_CODE_EXPERIMENTAL_MY_FEATURE`. Read directly by the resolver. */
   readonly env: string;
   readonly default: boolean;
+  /** Optional numeric default (e.g. BATCH_SIZE). When set, `resolver.asNumber(id)` falls back to this. */
+  readonly numDefault?: number;
   readonly surface: FlagSurface;
 }
 

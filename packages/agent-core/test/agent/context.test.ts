@@ -434,6 +434,7 @@ describe('Agent context', () => {
       messages:
         assistant: text "summary of old context"
         user: text "recent user message\\n\\nnew prompt"
+        user: text "<system-reminder>\\n<system-reminder kind=\\"injection\\" variant=\\"intent_add_feature\\">\\nNew feature detected. Follow these steps:\\nStep 1: Read existing files to understand current architecture.\\nStep 2: Design minimal change — identify files to modify.\\nStep 3: Implement. Keep changes focused.\\nStep 4: Verify (build/test).\\n</system-reminder>\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });

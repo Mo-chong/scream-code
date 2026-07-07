@@ -2,6 +2,13 @@ packages:
   - packages/*
   - apps/*
 
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  simple-git-hooks: true
+
 catalog:
   zod: ^4.3.6
 

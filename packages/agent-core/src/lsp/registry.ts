@@ -1,7 +1,8 @@
+import { access } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { execSync } from 'node:child_process';
+import { join } from 'pathe';
 import { createRequire } from 'node:module';
-
 import type { Jian } from '@scream-code/jian';
 
 import { LspClient } from './client';
@@ -13,13 +14,50 @@ export interface LspCommand {
   readonly initOptions?: (workspaceRoot: string) => Record<string, unknown> | undefined;
 }
 
-const TYPESCRIPT_SERVER_COMMAND = ['typescript-language-server', '--stdio'];
+/** Resolve npm binary commands to `node <entry>` on Windows (bypass .cmd wrappers). */
+const _cmdCache = new Map<string, string[]>();
+
+async function _resolveCmd(desc: LspCommand): Promise<string[]> {
+  const key = desc.command.join(' ');
+  const cached = _cmdCache.get(key);
+  if (cached) return cached;
+
+  if (process.platform === 'win32' && desc.languageId.startsWith('typescript')) {
+    // On Windows, npm-installed .cmd wrappers can't be spawned directly.
+    // Try multiple strategies to find the actual JS entry point:
+    // 1. npm root -g (global install)
+    // 2. npm next to node.exe (node's own npm)
+    // 3. Bundled require resolution
+    for (const npmCmd of ['npm', 'npm.cmd']) {
+      try {
+        const npmRoot = execSync(npmCmd + ' root -g', { encoding: 'utf8' }).trim();
+        const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
+        await access(entry); // confirm it exists
+        const resolved: string[] = [process.execPath, entry, '--stdio'];
+        _cmdCache.set(key, resolved);
+        return resolved;
+      } catch { /* try next strategy */ }
+    }
+    // Fallback: try npm next to node.exe
+    try {
+      const nodeBin = __dirname;
+      const npmRoot = execSync(join(nodeBin, 'npm.cmd') + ' root -g', { encoding: 'utf8' }).trim();
+      const entry = join(npmRoot, 'typescript-language-server', 'lib', 'cli.mjs');
+      await access(entry);
+      const resolved: string[] = [process.execPath, entry, '--stdio'];
+      _cmdCache.set(key, resolved);
+      return resolved;
+    } catch { /* fallthrough to raw command */ }
+  }
+  _cmdCache.set(key, desc.command);
+  return desc.command;
+}
 
 const LANGUAGE_SERVERS: Readonly<Record<string, LspCommand>> = {
-  '.ts': { command: TYPESCRIPT_SERVER_COMMAND, languageId: 'typescript', initOptions: typescriptInitOptions },
-  '.tsx': { command: TYPESCRIPT_SERVER_COMMAND, languageId: 'typescriptreact', initOptions: typescriptInitOptions },
-  '.js': { command: TYPESCRIPT_SERVER_COMMAND, languageId: 'javascript', initOptions: typescriptInitOptions },
-  '.jsx': { command: TYPESCRIPT_SERVER_COMMAND, languageId: 'javascriptreact', initOptions: typescriptInitOptions },
+  '.ts': { command: ['typescript-language-server', '--stdio'], languageId: 'typescript', initOptions: typescriptInitOptions },
+  '.tsx': { command: ['typescript-language-server', '--stdio'], languageId: 'typescriptreact', initOptions: typescriptInitOptions },
+  '.js': { command: ['typescript-language-server', '--stdio'], languageId: 'javascript', initOptions: typescriptInitOptions },
+  '.jsx': { command: ['typescript-language-server', '--stdio'], languageId: 'javascriptreact', initOptions: typescriptInitOptions },
   '.py': { command: ['pyright-langserver', '--stdio'], languageId: 'python' },
   '.rs': { command: ['rust-analyzer'], languageId: 'rust' },
   '.go': { command: ['gopls'], languageId: 'go' },
@@ -27,20 +65,6 @@ const LANGUAGE_SERVERS: Readonly<Record<string, LspCommand>> = {
 
 /**
  * Resolve a `tsserver` lib directory for `typescript-language-server`.
- *
- * `typescript-language-server` is only the LSP protocol layer; it shells out to
- * TypeScript's own `tsserver.js` to compute diagnostics. It searches the
- * workspace's `node_modules/typescript` by default, so editing a standalone
- * `.ts` file outside any JS project makes it exit with "Could not find a valid
- * TypeScript installation." Passing `initializationOptions.tsserver.path`
- * points it at a known-good install so diagnostics work regardless of where
- * the edited file lives.
- *
- * Resolution order: workspace `node_modules/typescript`, then the
- * `typescript` dependency bundled with scream-code itself (resolved via
- * `require.resolve`). Returns undefined when neither is available, in which
- * case the server will fall back to its own search (and likely fail for
- * project-less files).
  */
 function resolveTsserverPath(workspaceRoot: string): string | undefined {
   const workspaceCandidate = join(workspaceRoot, 'node_modules', 'typescript', 'lib');
@@ -68,31 +92,32 @@ export class LspRegistry {
    * Get or create an LSP client for the given file path and workspace root.
    * Returns undefined if the file type is not supported.
    *
-   * Caches the in-flight `Promise<LspClient>` rather than the client instance
-   * so concurrent callers share the same startup and never receive a client
-   * whose `initialize` has not completed.
+   * Caches the in-flight `Promise<LspClient>` so concurrent callers share
+   * the same startup and never receive a client whose `initialize` has not
+   * completed.
    */
   async getClient(path: string, workspaceRoot: string): Promise<LspClient | undefined> {
     const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
     const config = LANGUAGE_SERVERS[ext];
     if (config === undefined) return undefined;
 
-    const key = `${workspaceRoot}\0${config.command.join(' ')}`;
+    const resolvedCmd = await _resolveCmd(config);
+    const key = `${workspaceRoot}\0${resolvedCmd.join(' ')}`;
     let clientPromise = this.clients.get(key);
     if (clientPromise === undefined) {
-      clientPromise = this.createAndStartClient(config, workspaceRoot, key);
+      clientPromise = this.createAndStartClient(resolvedCmd, workspaceRoot, config);
       this.clients.set(key, clientPromise);
     }
     return clientPromise;
   }
 
   private async createAndStartClient(
-    config: LspCommand,
+    command: string[],
     workspaceRoot: string,
-    key: string,
+    config: LspCommand,
   ): Promise<LspClient> {
     const client = new LspClient(
-      config.command,
+      command,
       workspaceRoot,
       this.jian,
       config.initOptions?.(workspaceRoot),
@@ -101,9 +126,7 @@ export class LspRegistry {
       await client.start();
       return client;
     } catch (error) {
-      // Uncache the failed promise so subsequent calls don't reuse a
-      // half-started client (process undefined, started flag stuck) and
-      // block for the diagnostics poll timeout on every Edit/Write.
+      const key = `${workspaceRoot}\0${command.join(' ')}`;
       this.clients.delete(key);
       throw error;
     }

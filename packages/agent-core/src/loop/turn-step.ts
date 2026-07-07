@@ -17,6 +17,7 @@ import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 import { chatWithRetry } from './retry';
 import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
 import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
+import { maskToolObservations } from '../utils/mask-tool-observations';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -69,7 +70,11 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
 
   signal.throwIfAborted();
 
-  const messages = await buildMessages();
+  let messages = await buildMessages();
+  // Observation masking: replace old tool results with a placeholder
+  // to reduce attention overhead. Operates post-compaction on projected
+  // messages — does not affect context.history.
+  messages = maskToolObservations(messages);
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();
@@ -116,6 +121,16 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   });
   const usage = response.usage;
   recordUsage(usage);
+  // Log cache metrics for observability — the baseline we need before
+  // evaluating whether further cache_control tuning is warranted.
+  if (log !== undefined) {
+    log.info('llm cache metrics', {
+      cacheRead: usage.inputCacheRead,
+      cacheCreation: usage.inputCacheCreation,
+      inputOther: usage.inputOther,
+      step: currentStep,
+    });
+  }
   const stopReason = deriveStepStopReason(response);
 
   // Execute tools only when the normalized response shape represents a tool

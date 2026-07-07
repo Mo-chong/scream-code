@@ -1,4 +1,4 @@
-import { parseBooleanEnv } from '#/config/resolve';
+import { parseBooleanEnv, parseNumberEnv } from '#/config/resolve';
 
 import { FLAG_DEFINITIONS, type FlagId } from './registry';
 import type { FlagDefinitionInput } from './types';
@@ -26,6 +26,14 @@ export class FlagResolver {
   ) {
     this.env = env;
     this.byId = new Map(definitions.map((def) => [def.id, def]));
+  }
+
+  asNumber(id: FlagId): number {
+    const def = this.byId.get(id);
+    if (def === undefined) return 0;
+    const override = parseNumberEnv(this.env[def.env]); // L2 env override
+    if (override !== undefined) return override;
+    return def.numDefault ?? 0; // L3 registry default
   }
 
   enabled(id: FlagId): boolean {

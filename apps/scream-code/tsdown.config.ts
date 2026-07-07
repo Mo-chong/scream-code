@@ -37,6 +37,7 @@ export default defineConfig({
   },
   define: {
     [BUILT_IN_CATALOG_DEFINE]: builtInCatalogDefine(),
+    __BUILD_TIMESTAMP__: String(Date.now()),
     __SCREAM_CODE_VERSION__: JSON.stringify(packageJson.version),
     __SCREAM_CODE_CHANNEL__: JSON.stringify(process.env['SCREAM_CODE_CHANNEL'] ?? ''),
     __SCREAM_CODE_COMMIT__: JSON.stringify(process.env['SCREAM_CODE_COMMIT'] ?? ''),

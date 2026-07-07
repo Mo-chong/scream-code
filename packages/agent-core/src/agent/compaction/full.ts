@@ -21,26 +21,20 @@ import {
   sleepForRetry,
 } from '../../loop/retry';
 import { renderPrompt } from '../../utils/render-prompt';
+import type { ContextMessage } from '../context';
 import {
   estimateTokens,
   estimateTokensForMessages,
 } from '../../utils/tokens';
+import { maskToolObservations } from '../../utils/mask-tool-observations';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
-import compactionUpdateInstructionTemplate from './compaction-update-instruction.md';
 import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
 import { parseMemoryMemos } from '@scream-code/memory';
 import type { TodoItem } from '../../tools/builtin/state/todo-list';
-import type { ContextMessage } from '../context/types';
-import {
-  createFileOps,
-  extractFileOpsFromMessage,
-  formatFileOperations,
-  type FileOperations,
-} from './file-operations';
 
 
 export interface CompactedHistory {
@@ -48,105 +42,6 @@ export interface CompactedHistory {
 }
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
-
-/** Max recursion depth for re-summarize fallback. Each level halves the
- *  input, so depth 3 means we can compress a 8x-oversized input down to a
- *  single summary by chaining 2^3 = 8 partial summaries. */
-const MAX_RE_SUMMARIZE_DEPTH = 3;
-
-class TruncatedError extends Error {}
-
-/**
- * Recursive re-summarize fallback for context overflow. When even the
- * minimum safe split still overflows the model (typically because a single
- * message contains a giant tool result), split the input in half at a safe
- * boundary, summarize each half, then concatenate the two partial summaries
- * and re-summarize them into one. If a half still overflows, recurse.
- *
- * The split uses `canSplitAfter` from the strategy to make sure each half
- * ends at a message boundary that doesn't orphan tool results. If no safe
- * split exists in the half (e.g. one giant message), feed it as-is to the
- * model and let the outer retry loop handle the overflow.
- */
-async function summarizeWithFallback(
-  messages: readonly ContextMessage[],
-  summarizeOnce: (msgs: readonly ContextMessage[]) => Promise<{ summary: string; usage: TokenUsage | null }>,
-  depth: number = 0,
-): Promise<{ summary: string; usage: TokenUsage | null }> {
-  if (messages.length <= 1) {
-    // Can't split further — let the outer loop retry / fail.
-    return summarizeOnce(messages);
-  }
-
-  // Find a safe split near the midpoint, biased toward the back half so
-  // the second chunk tends to be smaller (more recent, denser content).
-  let split = -1;
-  const mid = Math.floor(messages.length / 2);
-  for (let i = mid; i > 0; i--) {
-    if (canSplitAfterContext(messages, i - 1)) {
-      split = i;
-      break;
-    }
-  }
-  if (split === -1) {
-    // No safe split forward from mid; try back half.
-    for (let i = mid + 1; i < messages.length; i++) {
-      if (canSplitAfterContext(messages, i - 1)) {
-        split = i;
-        break;
-      }
-    }
-  }
-  if (split === -1) {
-    return summarizeOnce(messages);
-  }
-
-  const firstHalf = messages.slice(0, split);
-  const secondHalf = messages.slice(split);
-
-  // Summarize each half. If a half overflows, recurse on it — but only if
-  // we haven't hit the depth cap. At the cap, let the overflow error bubble
-  // so the outer retry loop can handle it (otherwise we'd loop forever
-  // re-trying the same oversized half).
-  const summarizeHalf = async (half: readonly ContextMessage[]): Promise<string> => {
-    try {
-      return (await summarizeOnce(half)).summary;
-    } catch (error) {
-      if (
-        (error instanceof APIContextOverflowError || error instanceof TruncatedError) &&
-        depth + 1 < MAX_RE_SUMMARIZE_DEPTH
-      ) {
-        const nested = await summarizeWithFallback(half, summarizeOnce, depth + 1);
-        return nested.summary;
-      }
-      throw error;
-    }
-  };
-
-  const firstSummary = await summarizeHalf(firstHalf);
-  const secondSummary = await summarizeHalf(secondHalf);
-  const merged = `${firstSummary}\n\n---\n\n${secondSummary}`;
-
-  // Re-summarize the merged partial summaries into one final summary.
-  // Wrap them in a minimal user message so the model sees a single chunk.
-  const mergedMessage: ContextMessage = {
-    role: 'user',
-    content: [{ type: 'text', text: merged }],
-    toolCalls: [],
-  };
-  return summarizeOnce([mergedMessage]);
-}
-
-/** Same split-safety rule as DefaultCompactionStrategy.canSplitAfter, but
- *  operates on ContextMessage (which carries toolCalls on assistant msgs). */
-function canSplitAfterContext(messages: readonly ContextMessage[], index: number): boolean {
-  const m = messages[index];
-  if (m === undefined) return false;
-  if (m.role === 'user') return false;
-  if (m.role === 'assistant' && m.toolCalls.length > 0) return false;
-  if (messages[index + 1]?.role === 'tool') return false;
-  return true;
-}
 
 /** Max consecutive compaction failures before auto-compaction is
  *  disabled for the remainder of the turn. Resets each turn. */
@@ -163,23 +58,14 @@ const COMPACTION_SYSTEM_PROMPT =
   'Output text only. DO NOT CALL ANY TOOLS. ' +
   'Follow the compaction instruction in the last user message exactly. ' +
   'Pay special attention to the Memory Memo Extraction section — ' +
-  'you MUST output memory-memo blocks for every completed task loop.';
+  'you MUST output memory-memo blocks for every completed task loop. ' +
+  'Write memory-memo content in the SAME LANGUAGE as the conversation.';
 
 export class FullCompaction {
   protected compactionCountInTurn = 0;
   private consecutiveCompactionFailures = 0;
   private _shouldInjectSessionSummary = false;
   private compactionTimedOut = false;
-  /** Token count below which compaction should not re-trigger. Set after a
-   *  successful compaction to 110% of the post-compaction token count, so
-   *  that a context sitting just above triggerRatio doesn't immediately
-   *  re-trigger on every step. Reset each turn. */
-  private lowWaterMark = 0;
-  /** Whether a reactive (overflow-triggered) compaction has already been
-   *  attempted this turn. Prevents the overflow → compact → still near
-   *  limit → overflow → compact cycle from consuming the entire
-   *  maxCompactionPerTurn budget with marginal savings. */
-  private reactiveAttempted = false;
   protected compacting: {
     abortController: AbortController;
     promise: Promise<void>;
@@ -297,14 +183,9 @@ export class FullCompaction {
   resetForTurn(): void {
     this.compactionCountInTurn = 0;
     this.consecutiveCompactionFailures = 0;
-    this.lowWaterMark = 0;
-    this.reactiveAttempted = false;
   }
 
   async handleOverflowError(signal: AbortSignal, error: unknown) {
-    if (this.reactiveAttempted) {
-      throw error;
-    }
     const didStartCompaction = this.beginAutoCompaction(false);
     if (!didStartCompaction && !this.compacting) {
       if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -316,20 +197,20 @@ export class FullCompaction {
       }
       throw error;
     }
-    this.reactiveAttempted = true;
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
     // Stage 1: Run micro compaction first (free, no LLM call).
     // detect() advances the internal cutoff when token usage >= 50%.
-    this.agent.microCompaction.detect();
+    // force=true bypasses the batch gate so full compaction has an
+    // up-to-date picture of micro's savings before deciding.
+    this.agent.microCompaction.detect(true);
 
     // Stage 2: Check if full compaction is still needed, accounting for
     // the token savings micro compaction already provides.
     const effectiveTokens = this.effectiveTokenCount;
 
-    const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens) &&
-      effectiveTokens >= this.lowWaterMark;
+    const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens);
     const isProactiveTrigger = !isReactiveTrigger &&
       this.strategy.shouldCompactProactively(
         effectiveTokens,
@@ -375,9 +256,7 @@ export class FullCompaction {
 
   private checkAutoCompaction(throwOnLimit: boolean = true): boolean {
     if (this.compacting) return true;
-    const effectiveTokens = this.effectiveTokenCount;
-    if (!this.strategy.shouldCompact(effectiveTokens)) return false;
-    if (effectiveTokens < this.lowWaterMark) return false;
+    if (!this.strategy.shouldCompact(this.tokenCountWithPending)) return false;
 
     return this.beginAutoCompaction(throwOnLimit);
   }
@@ -443,6 +322,18 @@ export class FullCompaction {
     }
   }
 
+  /**
+   * Point C（ContentArchive docs-only）:
+   *
+   * FullCompact 不存档原始工具结果。原因：
+   * compactionWorker 把原始消息传给 LLM 做语义重写（总结/合并），
+   * 重写后原始 token 已被 LLM 消解而非简单截断，
+   * 恢复原始内容的价值极低。
+   *
+   * 需要完整上下文的场景应在 Point A（toolResultOutputForModel 截断前）
+   * 或 Point B（MicroCompact 合并前）存档，这两个点保存的是
+   * 未经 LLM 改写的原始输出。
+   */
   private async compactionWorker(
     signal: AbortSignal,
     data: Readonly<CompactionBeginData>,
@@ -451,81 +342,58 @@ export class FullCompaction {
     const originalHistory = [...this.agent.context.history];
     const tokensBefore = estimateTokensForMessages(originalHistory);
     const model = this.agent.config.model;
-    // Detect a prior compaction summary at the head of history. If present,
-    // use the iterative-update instruction so the LLM merges new content into
-    // the existing summary instead of producing a fresh one from scratch.
-    const previousSummary = extractPreviousSummary(originalHistory);
-    const isUpdate = previousSummary !== null;
     let retryCount = 0;
     try {
       await this.triggerPreCompactHook(data, tokensBefore, signal);
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
-      const summarizeOnce = async (
-        messagesToCompact: readonly ContextMessage[],
-      ): Promise<{ summary: string; usage: TokenUsage | null }> => {
-        const instruction = isUpdate
-          ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
-          : COMPACTION_INSTRUCTION(data.instruction);
+      let usage: TokenUsage | null;
+      let summary: string;
+      while (true) {
+        // Phase22.2: 跳过 protected 消息（S/A 级 system reminders，不被压缩）
+        const messagesToCompact: ContextMessage[] = [];
+        let _idx = 0;
+        let _maxTries = originalHistory.length * 2; // 安全门控：防止全 protected 死循环
+        while (messagesToCompact.length < compactedCount && _idx < originalHistory.length && _maxTries-- > 0) {
+          const m = originalHistory[_idx++];
+          if (m && !m.protected) {
+            messagesToCompact.push(m);
+          }
+        }
+        const projected = project(messagesToCompact);
+        const masked = maskToolObservations(projected, 1);
         const messages = [
-          ...project(messagesToCompact),
+          ...masked,
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: instruction,
+                text: COMPACTION_INSTRUCTION(data.instruction),
               },
             ],
             toolCalls: [],
           } satisfies Message,
         ];
-        const response = await this.agent.generate(
-          this.agent.config.provider,
-          COMPACTION_SYSTEM_PROMPT,
-          [],
-          messages,
-          undefined,
-          { signal },
-        );
-        if (response.finishReason === 'truncated') {
-          throw new TruncatedError();
-        }
-        return {
-          summary: extractCompactionSummary(response, model),
-          usage: response.usage,
-        };
-      };
-
-      let usage: TokenUsage | null;
-      let summary: string;
-      while (true) {
-        const messagesToCompact = originalHistory.slice(0, compactedCount);
+        class TruncatedError extends Error {}
         try {
-          const result = await summarizeOnce(messagesToCompact);
-          usage = result.usage;
-          summary = result.summary;
+          const response = await this.agent.generate(
+            this.agent.config.provider,
+            COMPACTION_SYSTEM_PROMPT,
+            [],
+            messages,
+            undefined,
+            { signal },
+          );
+          if (response.finishReason === 'truncated') {
+            throw new TruncatedError();
+          }
+          usage = response.usage;
+          summary = extractCompactionSummary(response, model);
           break;
         } catch (error) {
           if (error instanceof APIContextOverflowError || error instanceof TruncatedError) {
-            // Context overflow: shrink the input and retry. If we've already
-            // shrunk to the minimum safe split, fall back to re-summarizing
-            // the input in halves and merging — this handles the case where
-            // a single oversized message (e.g. a huge tool result) makes
-            // even the smallest split too large for the model.
-            const reduced = this.strategy.reduceCompactOnOverflow(messagesToCompact);
-            if (reduced < compactedCount) {
-              compactedCount = reduced;
-            } else {
-              this.agent.log.warn('compaction overflow at minimum split, falling back to re-summarize', {
-                compactedCount,
-                tokensBefore: estimateTokensForMessages(messagesToCompact),
-              });
-              const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
-              summary = result.summary;
-              usage = result.usage;
-              break;
-            }
+            compactedCount = this.strategy.reduceCompactOnOverflow(messagesToCompact);
           }
           else if (!isRetryableGenerateError(error)) {
             throw error;
@@ -551,29 +419,18 @@ export class FullCompaction {
       }
 
       const recent = originalHistory.slice(compactedCount);
-      const messagesToCompactForOps = originalHistory.slice(0, compactedCount);
-      const fileOps = createFileOps();
-      for (const msg of messagesToCompactForOps) {
-        extractFileOpsFromMessage(msg, fileOps);
-      }
-      const processedSummary = this.postProcessSummary(summary, fileOps);
-      const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
+      const tokensAfter = estimateTokens(summary) + estimateTokensForMessages(recent);
 
       const result: CompactionResult = {
-        summary: processedSummary,
+        summary,
         compactedCount,
         tokensBefore,
         tokensAfter,
-        ...(isUpdate ? { isUpdate: true } : {}),
       };
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
-      // Set lowWaterMark AFTER applyCompaction so effectiveTokenCount reflects
-      // the compressed context. 110% margin accounts for normal per-step token
-      // growth that shouldn't count as "needing compaction again."
-      this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
-      await this.extractAndStoreMemos(processedSummary);
+      await this.extractAndStoreMemos(summary);
       this.triggerPostCompactHook(data, result);
 
       // Compaction succeeded — reset circuit breaker
@@ -667,7 +524,7 @@ export class FullCompaction {
       summaryLen: summary.length,
     });
 
-    const memos = parseMemoryMemos(summary);
+    const memos = await parseMemoryMemos(summary);
     this.agent.log.info('Memory memo parse result', {
       memoCount: memos.length,
     });
@@ -705,29 +562,22 @@ export class FullCompaction {
   }
 
   /**
-   * Append the current todo list and file operations as markdown sections to
-   * the compaction summary so active tasks and file context survive
-   * compression. Without this, both are lost after compaction because the
-   * original messages containing them are removed from the context window.
+   * Append the current todo list as a markdown section to the compaction
+   * summary so active tasks survive compression. This mirrors kimi-code's
+   * approach: without it, the todo list is lost after compaction because
+   * the original messages containing it are removed from the context window.
    */
-  private postProcessSummary(summary: string, fileOps: FileOperations): string {
+  private postProcessSummary(summary: string): string {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
+    if (todos.length === 0) return summary;
 
-    const sections: string[] = [summary.trim()];
-
-    if (todos.length > 0) {
-      const lines = todos.map((t) => {
-        const marker = t.status === 'done' ? 'x' : t.status === 'in_progress' ? '-' : ' ';
-        return `- [${marker}] ${t.title}`;
-      });
-      sections.push(['## TODO List', '', ...lines].join('\n'));
-    }
-
-    const filesSection = formatFileOperations(fileOps);
-    if (filesSection.length > 0) sections.push(filesSection);
-
-    return sections.join('\n\n');
+    const lines = todos.map((t) => {
+      const marker = t.status === 'done' ? 'x' : t.status === 'in_progress' ? '-' : ' ';
+      return `- [${marker}] ${t.title}`;
+    });
+    const todoMarkdown = ['## TODO List', '', ...lines].join('\n');
+    return `${summary.trim()}\n\n${todoMarkdown}`;
   }
 }
 function extractCompactionSummary(response: GenerateResult, model: string): string {
@@ -750,22 +600,4 @@ function extractCompactionSummary(response: GenerateResult, model: string): stri
 
 export const COMPACTION_INSTRUCTION = (customInstruction = ''): string =>
   renderPrompt(compactionInstructionTemplate, { customInstruction });
-
-export const COMPACTION_UPDATE_INSTRUCTION = (customInstruction = ''): string =>
-  renderPrompt(compactionUpdateInstructionTemplate, { customInstruction });
-
-/**
- * If history starts with a compaction_summary message, return its text so the
- * next compaction can merge new content into it instead of starting fresh.
- * Returns null when no prior summary exists (first compaction in the session).
- */
-function extractPreviousSummary(history: readonly ContextMessage[]): string | null {
-  const head = history[0];
-  if (head?.origin?.kind !== 'compaction_summary') return null;
-  const text = head.content
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('');
-  return text.length > 0 ? text : null;
-}
 

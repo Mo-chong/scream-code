@@ -217,6 +217,10 @@ export class Session {
       );
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
+      // 🆕 刷新拦截事件日志到磁盘
+      await Promise.allSettled(
+        Array.from(this.agents.values(), async (agent) => agent.turn.flushEventLog()),
+      );
       await this.triggerSessionEnd('exit');
     } finally {
       try {

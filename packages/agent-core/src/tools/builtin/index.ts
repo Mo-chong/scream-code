@@ -9,6 +9,7 @@ export * from './collaboration/agent';
 export * from './collaboration/ask-user';
 export * from './collaboration/report-finding';
 export * from './goal/create-goal';
+export * from './context/archive-recover';
 export * from './goal/get-goal';
 export * from './goal/set-goal-budget';
 export * from './goal/update-goal';

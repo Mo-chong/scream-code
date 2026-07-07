@@ -1,8 +1,33 @@
 import type { MemoryMemo, MemoryMemoSummary } from './models.js';
 import { createMemoryMemo, toSummary } from './models.js';
 import type { MemoryMemoStore } from './store.js';
-import { STOP_WORDS, computeKeywordSimilarity } from './scoring.js';
-import { normalizeTags } from './tags.js';
+import { STOP_WORDS, isDuplicate } from './scoring.js';
+import { normalizeTags, processTags, RESERVED_TAGS, TAG_CONFIG } from './tags.js';
+
+/**
+ * Merge tags from multiple memos with priority for consensus tags.
+ * Tags appearing in more memos rank higher.
+ */
+export function unionWithPriority(
+  tagArrays: string[][],
+  maxTags: number = 12,
+): string[] {
+  const freq = new Map<string, number>();
+  for (const arr of tagArrays) {
+    const seen = new Set<string>();
+    for (const tag of arr) {
+      const normalized = tag.trim().toLowerCase();
+      if (normalized.length === 0 || seen.has(normalized)) continue;
+      seen.add(normalized);
+      freq.set(normalized, (freq.get(normalized) ?? 0) + 1);
+    }
+  }
+  return [...freq.entries()]
+    .toSorted((a, b) => b[1] - a[1])
+    .slice(0, maxTags)
+    .map(([tag]) => tag)
+    .filter((t) => !RESERVED_TAGS.has(t));
+}
 
 export interface DuplicateGroup {
   /** Memos identified as duplicates/similar. */
@@ -44,10 +69,14 @@ export interface ConsolidationPlan {
     resolvedFound: number;
     staleFound: number;
     memosAfterConsolidation: number;
+    /** Number of protected (baohu-tagged) memos skipped. */
+    skippedProtected: number;
   };
 }
 
-const SIMILARITY_THRESHOLD = 0.45;
+/** Tags that immunize a memo from all consolidation (merge, delete, archive). */
+const PROTECTED_TAGS = ['baohu', 'chundu', 'ding', 'yongjiu'];
+
 const STALE_DAYS = 30;
 
 /**
@@ -58,14 +87,24 @@ const STALE_DAYS = 30;
  */
 export async function buildConsolidationPlan(
   store: MemoryMemoStore,
-  options?: { projectDir?: string },
+  options?: { projectDir?: string; includeArchive?: boolean },
 ): Promise<ConsolidationPlan> {
   const allMemos: MemoryMemo[] = [];
   for await (const memo of store.read(options)) {
     allMemos.push(memo);
   }
+  // If includeArchive is set, also scan cold-tier memos for dedup/stale
+  if (options?.includeArchive) {
+    for await (const memo of store.readArchived(options)) {
+      allMemos.push(memo);
+    }
+  }
 
-  const summaries = allMemos.map(toSummary);
+  // Protected memos (tagged 'baohu' or 'chundu') are immune from merge/delete/stale.
+  const protectedCount = allMemos.filter(m => m.tags?.some(t => PROTECTED_TAGS.includes(t))).length;
+  const active = allMemos.filter(m => !m.tags?.some(t => PROTECTED_TAGS.includes(t)));
+
+  const summaries = active.map(toSummary);
   const duplicateGroups = findDuplicateGroups(summaries);
   const relatedGroups = findRelatedGroups(summaries, duplicateGroups);
   const resolved = findResolved(summaries);
@@ -86,6 +125,7 @@ export async function buildConsolidationPlan(
       staleFound: stale.length,
       memosAfterConsolidation:
         allMemos.length - dedupedCount - resolved.length - stale.length,
+      skippedProtected: protectedCount,
     },
   };
 }
@@ -101,7 +141,7 @@ export async function applyConsolidation(
   let deleted = 0;
   let created = 0;
 
-  // ── 1. 归档 resolved/stale 的经验（先 append，防崩溃丢数据）──
+  // ── 1. 归档 resolved/stale 的经验（append + demote 代替 delete）──
   if (plan.resolved.length > 0) {
     const worked = plan.resolved
       .filter((m) => m.whatWorked)
@@ -119,7 +159,7 @@ export async function applyConsolidation(
         outcome: '已完成',
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
-        tags: normalizeTags(plan.resolved.flatMap((m) => m.tags ?? [])),
+        tags: await processTags(plan.resolved.flatMap((m) => m.tags ?? [])),
         extractionSource: 'compaction',
       });
       await store.append(archive);
@@ -143,11 +183,31 @@ export async function applyConsolidation(
         outcome: '已归档',
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
-        tags: normalizeTags(plan.stale.flatMap((m) => m.tags ?? [])),
+        tags: await processTags(plan.stale.flatMap((m) => m.tags ?? [])),
         extractionSource: 'compaction',
       });
       await store.append(archive);
       created++;
+    }
+  }
+
+  // ── 2. Demote resolved/stale instead of deleting (hot→cold move) ──
+  for (const memo of plan.resolved) {
+    if (store.demote !== undefined) {
+      await store.demote(memo.id);
+      deleted++;
+    } else {
+      await store.delete(memo.id);
+      deleted++;
+    }
+  }
+  for (const memo of plan.stale) {
+    if (store.demote !== undefined) {
+      await store.demote(memo.id);
+      deleted++;
+    } else {
+      await store.delete(memo.id);
+      deleted++;
     }
   }
 
@@ -156,8 +216,10 @@ export async function applyConsolidation(
     const newest = group.memos.reduce((a, b) =>
       a.recordedAt > b.recordedAt ? a : b,
     );
-    const mergedTags = normalizeTags(
-      group.memos.flatMap((m) => m.tags ?? []),
+    // Union with priority: consensus tags across duplicates rank highest
+    const mergedTags = unionWithPriority(
+      group.memos.map((m) => m.tags ?? []),
+      12,
     );
     const merged = createMemoryMemo({
       sourceSessionId: newest.sourceSessionId,
@@ -175,20 +237,12 @@ export async function applyConsolidation(
     created++;
   }
 
-  // ── 3. 删除 originals（merged 已安全落盘，崩溃可恢复）──
+  // ── 3. 删除 originals of duplicates（merged 已安全落盘，崩溃可恢复）──
   for (const group of plan.duplicateGroups) {
     for (const memo of group.memos) {
       await store.delete(memo.id);
       deleted++;
     }
-  }
-  for (const memo of plan.resolved) {
-    await store.delete(memo.id);
-    deleted++;
-  }
-  for (const memo of plan.stale) {
-    await store.delete(memo.id);
-    deleted++;
   }
 
   return { deleted, created };
@@ -208,14 +262,8 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
       const candidate = memos[j];
       if (!candidate || used.has(candidate.id)) continue;
 
-      // Check similarity against all memos already in the cluster
-      const isSimilar = cluster.some((m) => {
-        const score = computeKeywordSimilarity(
-          candidate,
-          `${m.userNeed} ${m.approach}`,
-        );
-        return score >= SIMILARITY_THRESHOLD;
-      });
+      // Weighted multi-field dedup with userNeed short-circuit and synonym expansion
+      const isSimilar = cluster.some((m) => isDuplicate(m, candidate));
 
       if (isSimilar) {
         cluster.push(candidate);
@@ -233,14 +281,15 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
 
 /**
  * Split a whatFailed / whatWorked field into individual claims.
- * Handles both `;` and `；` separators.
+ * Handles multiple Chinese/English delimiters for real-world sentence patterns.
  */
 function splitClaims(text: string): string[] {
   if (!text || text === 'none' || text === '无') return [];
+  // 🛠️ P1-4: Split on Chinese/English sentence delimiters including Chinese comma
   return text
-    .split(/[;；]/)
+    .split(/[;；。.!！?？，,\n\r]+/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .filter((s) => s.length >= 2);
 }
 
 /**
@@ -266,13 +315,17 @@ function extractSignificantWords(text: string): string[] {
  * Check whether `claim` overlaps with any claim in `against`.
  * 2+ shared significant words = overlap; 1 word is enough for single-word claims.
  */
+// 🛠️ P3-12: minimum word matches to consider a claims overlap (was hardcoded 2)
+const CLAIMS_OVERLAP_MIN_MATCH = 2;
+
 function claimsOverlap(claim: string, against: Set<string>): boolean {
   const words = extractSignificantWords(claim);
-  if (words.length === 0) return false;
+  // Single word never counts as overlap — too ambiguous
+  if (words.length <= 1) return false;
   for (const other of against) {
     const otherLower = other.toLowerCase();
-    const matched = words.filter((w) => otherLower.includes(w)).length;
-    if (matched >= 2 || (matched >= 1 && words.length === 1)) return true;
+    const matched = words.filter((w) => otherLower.includes(w.toLowerCase())).length;
+    if (matched >= CLAIMS_OVERLAP_MIN_MATCH) return true;
   }
   return false;
 }
@@ -320,7 +373,7 @@ function buildDuplicateGroup(cluster: MemoryMemoSummary[]): DuplicateGroup {
       whatFailed: failures.size > 0 ? [...failures].join('; ') : 'none',
       whatWorked: successes.size > 0 ? [...successes].join('; ') : 'none',
     },
-    reason: `发现 ${cluster.length} 条相似记录（关键词重叠 > ${Math.round(SIMILARITY_THRESHOLD * 100)}%）`,
+    reason: `发现 ${cluster.length} 条相似记录（多字段加权相似度 >= 45%）`,
   };
 }
 
@@ -445,4 +498,37 @@ function findStale(
       !isOutcomeCompleted(m.outcome) &&
       !m.outcome.includes('blocked'),
   );
+}
+
+/**
+ * Phase 5: Find memos whose tags have become "stale" (low freshness)
+ * based on the ResNet decay formula. Returns stale tag entries that
+ * Dream consolidation can suggest refreshing.
+ */
+export function findStaleTags(
+  memos: MemoryMemoSummary[],
+  options?: { threshold?: number; decay?: number },
+): Array<{
+  memoId: string;
+  oldTags: string[];
+  daysSince: number;
+  freshness: number;
+}> {
+  const threshold = options?.threshold ?? TAG_CONFIG.TAG_FRESHNESS_THRESHOLD;
+  const decay = options?.decay ?? TAG_CONFIG.TAG_FRESHNESS_DECAY;
+  const stale: Array<{
+    memoId: string;
+    oldTags: string[];
+    daysSince: number;
+    freshness: number;
+  }> = [];
+  for (const memo of memos) {
+    if (!memo.tags?.length) continue;
+    const daysSince = (Date.now() - memo.recordedAt) / 86400000;
+    const freshness = Math.pow(decay, daysSince);
+    if (freshness < threshold) {
+      stale.push({ memoId: memo.id, oldTags: memo.tags, daysSince, freshness });
+    }
+  }
+  return stale;
 }

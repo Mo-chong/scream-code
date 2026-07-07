@@ -37,6 +37,7 @@ describe('buildConsolidationPlan', () => {
   });
 
   afterEach(async () => {
+    store.close();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -146,6 +147,7 @@ describe('applyConsolidation', () => {
   });
 
   afterEach(async () => {
+    store.close();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
