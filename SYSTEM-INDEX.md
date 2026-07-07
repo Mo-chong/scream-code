@@ -173,6 +173,7 @@
 | 问题 | 先查这个文件 |
 |------|-------------|
 | **合并上游完整流程（推荐）** | **`SYSTEM/合并上游仓库SOP.md`** |
+| **system.md ⚠️ 保护+同步规则** | **`SYSTEM/合并上游仓库SOP.md` §7** |
 | 作者 force-push 后怎么合并 | `SYSTEM/pitfalls.md` §Git 与仓库管理 |
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
 | 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |
