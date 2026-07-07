@@ -10,7 +10,7 @@
  */
 
 import type { Agent } from '..';
-import type { DynamicInjector } from './injector';
+import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
 import { VariantScheduler } from '../turn/variant-registry';
 
@@ -174,16 +174,26 @@ export class InjectionRouter {
         continue;
       }
 
+      // Step 4: 残差注意力衰减检查（注入器可选配置）
+      const residualCfg = injector.getResidualConfig();
+      if (residualCfg) {
+        const lastStep = this.scheduler.getLastStep(id);
+        if (lastStep >= 0) {
+          const stepDelta = context.currentStep - lastStep;
+          if (stepDelta < residualCfg.minStepGap) continue;
+          const residual = residualCfg.weight * Math.pow(residualCfg.decayPerStep, stepDelta);
+          if (residual >= residualCfg.threshold) continue;
+        }
+      }
+
       // Step 7: Token 预算检查（预留）
       if (!this.tokenBudgetCheck(injectionCount + 1)) {
         continue;
       }
 
-      // TODO(Step 11): 缓存感知 / 注意力路由 / 冷却
-
       try {
-        // DynamicInjector.inject() 内部调用 getInjection() + appendSystemReminder
-        await injector.inject();
+        // DynamicInjector.inject(context) — 传入上下文供步级决策
+        await injector.inject(context);
         this.scheduler.record(id, context.currentStep);
         results.push({
           variant: id,
@@ -248,12 +258,13 @@ export class InjectionRouter {
   }
 
   /** 运行时状态摘要（诊断/监控用） */
-  getStats(): { registered: number; disabled: string[]; active: string[] } {
+  getStats(): { registered: number; disabled: string[]; active: string[]; injectedThisConversation: number } {
     const all = Array.from(this.injectors.keys());
     return {
       registered: all.length,
       disabled: Array.from(this.disabled),
       active: all.filter((id) => !this.disabled.has(id)),
+      injectedThisConversation: this.scheduler.getAllCounts ? Object.values(this.scheduler.getAllCounts()).reduce((a, b) => a + b, 0) : 0,
     };
   }
 
@@ -264,6 +275,7 @@ export class InjectionRouter {
     for (const injector of this.injectors.values()) {
       injector.onContextClear();
     }
+    this.scheduler.reset();
   }
 
   /** 通知所有注册注入器：上下文已合并 */

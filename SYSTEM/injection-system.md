@@ -202,7 +202,7 @@ export class InjectionRouter {
   getDisabledList(): string[];
 
   /** 获取注入器注册/禁用统计 */
-  getStats(): { registered: number; disabled: string[]; active: string[] };
+  getStats(): { registered: number; disabled: string[]; active: string[]; injectedThisConversation: number };
 
   /** 设置 token 预算 */
   setBudget(budget: number | undefined): void;

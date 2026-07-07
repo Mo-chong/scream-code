@@ -41,9 +41,9 @@ export class InjectionManager {
     return this.router;
   }
 
-  async inject(): Promise<void> {
+  async inject(currentStep: number): Promise<void> {
     const context: InjectContext = {
-      currentStep: 1,
+      currentStep,
       messageCount: this.agent.context?.history?.length ?? 0,
     };
     await this.router.dispatch(context);
