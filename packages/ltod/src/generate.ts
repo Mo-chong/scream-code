@@ -1,3 +1,6 @@
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { APIEmptyResponseError } from './errors';
 import {
   getStreamFirstItemTimeoutMs,
@@ -16,6 +19,11 @@ import {
 import type { ChatProvider, FinishReason, GenerateOptions, StreamedMessage } from './provider';
 import type { Tool } from './tool';
 import type { TokenUsage } from './usage';
+
+/** 每步 LLM 调用后写入缓存审计日志 — 所有 provider 统一出口 */
+const _cacheAuditPath = (() => {
+  try { const p = join(process.cwd(), 'workspace', 'cache-audit.ndjson'); return p; } catch { return null; }
+})();
 
 /** Snapshot of a ToolCall excluding the internal `_streamIndex` routing field. */
 type StoredToolCall = Omit<ToolCall, '_streamIndex'>;
@@ -208,6 +216,28 @@ export async function generate(
     for (const toolCall of message.toolCalls) {
       await throwIfAborted(options?.signal, stream);
       await callbacks.onToolCall(toolCall);
+    }
+  }
+
+  // 缓存审计日志 — 所有 LLM 调用统一出口
+  if (_cacheAuditPath && stream.usage) {
+    const u = stream.usage;
+    const entry = JSON.stringify({
+      turn: 0, // turn-step 层会补全
+      model: provider.modelName,
+      ts: Date.now(),
+      totalInput: (u.inputCacheRead ?? 0) + (u.inputCacheCreation ?? 0) + (u.inputOther ?? 0),
+      cacheHit: u.inputCacheRead ?? 0,
+      cacheCreation: u.inputCacheCreation ?? 0,
+      cacheMiss: u.inputOther ?? 0,
+      hitRatio: ((u.inputCacheRead ?? 0) + (u.inputCacheCreation ?? 0)) / Math.max((u.inputCacheRead ?? 0) + (u.inputCacheCreation ?? 0) + (u.inputOther ?? 0), 1),
+    });
+    try {
+      const dir = join(_cacheAuditPath, '..');
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      appendFileSync(_cacheAuditPath, entry + '\n', 'utf-8');
+    } catch {
+      // non-fatal
     }
   }
 
