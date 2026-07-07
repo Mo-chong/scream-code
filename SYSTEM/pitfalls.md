@@ -434,6 +434,12 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 6. `git add -A && git commit`（绕 guard hook 拦截）
 7. 运行测试验证
 
+### 上游中文标题 h1→h2（2026-07 合并 v0.8.10 发现）
+
+**现象**: 上游将中文 README 标题从 `##` 降为 `###`（h1→h2），原因是 GitHub 搜索结果会优先显示根 README 的 h1 而非仓库 description，如果 h1 与仓库名不符会导致 SEO 混乱。
+
+**教训**: 合并上游时检查 markdown 标题层级变更。如果上游改了标题层级，需要同步更新本地文档以保持 SEO 一致性。
+
 ### 策略层防御模式
 
 **现象**：`install-strategy.ts` 中有策略层防御模式，用于阻止不安全的上游变更。

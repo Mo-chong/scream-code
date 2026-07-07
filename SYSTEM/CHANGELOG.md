@@ -272,3 +272,24 @@ tags: [type/changelog, status/final, domain/system]
 
 #### 设计文档
 - `DECISIONS/AGENTS-MD分层方案-当前真实状态.md` — 完整迭代（3版本：去重导向→能力增强→语言规范整合）
+
+---
+
+### v0.8.5 → v0.8.10（2026-07-07 合并）
+
+**范围**: 上游 24 commit，4 新功能 + 8 修复 + 文档
+
+**新功能**:
+- 知识图谱网页重写：白色简约风、平滑镜头过渡、自动旋转、实体面板、语言切换
+- FusionPlanTool 从 TUI 移至 agent-core（子代理可递归 spawn explore）
+- TUI 全面国际化：运行时中英文切换 + 首次安装自动检测系统语言
+- /knowledge 菜单显示 embedding 模型状态
+
+**修复**:
+- 知识图谱：初始相机距离、双击折叠、web 视觉改进
+- i18n：删除重复 key、修复 module 级 t() 过期
+- 中文标题 h1→h2（防止 GitHub 仓库描述被覆盖）
+- 环境变量方括号写法（兼容 TS 严格模式）
+- 测试/lint 修复
+
+**二开影响**: 低。FusionPlanTool 冲突已通过 keep-local 解决。其余为 TUI 层改动。
