@@ -6,6 +6,7 @@
  */
 
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 import type { Agent } from '..';
 import { checkGuard, type StepToolSummary } from '../turn/guard-engine';
 
@@ -14,6 +15,11 @@ export class GuardInjector extends DynamicInjector {
 
   constructor(agent: Agent) {
     super(agent);
+  }
+
+  /** 守卫反馈高优先级：注入到系统提示之后 */
+  override getTargetPosition(): InsertPosition {
+    return InsertPosition.AFTER_SYSTEM;
   }
 
   protected getInjection(): string | undefined {

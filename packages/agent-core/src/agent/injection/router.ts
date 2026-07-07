@@ -187,7 +187,7 @@ export class InjectionRouter {
         this.scheduler.record(id, context.currentStep);
         results.push({
           variant: id,
-          position: InsertPosition.AFTER_TOOL_CALL,
+          position: injector.getTargetPosition(),
           success: true,
           stepInjected: context.currentStep,
         });
@@ -195,7 +195,7 @@ export class InjectionRouter {
       } catch (error) {
         results.push({
           variant: id,
-          position: InsertPosition.AFTER_TOOL_CALL,
+          position: injector.getTargetPosition(),
           success: false,
           error: String(error),
           stepInjected: context.currentStep,

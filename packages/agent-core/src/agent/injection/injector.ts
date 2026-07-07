@@ -1,4 +1,5 @@
 import type { Agent } from '..';
+import { InsertPosition } from './position-strategy';
 
 export abstract class DynamicInjector {
   protected injectedAt: number | null = null;
@@ -28,6 +29,11 @@ export abstract class DynamicInjector {
     } else if (index === this.injectedAt) {
       this.injectedAt = null;
     }
+  }
+
+  /** 注入器期望的插入位置（默认 AFTER_TOOL_CALL） */
+  getTargetPosition(): InsertPosition {
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   async inject(): Promise<void> {

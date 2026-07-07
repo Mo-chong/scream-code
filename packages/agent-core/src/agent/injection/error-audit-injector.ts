@@ -8,6 +8,7 @@
  */
 
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 import type { Agent } from '..';
 import type { FileActionAuditEntry } from '../audit/file-action-audit';
 
@@ -16,6 +17,11 @@ export class ErrorAuditInjector extends DynamicInjector {
 
   constructor(agent: Agent) {
     super(agent);
+  }
+
+  /** 审计错误摘要注入到上下文中间位置 */
+  override getTargetPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
   }
 
   protected getInjection(): string | undefined {
