@@ -1748,7 +1748,7 @@ export class TurnFlow {
     this.resetInjectorStepState();
 
     // ── Phase 26: 缓存审计日志写入 + GrowthPredictor 数据投喂 ──
-    if (this._lastUsage && (this._lastUsage.cacheHitTokens !== undefined || this._lastUsage.cacheMissTokens !== undefined)) {
+    if (this._lastUsage) {
       const metrics = computeCacheMetrics(this._lastUsage);
       const compacted = this.agent.fullCompaction.lastCompactedTokens > 0;
       const compactedTokens = compacted ? this.agent.fullCompaction.lastCompactedTokens : 0;
