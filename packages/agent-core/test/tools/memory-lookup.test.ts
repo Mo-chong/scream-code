@@ -39,7 +39,10 @@ function makeStore(memos: MemoryMemo[]): { store: NonNullable<Agent['memoStore']
       },
       getEmbeddingEngine: () => undefined,
       hasEmbeddings: () => false,
+      hasVec0: () => false,
       searchByVector: async () => [],
+      searchByVectorVec0: () => [],
+      autoPromoteHits: async () => 0,
       search: async (query: string, options?: { projectDir?: string }) => {
         const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
         return memos.filter((memo) => {

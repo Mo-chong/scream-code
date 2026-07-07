@@ -31,6 +31,7 @@ describe('SQLite-backed MemoryMemoStore FTS', () => {
   });
 
   afterEach(async () => {
+    store.close();
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -94,6 +95,7 @@ describe('SQLite-backed MemoryMemoStore FTS', () => {
 
     const result = await fresh.list({ search: 'legacy' });
     expect(result.total).toBe(1);
+    fresh.close();
   });
 
   it('handles concurrent appends without data loss', async () => {

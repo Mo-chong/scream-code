@@ -1,8 +1,14 @@
-import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
 import { refreshUpdateCache } from './refresh';
 import { selectUpdateTarget } from './select';
+import {
+  INSTALL_COMMAND_STRING,
+  MANUAL_UPDATE_MESSAGE,
+  installUpdate,
+} from './install-strategy';
 import {
   type UpdateDecision,
   type UpdatePreflightResult,
@@ -17,29 +23,12 @@ export interface RunUpdatePreflightOptions {
   readonly isTTY?: boolean;
 }
 
-const INSTALL_TIMEOUT_MS = 300_000;
-
-/**
- * Resolve the npm executable name for the current platform.
- *
- * On Windows, `npm` is `npm.cmd` — a batch file Node can spawn directly
- * without `shell: true` (which would trigger DEP0190 when args are passed).
- */
-function npmExecutable(): string {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-}
-
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget): string {
-  return (
-    `Scream Code 有新版本可用 ` +
-    `(${currentVersion} -> ${target.version})。\n` +
-    `自动更新失败，请手动执行：\n` +
-    `  npm install -g scream-code@latest\n`
-  );
+function renderManualUpdateMessage(_currentVersion: string, _target: UpdateTarget): string {
+  return MANUAL_UPDATE_MESSAGE;
 }
 
 function renderInstallSuccessMessage(target: UpdateTarget): string {
@@ -57,28 +46,6 @@ async function promptInstall(
     installCommand,
   };
   return promptForInstallConfirmation(options);
-}
-
-async function installUpdate(): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(npmExecutable(), ['install', '-g', 'scream-code@latest'], { stdio: 'inherit' });
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('npm install 超时'));
-    }, INSTALL_TIMEOUT_MS);
-    child.once('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.once('exit', (code, signal) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`npm install 失败（exit ${code ?? signal}）`));
-    });
-  });
 }
 
 export function decideUpdateAction(
@@ -108,7 +75,7 @@ export async function runUpdatePreflight(
     const decision = decideUpdateAction(target, isInteractive);
     if (decision === 'none' || target === null) return 'continue';
 
-    const installCommand = 'npm install -g scream-code@latest';
+    const installCommand = INSTALL_COMMAND_STRING;
 
     if (decision === 'manual-command') {
       stdout.write(renderManualUpdateMessage(currentVersion, target));

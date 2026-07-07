@@ -1,5 +1,8 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import type { MemoryMemo } from './models.js';
 
 /**
@@ -55,6 +58,8 @@ const engineCache = new Map<string, EmbeddingEngine>();
  * Lazily loads the model on first use so startup is not blocked.
  * Engines are cached by cacheDir so repeated calls with the same cacheDir
  * return the same instance, sharing model state and download progress.
+ * Pre-warms eagerly when created during agent startup so model download
+ * happens in background before user interacts.
  * @param cacheDir Absolute path for model cache (e.g. ~/.scream-code/cache/fastembed).
  *                 Defaults to "local_cache" (CWD-relative) if not provided — prefer
  *                 passing an explicit path so the cache doesn't duplicate across CWDs.
@@ -73,21 +78,27 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let initPromise: Promise<FastembedModel | null> | null = null;
   let loadFailed = false;
 
+  // Pre-warm: eagerly load the model on construction.
+  // The Agent caller (agent/index.ts) creates the engine during startup,
+  // so the model download/load happens in background before user interacts.
+  initPromise = loadEmbedder(cacheDir).then(m => { embedder = m; return m; });
+
   return {
     get available(): boolean {
-      return !loadFailed;
+      return embedder !== null || initPromise !== null;
     },
 
     async embedBatch(texts: string[]): Promise<Float32Array[] | null> {
-      if (loadFailed) return null;
       if (texts.length === 0) return [];
 
       try {
+        // Reuse existing initPromise; never start a second concurrent download.
+        // Parallel loadEmbedder() calls corrupt the shared HF Hub cache.
         if (embedder === null) {
           initPromise ??= loadEmbedder(cacheDir);
           embedder = await initPromise;
+          initPromise = null; // consumed — next failure triggers fresh attempt
           if (embedder === null) {
-            loadFailed = true;
             return null;
           }
         }
@@ -101,8 +112,12 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
           }
         }
         return vectors.length > 0 ? vectors : null;
-      } catch {
-        loadFailed = true;
+      } catch (e) {
+        // loadFailed is retryable: clear initPromise so next call retries.
+        // Surface the real error for diagnosis instead of silent null.
+        process.stderr.write(`[embedBatch] error: ${e instanceof Error ? e.stack || e.message : String(e)}\n`);
+        embedder = null;
+        initPromise = null;
         return null;
       }
     },
@@ -147,35 +162,153 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   };
 }
 
-async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
-  try {
-    const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
-    if (cacheDir !== undefined) {
-      mkdirSync(cacheDir, { recursive: true });
-    }
-    const model = EmbeddingModel.BGESmallZH;
-    const initOpts = cacheDir !== undefined
-      ? { model, cacheDir }
-      : { model };
-    try {
-      return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-    } catch (initError: unknown) {
-      // If init fails due to missing config/tokenizer sidecars, download them
-      // from HuggingFace mirror and retry.
-      const msg = initError instanceof Error ? initError.message : '';
-      if (!/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(msg)) {
-        return null;
-      }
-      try {
-        await ensureFastembedModelSidecars(String(model), cacheDir);
-        return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-      } catch {
-        return null;
-      }
-    }
-  } catch {
-    return null;
+import { createRequire } from 'node:module';
+
+/** Timeout for FlagEmbedding.init() model download. 5min for cold cache on slow connections. */
+const EMBED_INIT_TIMEOUT_MS = 600_000;
+
+/**
+ * Resolve the package root directory from import.meta.url.
+ * packages/memory/dist/ → D:\AI\ScreamCode\ (monorepo root)
+ */
+function getScreamCodeRoot(): string {
+  const pkgDir = path.dirname(fileURLToPath(import.meta.url));
+  // packages/memory/dist/ => up 3 levels to monorepo root
+  return path.resolve(pkgDir, '..', '..', '..');
+}
+
+/**
+ * Absolute path to the project-local model cache directory.
+ * e.g. D:\AI\ScreamCode\local_cache\
+ */
+function getLocalCacheDir(): string {
+  return path.join(getScreamCodeRoot(), 'local_cache');
+}
+
+async function initWithTimeout<T>(
+  factory: () => Promise<T>,
+  label: string,
+  ms: number = EMBED_INIT_TIMEOUT_MS,
+): Promise<T> {
+  const timer = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+  );
+  return await Promise.race([factory(), timer]);
+}
+
+/**
+ * Clean model cache directories known to hold BGESmallZH.
+ * If `specificDir` is provided (the actual cacheDir in use), clean that first.
+ * Then also clean known fallback locations.
+ */
+function cleanFastembedCache(specificDir?: string): void {
+  const modelName = 'fast-bge-small-zh-v1.5';
+  const dirsToClean: string[] = [];
+
+  // 1. The actual cacheDir in use (most important — caller's specific dir)
+  if (specificDir !== undefined) {
+    dirsToClean.push(path.join(specificDir, modelName));
   }
+
+  // 2. Project-local cache (fallback when no cacheDir passed)
+  dirsToClean.push(path.join(getLocalCacheDir(), modelName));
+
+  // 3. Scream Home cache (used by agent/index.ts: embedCacheDir)
+  if (process.env.SCREAM_HOME) {
+    dirsToClean.push(path.join(process.env.SCREAM_HOME, 'cache', 'fastembed', modelName));
+  }
+
+  // 4. HuggingFace Hub cache
+  const hfHub = process.env['HF_HOME']
+    ? path.join(process.env['HF_HOME'], 'hub')
+    : path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+  dirsToClean.push(path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5'));
+
+  // 5. Fastembed default fallback (~/.cache/fastembed/)
+  dirsToClean.push(path.join(os.homedir(), '.cache', 'fastembed', modelName));
+
+  for (const dir of dirsToClean) {
+    try {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+        process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${dir}\n`);
+      }
+    } catch { /* best-effort */ }
+  }
+}
+
+async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
+  // Fallback to absolute path when no cacheDir provided (local enhancement)
+  const effectiveCacheDir = cacheDir ?? getLocalCacheDir();
+
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
+      if (effectiveCacheDir !== undefined) {
+        mkdirSync(effectiveCacheDir, { recursive: true });
+      }
+      const model = EmbeddingModel.BGESmallZH;
+      const initOpts = effectiveCacheDir !== undefined
+        ? { model, cacheDir: effectiveCacheDir }
+        : { model };
+
+      try {
+        return await initWithTimeout(
+          () => FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]),
+          'FlagEmbedding.init(BGESmallZH)',
+        );
+      } catch (initError: unknown) {
+        const errMsg = initError instanceof Error ? initError.message : String(initError);
+        process.stderr.write(`[loadEmbedder] attempt ${attempt}/${maxRetries} failed: ${errMsg}\n`);
+
+        // Corrupt cache from partial download — clean and retry
+        const isCorruptCache = errMsg.includes('TAR_BAD_ARCHIVE')
+          || errMsg.includes('Unrecognized archive')
+          || errMsg.includes('zlib:')
+          || errMsg.includes('tokenizer.json');
+        if (isCorruptCache) {
+          cleanFastembedCache(effectiveCacheDir);
+          continue;
+        }
+
+        // Missing sidecars — download from HF mirror and retry
+        if (/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(errMsg)) {
+          try {
+            await ensureFastembedModelSidecars(String(model), effectiveCacheDir);
+            return await initWithTimeout(
+              () => FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]),
+              'FlagEmbedding.init(BGESmallZH, after sidecar)',
+            );
+          } catch {
+            // fall through to retry/fallback
+          }
+        }
+
+        // On last attempt, try createRequire fallback
+        if (attempt >= maxRetries) {
+          try {
+            const distRequire = createRequire(import.meta.url);
+            const fePath = distRequire.resolve('fastembed');
+            const { FlagEmbedding, EmbeddingModel } = await import(fePath);
+            return await initWithTimeout(
+              () => FlagEmbedding.init({
+                model: EmbeddingModel.BGESmallZH,
+                cacheDir: effectiveCacheDir,
+              }),
+              'FlagEmbedding.init(fallback)',
+            );
+          } catch (fallbackErr) {
+            process.stderr.write(`[loadEmbedder] fallback failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}\n`);
+            return null;
+          }
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /**

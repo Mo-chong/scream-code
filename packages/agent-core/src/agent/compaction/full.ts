@@ -21,10 +21,12 @@ import {
   sleepForRetry,
 } from '../../loop/retry';
 import { renderPrompt } from '../../utils/render-prompt';
+import type { ContextMessage } from '../context';
 import {
   estimateTokens,
   estimateTokensForMessages,
 } from '../../utils/tokens';
+import { maskToolObservations } from '../../utils/mask-tool-observations';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
 import compactionUpdateInstructionTemplate from './compaction-update-instruction.md';
@@ -34,7 +36,6 @@ import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionSt
 import { basename, dirname } from 'pathe';
 import { parseMemoryMemos } from '@scream-code/memory';
 import type { TodoItem } from '../../tools/builtin/state/todo-list';
-import type { ContextMessage } from '../context/types';
 import {
   createFileOps,
   extractFileOpsFromMessage,
@@ -163,13 +164,16 @@ const COMPACTION_SYSTEM_PROMPT =
   'Output text only. DO NOT CALL ANY TOOLS. ' +
   'Follow the compaction instruction in the last user message exactly. ' +
   'Pay special attention to the Memory Memo Extraction section — ' +
-  'you MUST output memory-memo blocks for every completed task loop.';
+  'you MUST output memory-memo blocks for every completed task loop. ' +
+  'Write memory-memo content in the SAME LANGUAGE as the conversation.';
 
 export class FullCompaction {
   protected compactionCountInTurn = 0;
   private consecutiveCompactionFailures = 0;
   private _shouldInjectSessionSummary = false;
   private compactionTimedOut = false;
+  /** Tokens saved by the most recent compaction (tokensBefore - tokensAfter), or 0. */
+  lastCompactedTokens = 0;
   /** Token count below which compaction should not re-trigger. Set after a
    *  successful compaction to 110% of the post-compaction token count, so
    *  that a context sitting just above triggerRatio doesn't immediately
@@ -322,7 +326,9 @@ export class FullCompaction {
   async beforeStep(signal: AbortSignal): Promise<void> {
     // Stage 1: Run micro compaction first (free, no LLM call).
     // detect() advances the internal cutoff when token usage >= 50%.
-    this.agent.microCompaction.detect();
+    // force=true bypasses the batch gate so full compaction has an
+    // up-to-date picture of micro's savings before deciding.
+    this.agent.microCompaction.detect(true);
 
     // Stage 2: Check if full compaction is still needed, accounting for
     // the token savings micro compaction already provides.
@@ -443,6 +449,18 @@ export class FullCompaction {
     }
   }
 
+  /**
+   * Point C（ContentArchive docs-only）:
+   *
+   * FullCompact 不存档原始工具结果。原因：
+   * compactionWorker 把原始消息传给 LLM 做语义重写（总结/合并），
+   * 重写后原始 token 已被 LLM 消解而非简单截断，
+   * 恢复原始内容的价值极低。
+   *
+   * 需要完整上下文的场景应在 Point A（toolResultOutputForModel 截断前）
+   * 或 Point B（MicroCompact 合并前）存档，这两个点保存的是
+   * 未经 LLM 改写的原始输出。
+   */
   private async compactionWorker(
     signal: AbortSignal,
     data: Readonly<CompactionBeginData>,
@@ -464,11 +482,13 @@ export class FullCompaction {
       const summarizeOnce = async (
         messagesToCompact: readonly ContextMessage[],
       ): Promise<{ summary: string; usage: TokenUsage | null }> => {
+        const projected = project(messagesToCompact);
+        const masked = maskToolObservations(projected, 1);
         const instruction = isUpdate
           ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
           : COMPACTION_INSTRUCTION(data.instruction);
         const messages = [
-          ...project(messagesToCompact),
+          ...masked,
           {
             role: 'user',
             content: [
@@ -500,7 +520,16 @@ export class FullCompaction {
       let usage: TokenUsage | null;
       let summary: string;
       while (true) {
-        const messagesToCompact = originalHistory.slice(0, compactedCount);
+        // Phase22.2: 跳过 protected 消息（S/A 级 system reminders，不被压缩）
+        const messagesToCompact: ContextMessage[] = [];
+        let _idx = 0;
+        let _maxTries = originalHistory.length * 2; // 安全门控：防止全 protected 死循环
+        while (messagesToCompact.length < compactedCount && _idx < originalHistory.length && _maxTries-- > 0) {
+          const m = originalHistory[_idx++];
+          if (m && !m.protected) {
+            messagesToCompact.push(m);
+          }
+        }
         try {
           const result = await summarizeOnce(messagesToCompact);
           usage = result.usage;
@@ -566,6 +595,7 @@ export class FullCompaction {
         tokensAfter,
         ...(isUpdate ? { isUpdate: true } : {}),
       };
+      this.lastCompactedTokens = tokensBefore - tokensAfter;
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
@@ -575,6 +605,14 @@ export class FullCompaction {
       this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
       await this.extractAndStoreMemos(processedSummary);
       this.triggerPostCompactHook(data, result);
+
+      // Phase4: 压缩后恢复提醒，告知模型所有激活的指令仍然生效
+      if (this.agent?.context?.appendSystemReminder) {
+        this.agent.context.appendSystemReminder(
+          'Context was compacted. All active instructions remain in effect.',
+          { kind: 'injection', variant: 'post_compact_notice' },
+        );
+      }
 
       // Compaction succeeded — reset circuit breaker
       this.consecutiveCompactionFailures = 0;
@@ -667,7 +705,7 @@ export class FullCompaction {
       summaryLen: summary.length,
     });
 
-    const memos = parseMemoryMemos(summary);
+    const memos = await parseMemoryMemos(summary);
     this.agent.log.info('Memory memo parse result', {
       memoCount: memos.length,
     });

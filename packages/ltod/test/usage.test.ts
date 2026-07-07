@@ -9,6 +9,8 @@ describe('emptyUsage', () => {
     expect(usage.output).toBe(0);
     expect(usage.inputCacheRead).toBe(0);
     expect(usage.inputCacheCreation).toBe(0);
+    expect(usage.cacheHitTokens).toBe(0);
+    expect(usage.cacheMissTokens).toBe(0);
   });
 });
 
@@ -71,6 +73,8 @@ describe('addUsage', () => {
       output: 200,
       inputCacheRead: 300,
       inputCacheCreation: 400,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
     };
     const result = addUsage(usage, emptyUsage());
     expect(result).toEqual(usage);

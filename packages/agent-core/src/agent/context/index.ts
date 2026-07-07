@@ -4,7 +4,9 @@ import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
-import { project } from './projector';
+import { assertWireFormat, project } from './projector';
+import { stabilizePrefix } from './prefix-stabilizer';
+import { flags } from '../../flags';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -45,8 +47,20 @@ export class ContextMemory {
   private openSteps: Map<string, ContextMessage> = new Map();
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
+  /** Number of turns where micro-compaction actually reduced messages. Exposed via getMetrics(). */
+  private _microCompactCount = 0;
+  /** Number of turns where prefix stabilizer did not need to mutate the prefix. Exposed via getMetrics(). */
+  private _stabilizeHitCount = 0;
 
   constructor(protected readonly agent: Agent) {}
+
+  /** Returns runtime pipeline counters (micro-compact, prefix-stabilize) for observability. */
+  getMetrics(): { microCompactCount: number; stabilizeHitCount: number } {
+    return {
+      microCompactCount: this._microCompactCount,
+      stabilizeHitCount: this._stabilizeHitCount,
+    };
+  }
 
   snapshot(): ContextMemorySnapshot {
     return {
@@ -80,14 +94,79 @@ export class ContextMemory {
     });
   }
 
-  appendSystemReminder(content: string, origin: PromptOrigin): void {
+  appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
     this.appendMessage({
       role: 'user',
       content: [{ type: 'text', text }],
       toolCalls: [],
       origin,
+      ...(isProtected ? { protected: true } : {}),
     });
+  }
+
+  /**
+   * Phase4 注意力管控：从尾部搜索最后一条 system-reminder，在其后插入新提醒（利用 primacy effect）。
+   * 若无任何 system-reminder，则追加到 history 最前面。
+   */
+  insertSystemReminderAtHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
+    const text = `<system-reminder>\n${content}\n</system-reminder>`;
+    const insertMsg: ContextMessage = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin,
+      ...(isProtected ? { protected: true as const } : {}),
+    };
+    // 从尾部向前找最后一条 system-reminder
+    let lastReminderIdx = -1;
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const c = this._history[i]!.content;
+      const firstPart = Array.isArray(c) ? (c[0] as { text?: string }) : undefined;
+      if (firstPart?.text?.includes('<system-reminder>')) {
+        lastReminderIdx = i;
+        break;
+      }
+    }
+    if (lastReminderIdx === -1) {
+      this._history.unshift(insertMsg);
+    } else {
+      this._history.splice(lastReminderIdx + 1, 0, insertMsg);
+    }
+  }
+
+  /**
+   * Phase4 注意力管控：在历史列表前 1/3 位置插入提醒（避免 U 形死区，near_head 位置）。
+   */
+  insertSystemReminderAtNearHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
+    const text = `<system-reminder>\n${content}\n</system-reminder>`;
+    const insertMsg: ContextMessage = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin,
+      ...(isProtected ? { protected: true as const } : {}),
+    };
+    const nearHeadPos = Math.max(1, Math.floor(this._history.length / 3));
+    this._history.splice(nearHeadPos, 0, insertMsg);
+  }
+
+  /**
+   * Phase22.2: 将 history 中 origin 为 S/A 级的 system-reminder 标记为 protected，
+   * 使其在 compaction 时被跳过。
+   */
+  protectHighLevelReminders(highOrigins: Set<string>): void {
+    for (const msg of this._history) {
+      const originStr = msg.origin !== undefined ? String(msg.origin) : '';
+      if (
+        msg.role === 'user' &&
+        originStr.length > 0 &&
+        highOrigins.has(originStr) &&
+        !msg.protected
+      ) {
+        (msg as { protected?: boolean }).protected = true;
+      }
+    }
   }
 
   clear(): void {
@@ -98,6 +177,8 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this._microCompactCount = 0;
+    this._stabilizeHitCount = 0;
     this.agent.injection.onContextClear();
     this.agent.emitStatusUpdated();
   }
@@ -187,6 +268,8 @@ export class ContextMemory {
     this.agent.injection.onContextCompacted(summary.compactedCount);
     this.agent.emitStatusUpdated();
     this.agent.microCompaction.reset();
+    // Phase22.2: compaction 后重新保护 S/A 级提醒
+    this.protectHighLevelReminders(new Set(['system', 'scream_code']));
   }
 
   data(): AgentContextData {
@@ -213,9 +296,24 @@ export class ContextMemory {
     // Apply micro-compaction before projecting: old tool results are
     // truncated to a short marker, freeing context tokens without an
     // LLM call. Detect() is a no-op when the micro-compaction flag is
-    // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
+    // off (SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0) or when the
+    // BATCH_SIZE gate has not been reached
+    // (registry numDefault=8, override via SCREAM_CODE_MICRO_BATCH_SIZE).
     this.agent.microCompaction.detect();
-    return project(this.agent.microCompaction.compact(this.history));
+    const lenBeforeCompact = this.history.length;
+    let msgs: readonly ContextMessage[] = this.agent.microCompaction.compact(this.history);
+    if (msgs.length < lenBeforeCompact) ++this._microCompactCount;
+    // Prefix stabilisation: replace volatile fields (timestamps, UUIDs)
+    // in system-role messages so the KV-cache prefix is stable across turns.
+    // Compare serialized form — stabilizePrefix never changes array length
+    // (it operates on message content, not structure), so a length check
+    // would always increment and provide no signal.
+    const serializedBeforeStab = JSON.stringify(msgs);
+    msgs = stabilizePrefix(msgs);
+    if (JSON.stringify(msgs) === serializedBeforeStab) ++this._stabilizeHitCount;
+    const result = project(msgs);
+    assertWireFormat(result);
+    return result;
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {
@@ -268,6 +366,15 @@ export class ContextMemory {
         return;
       }
       case 'tool.result': {
+        // Point A: 存档原始工具输出（截断/压缩前保留完整内容）
+        // gated by content-archive flag (default: true)
+        if (flags.enabled('content-archive')) {
+          this.agent.contentArchive?.archive(
+            `tool:${event.toolCallId}`,
+            event.result.output,
+            { source: 'toolResult' },
+          );
+        }
         const message = createToolMessage(event.toolCallId, toolResultOutputForModel(event.result));
         this.pushHistory({
           ...message,
@@ -346,8 +453,31 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
   return truncateContentParts(output);
 }
 
+/**
+ * Collapse consecutive duplicate lines in a string, keeping only the first
+ * occurrence of each run.  This saves tokens on repetitive output patterns
+ * (progress bars, polling loops, repeated error messages).
+ */
+function collapseDuplicateLines(text: string, threshold: number = 3): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let runCount = 1;
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && lines[i] === lines[i - 1]) {
+      runCount++;
+      if (runCount > threshold) continue; // skip this duplicate
+    } else {
+      runCount = 1;
+    }
+    out.push(lines[i]!);
+  }
+  return out.join('\n');
+}
+
 /** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS. */
 function truncateToolOutput(text: string): string {
+  // P1-3: collapse consecutive duplicate lines (keep first N, skip rest)
+  text = collapseDuplicateLines(text);
   if (estimateTokens(text) <= MAX_TOOL_RESULT_TOKENS) return text;
   // Walk backwards to find a safe cut point within budget, reserving room
   // for the truncation notice.

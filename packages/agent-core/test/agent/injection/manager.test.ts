@@ -37,7 +37,17 @@ class BoomInjector extends DynamicInjector {
 }
 
 function installInjectors(manager: InjectionManager, injectors: DynamicInjector[]): void {
-  (manager as unknown as { injectors: DynamicInjector[] }).injectors = injectors;
+  const router = manager.getRouter();
+  for (const id of [
+    'plugin-session-start', 'wolfpack', 'plan-mode', 'permission-mode',
+    'todo-list', 'goal', 'working-set', 'user-prefs', 'guard-feedback', 'error-audit',
+  ]) {
+    if (router.has(id)) router.unregister(id);
+  }
+  for (let i = 0; i < injectors.length; i++) {
+    const inj = injectors[i];
+    if (inj) router.register(`test-injector-${i}`, inj);
+  }
 }
 
 describe('InjectionManager.onContextCompacted', () => {

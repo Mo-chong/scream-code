@@ -239,11 +239,27 @@ export function extractUsage(usage: unknown): TokenUsage | null {
     }
   }
 
+  // DeepSeek: prompt_cache_hit_tokens / prompt_cache_miss_tokens
+  let cacheHit: number | undefined;
+  let cacheMiss: number | undefined;
+  if (typeof u['prompt_cache_hit_tokens'] === 'number') {
+    cacheHit = u['prompt_cache_hit_tokens'];
+    cacheMiss = typeof u['prompt_cache_miss_tokens'] === 'number'
+      ? u['prompt_cache_miss_tokens']
+      : 0;
+    // Use DeepSeek cache fields as the primary cached count if available
+    if (cached === 0 && cacheHit > 0) {
+      cached = cacheHit;
+    }
+  }
+
   return {
     inputOther: Math.max(0, promptTokens - cached),
     output: completionTokens,
     inputCacheRead: cached,
     inputCacheCreation: 0,
+    cacheHitTokens: cacheHit,
+    cacheMissTokens: cacheMiss,
   };
 }
 /**

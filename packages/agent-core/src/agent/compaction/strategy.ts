@@ -1,6 +1,7 @@
 import type { Message } from "@scream-code/ltod";
 import { estimateTokensForMessage } from "../../utils/tokens";
 import type { CompactionSource } from "./types";
+import { GrowthPredictor } from "./predictor";
 
 export interface CompactionConfig {
   triggerRatio: number;
@@ -30,6 +31,8 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
 
 export interface CompactionStrategy {
   shouldCompact(usedSize: number): boolean;
+  /** Phase26: 记录本轮 token 使用量，供 GrowthPredictor 预测下次压缩时机 */
+  recordRound(tokensUsed: number): void;
   shouldBlock(usedSize: number): boolean;
   computeCompactCount(messages: readonly Message[], source: CompactionSource): number;
   reduceCompactOnOverflow(messages: readonly Message[]): number;
@@ -43,6 +46,8 @@ export interface CompactionStrategy {
 }
 
 export class DefaultCompactionStrategy implements CompactionStrategy {
+  readonly predictor = new GrowthPredictor();
+
   constructor(
     protected readonly maxSizeProvider: () => number,
     protected readonly config: CompactionConfig = DEFAULT_COMPACTION_CONFIG
@@ -52,8 +57,16 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     return this.maxSizeProvider();
   }
 
+  recordRound(tokensUsed: number): void {
+    this.predictor.recordRound(tokensUsed);
+  }
+
   shouldCompact(usedSize: number): boolean {
     if (this.maxSize <= 0) return false;
+    // Phase 26: 动态自适应阈值 — 优先用 predictor，fallback 到 triggerRatio
+    if (this.predictor.shouldCompact(usedSize, this.maxSize)) {
+      return true;
+    }
     return (
       usedSize >= this.maxSize * this.config.triggerRatio ||
       this.shouldUseReservedContext(usedSize)

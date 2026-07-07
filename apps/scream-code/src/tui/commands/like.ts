@@ -51,7 +51,7 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
     items.push(`- Nickname: address the user as "${prefs.nickname.trim()}".`);
   }
   if (prefs.tone !== undefined && prefs.tone.trim().length > 0) {
-    items.push(`- Tone: respond in ${prefs.tone.trim()} tone.`);
+    items.push(`Respond ${prefs.tone.trim()}.`);
   }
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
     items.push(`- Other: ${prefs.other.trim()}`);

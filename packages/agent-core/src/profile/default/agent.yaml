@@ -11,6 +11,7 @@ tools:
   - Edit
   - Grep
   - Glob
+  - LSP
   - Bash
   - TaskList
   - TaskOutput
@@ -25,6 +26,7 @@ tools:
   - ReadMediaFile
   - TodoList
   - MemoryLookup
+  - MemoryEdit
   - MemoryConsolidatePlan
   - MemoryConsolidateApply
   - MemoryWrite

@@ -78,6 +78,8 @@ export type PromptOrigin =
 export type ContextMessage = Message & {
   readonly origin?: PromptOrigin | undefined;
   readonly isError?: boolean;
+  /** compaction 时跳过此条消息 */
+  readonly protected?: boolean;
   /**
    * Set on a tool result message whose content is unlikely to be referenced
    * again (e.g. "no matches" from Grep, empty output from Bash). Micro
@@ -86,6 +88,7 @@ export type ContextMessage = Message & {
    * affects internal compaction decisions.
    */
   readonly useless?: boolean;
+
 };
 
 export interface UserMessageRecord {
@@ -96,9 +99,13 @@ export interface UserMessageRecord {
 export interface SystemReminderRecord {
   content: string;
   origin: PromptOrigin;
+  /** S/A 级 → true → compaction 跳过 */
+  protected?: boolean;
 }
 
 export interface AgentContextData {
   history: readonly ContextMessage[];
   tokenCount: number;
+  /** Reference to the ContentArchive instance, if one is attached to the Agent. */
+  readonly contentArchive?: import('./content-archive').ContentArchive | undefined;
 }

@@ -2,6 +2,9 @@ import { normalizeTags } from './tags.js';
 
 /** Memory memo types — structured task experience records extracted from conversations. */
 
+/** Value tier classification for memory quality filtering and layered demotion. */
+export type MemoValueTier = 'critical' | 'valuable' | 'normal' | 'low';
+
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
   id: string;
@@ -27,6 +30,12 @@ export interface MemoryMemo {
   projectDir: string;
   /** Semantic tags summarizing the task domain (3-5 items). */
   tags?: string[];
+  /** Number of times this memo has been recalled (0 = never, undefined = legacy). */
+  recallCount?: number;
+  /** Unix ms timestamp of the most recent recall. */
+  lastRecalledAt?: number;
+  /** Value tier for quality-based demotion and filtering. Default 'normal'. */
+  valueTier?: MemoValueTier;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -50,6 +59,9 @@ export interface MemoryMemoSummary {
   recordedAt: number;
   projectDir: string;
   tags?: string[];
+  recallCount?: number;
+  lastRecalledAt?: number;
+  valueTier?: MemoValueTier;
 }
 
 /** Result of listing/filtering memos. */
@@ -85,6 +97,7 @@ export function createMemoryMemo(
     recordedAt: partial.recordedAt ?? Date.now(),
     projectDir: partial.projectDir ?? '',
     tags: normalizedTags(partial.tags),
+    valueTier: partial.valueTier,
   };
 }
 
@@ -107,5 +120,8 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     recordedAt: memo.recordedAt,
     projectDir: memo.projectDir,
     tags: memo.tags,
+    recallCount: memo.recallCount,
+    lastRecalledAt: memo.lastRecalledAt,
+    valueTier: memo.valueTier,
   };
 }

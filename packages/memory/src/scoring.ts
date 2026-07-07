@@ -11,6 +11,8 @@ export interface RelevanceFactors {
   projectBoost: number; // 0-1
   /** Tag overlap between this memo and the current project's tag cloud. */
   tagOverlap: number; // 0-1
+  /** 🆕 ding boost: +0.25 for pinned (ding-tagged) memos. */
+  dingBoost: number; // 0-0.25
 }
 
 export interface ScoredMemo {
@@ -26,6 +28,9 @@ export interface RankMemosOptions {
   /** Optional vector similarity scores keyed by memo id. When provided, keyword
    * and vector scores are blended (60% keyword, 40% vector). */
   vectorScores?: Map<string, number>;
+  /** Optional ResNet factor override keyed by memo id (0-1). When absent, no
+   * ResNet attenuation is applied. */
+  resNetFactors?: Map<string, number>;
 }
 
 export interface QueryIntent {
@@ -39,6 +44,10 @@ const TEMPORAL_STRONG = /昨天|今天|上周|本周|本月|最近|之前|以前
 const TEMPORAL_WEAK = /什么时候|何时|多久|几时|哪天|哪一天|多长.*时间/;
 const TEMPORAL_ACTION = /做了|干了|处理了|解决了|修复了|完成了|改了|写了|加了|删了|移除了|部署了|发布了/;
 const CODE_SIGNAL = /[`'"#]|[{}()[\]]|\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h)\b|function |const |import |export |class |async |await |type |interface /;
+// 🛠️ P2-8: Chinese temporal markers (e.g. 之前/以后/刚刚/最近/上次)
+const CHINESE_TEMPORAL = /[昨今明去前当]天|[刚正]刚?[才刚]?|最近|上次|之前|以后|将来|未来|\d+[分时天周月年][前前后后]?|等[会一]下|立刻|马上|同时/;
+// 🛠️ P2-8: Chinese factual / code / tech intent signals
+const CHINESE_FACTUAL = /如何|什么|哪[个些]|怎么|为什么|是[什不]|解释|说明|比较|区别|定义|原理|架构|流程|步骤|方法|代码|函数|接口|api|配置|命令|报错|错误|问题|解决|修复|原因/;
 
 /**
  * Lightweight regex-based query intent detection.
@@ -59,9 +68,18 @@ export function detectQueryIntent(query: string): QueryIntent {
     temporalBias = 0.6;
   }
 
+  // 🛠️ P2-8: Chinese temporal markers (e.g. 之前/以后/刚刚/最近/上次)
+  if (CHINESE_TEMPORAL.test(q)) {
+    temporalBias = Math.max(temporalBias, 0.8);
+  }
+  // 🛠️ P2-8: Chinese factual / code / tech intent signals
+  if (CHINESE_FACTUAL.test(q)) {
+    factualBias = Math.max(factualBias, 1.0);
+  }
+
   // Factual queries: have code/tech signals and no temporal words
   if (CODE_SIGNAL.test(q) && !TEMPORAL_STRONG.test(q) && !TEMPORAL_WEAK.test(q)) {
-    factualBias = 1.0;
+    factualBias = Math.max(factualBias, 1.0);
   }
 
   return { temporalBias, factualBias };
@@ -90,9 +108,11 @@ export function computeRelevanceScore(
     recency: computeRecency(memo.recordedAt),
     // NOTE: usageCount is always 0 — per-memo usage counting is not yet
     // implemented in the store. When added, increment on each search hit.
-    usageBoost: Math.min(0.3, usageCount * 0.1),
+    usageBoost: Math.min(0.3, (usageCount ?? 0) * 0.1),
     projectBoost: computeProjectBoost(memo.projectDir, currentProjectDir),
     tagOverlap: computeTagOverlap(memo.tags, projectTagCloud),
+    // 🆕 ding boost: +0.25 for pinned memos, ensures they rank above unpinned.
+    dingBoost: memo.tags?.includes('ding') ? 0.25 : 0,
   };
 
   // Intent-adjusted weights. At default biases (ti=0.3, fi=0.6) the
@@ -110,7 +130,8 @@ export function computeRelevanceScore(
     factors.recency * (recencyWeight / total) +
     factors.usageBoost * (usageWeight / total) +
     factors.projectBoost * (projectWeight / total) +
-    factors.tagOverlap * (tagWeight / total)
+    factors.tagOverlap * (tagWeight / total) +
+    factors.dingBoost // 🆕 additive ding boost, not weighted — flat bonus
   );
 }
 
@@ -122,7 +143,7 @@ export function rankMemos(
   query: string,
   options: RankMemosOptions = {},
 ): ScoredMemo[] {
-  const { minScore = 0.3, maxResults = 3, currentProjectDir, projectTagCloud, vectorScores } =
+  const { minScore = 0.3, maxResults = 3, currentProjectDir, projectTagCloud, vectorScores, resNetFactors } =
     options;
   const intent = detectQueryIntent(query);
   const hasVectorScores = vectorScores !== undefined && vectorScores.size > 0;
@@ -130,13 +151,16 @@ export function rankMemos(
   return memos
     .map((memo) => {
       const keywordScore = computeRelevanceScore(
-        memo, query, 0, currentProjectDir, projectTagCloud, intent,
+        memo, query, memo.recallCount ?? 0, currentProjectDir, projectTagCloud, intent,
       );
       const vectorScore = vectorScores?.get(memo.id) ?? 0;
       // Blend: 60% keyword + 40% vector when both are available.
-      const score = hasVectorScores
+      const blended = hasVectorScores
         ? keywordScore * 0.6 + vectorScore * 0.4
         : keywordScore;
+      // ResNet attenuation: when ResNet factor is provided, multiply it in.
+      const resNetFactor = resNetFactors?.get(memo.id) ?? 1;
+      const score = blended * resNetFactor;
       return { memo, score };
     })
     .filter((s) => s.score >= minScore)
@@ -221,12 +245,33 @@ export function extractKeywords(text: string): string[] {
   const tokens: string[] = [];
   for (const part of parts) {
     if (part.length === 0) continue;
-    // For CJK text, split into individual characters.
+    // For CJK text, split into character bigrams (2-grams).
+    // Single characters provide near-random Jaccard similarity; bigrams
+    // preserve meaningful sub-word units, e.g. "记忆" "忆系" "系统" from "记忆系统".
     if (/[一-鿿㐀-䶿]/.test(part)) {
-      for (const ch of part) {
+      for (let i = 0; i < part.length; i++) {
+        // Emit single CJK characters that survive stopword filter
+        // so very short queries like "记忆" can still match.
+        const ch = part[i]!;
         if (ch.length > 0 && !STOP_WORDS.has(ch)) {
           tokens.push(ch);
         }
+        // Emit bigram if we have two adjacent non-stopword characters
+        if (i < part.length - 1) {
+          const bigram = part.substring(i, i + 2);
+          const left = part[i]!;
+          const right = part[i + 1]!;
+          // A bigram passes if neither character is a stopword
+          if (!STOP_WORDS.has(left) && !STOP_WORDS.has(right)) {
+            tokens.push(bigram);
+          }
+        }
+      }
+      // 🛠️ P1-1: Also emit bigrams for the entire CJK run to improve matching precision.
+      // e.g. "记忆系统" → bigrams {记忆, 忆系, 系统} in addition to single chars {记,忆,系,统}
+      for (let i = 0; i < part.length - 1; i++) {
+        const bigram = part.substring(i, i + 2);
+        tokens.push(bigram);
       }
     }
     // For ASCII text, keep as word if long enough and not a stopword.
@@ -254,8 +299,165 @@ export function computeKeywordSimilarity(
   return union === 0 ? 0 : intersection / union;
 }
 
+// ─── Synonym expansion for better Jaccard matching ──────────────────────────
+
+/** Groups of tokens that should be treated as equivalent during similarity computation. */
+const SYNONYM_GROUPS: string[][] = [
+  ['install', 'installupdate', '安装', 'setup', 'deploy', '部署', '配置'],
+  ['update', 'upgrade', '更新', '升级', 'migrate', '迁移'],
+  ['fix', 'bugfix', '修复', '修复了', 'fixes', 'fixed', 'hotfix', 'bug'],
+  ['config', 'configure', '配置', '设置', 'setup', 'setting', 'settings'],
+  ['delete', 'remove', '删除', '移除', '清理', 'cleanup', '清除'],
+  ['merge', '合并', '整合', 'combine', 'consolidate', 'consolidation'],
+  ['error', '错误', '异常', 'exception', 'crash', '崩溃', 'failure', '失败'],
+  ['search', '搜索', '检索', 'query', '查询', '召回', 'recall'],
+  ['test', '测试', 'spec', '验证', 'verify', 'assert', 'assertion'],
+];
+
+/**
+ * Expand a set of tokens by adding synonyms for any token that belongs to a synonym group.
+ * The original tokens are always kept.
+ * @param extraSynonymGroups - Optional additional synonym groups appended after SYNONYM_GROUPS.
+ */
+export function expandWithSynonyms(tokens: Set<string>, extraSynonymGroups?: string[][]): Set<string> {
+  const expanded = new Set(tokens);
+  const allGroups = extraSynonymGroups ? [...SYNONYM_GROUPS, ...extraSynonymGroups] : SYNONYM_GROUPS;
+  for (const token of tokens) {
+    for (const group of allGroups) {
+      if (group.includes(token)) {
+        for (const synonym of group) {
+          expanded.add(synonym);
+        }
+        break;
+      }
+    }
+  }
+  return expanded;
+}
+
+// ─── Weighted multi-field similarity (Scheme A from analysis) ───────────────
+
+const FIELD_WEIGHTS = {
+  userNeed: 0.55,
+  approach: 0.25,
+  outcome: 0.10,
+  whatFailed: 0.05,
+  whatWorked: 0.05,
+} as const;
+
+/**
+ * Compute Jaccard similarity between two text strings after keyword extraction + synonym expansion.
+ */
+function jaccardWithSynonyms(a: string, b: string): number {
+  const tokensA = expandWithSynonyms(new Set(extractKeywords(a)));
+  const tokensB = expandWithSynonyms(new Set(extractKeywords(b)));
+
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  const union = new Set([...tokensA, ...tokensB]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Plain Jaccard without synonym expansion — used for short, precise fields like userNeed.
+ */
+function computeJaccardPlain(a: string, b: string): number {
+  const tokensA = new Set(extractKeywords(a));
+  const tokensB = new Set(extractKeywords(b));
+
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  const union = new Set([...tokensA, ...tokensB]).size;
+  // 🛠️ P3-9: cap at 0.95 so no Jaccard ever hits 1.0 (avoids false-positive dedup lock)
+  return union === 0 ? 0 : Math.min(intersection / union, 0.95);
+}
+
+/**
+ * Weighted multi-field similarity for dedup detection.
+ *
+ * Strategy:
+ * 1. If userNeed Jaccard >= 0.60 → short-circuit to true (hard threshold).
+ * 2. Else if userNeed Jaccard >= 0.40 → compute weighted average across all fields.
+ * 3. Else → false (userNeed too different).
+ *
+ * This prevents long approach tokens from dragging down an otherwise clear duplicate.
+ */
+export function computeMultiFieldSimilarity(
+  a: Partial<Pick<MemoryMemoSummary, 'userNeed' | 'approach' | 'outcome' | 'whatFailed' | 'whatWorked'>>,
+  b: Partial<Pick<MemoryMemoSummary, 'userNeed' | 'approach' | 'outcome' | 'whatFailed' | 'whatWorked'>>,
+): number {
+  // userNeed uses plain Jaccard (no synonym expansion) since it's short and precise.
+  const needSim = computeJaccardPlain(a.userNeed ?? '', b.userNeed ?? '');
+
+  // Hard threshold: userNeed essentially identical → definite duplicate
+  if (needSim >= 0.60) return needSim;
+
+  // User need too different → not a duplicate
+  if (needSim < 0.40) return 0;
+
+  // Compute per-field similarities with synonym expansion
+  // Skip low-information fields (empty, 'none', very short) to avoid spurious matches.
+  const fields: Array<{ sim: number; weight: number }> = [
+    { sim: needSim, weight: FIELD_WEIGHTS.userNeed },
+  ];
+  const approachA = a.approach ?? '';
+  const approachB = b.approach ?? '';
+  if (hasContent(approachA) && hasContent(approachB)) {
+    fields.push({ sim: jaccardWithSynonyms(approachA, approachB), weight: FIELD_WEIGHTS.approach });
+  }
+  const outcomeA = a.outcome ?? '';
+  const outcomeB = b.outcome ?? '';
+  if (hasContent(outcomeA) && hasContent(outcomeB)) {
+    fields.push({ sim: jaccardWithSynonyms(outcomeA, outcomeB), weight: FIELD_WEIGHTS.outcome });
+  }
+  const failedA = a.whatFailed ?? '';
+  const failedB = b.whatFailed ?? '';
+  if (hasContent(failedA) && hasContent(failedB)) {
+    fields.push({ sim: jaccardWithSynonyms(failedA, failedB), weight: FIELD_WEIGHTS.whatFailed });
+  }
+  const workedA = a.whatWorked ?? '';
+  const workedB = b.whatWorked ?? '';
+  if (hasContent(workedA) && hasContent(workedB)) {
+    fields.push({ sim: jaccardWithSynonyms(workedA, workedB), weight: FIELD_WEIGHTS.whatWorked });
+  }
+
+  // Renormalize weights proportionally
+  const totalWeight = fields.reduce((s, f) => s + f.weight, 0);
+  if (totalWeight === 0) return needSim;
+
+  const weighted = fields.reduce((s, f) => s + f.sim * (f.weight / totalWeight), 0);
+  return weighted;
+}
+
+/**
+ * Legacy dedup check: returns true when weighted multi-field similarity >= THRESHOLD.
+ * Use this in findDuplicateGroups.
+ */
+export function isDuplicate(
+  a: Partial<Pick<MemoryMemoSummary, 'userNeed' | 'approach' | 'outcome' | 'whatFailed' | 'whatWorked'>>,
+  b: Partial<Pick<MemoryMemoSummary, 'userNeed' | 'approach' | 'outcome' | 'whatFailed' | 'whatWorked'>>,
+  threshold: number = 0.45,
+): boolean {
+  const sim = computeMultiFieldSimilarity(a, b);
+  return sim >= threshold;
+}
+
 function computeRecency(recordedAt: number): number {
   const daysSince = (Date.now() - recordedAt) / (1000 * 60 * 60 * 24);
   // Linear decay: 1.0 at day 0, 0 at day 90+
   return Math.max(0, 1 - daysSince / 90);
+}
+
+/** Return true if a field value has meaningful content (not empty, 'none', or 'n/a'). */
+function hasContent(v: string): boolean {
+  const trimmed = v.trim().toLowerCase();
+  return trimmed.length > 0 && trimmed !== 'none' && trimmed !== 'n/a';
 }

@@ -1,4 +1,4 @@
-import { createMemoryMemo, generateTags, normalizeTags } from '@scream-code/memory';
+import { createMemoryMemo, processTags } from '@scream-code/memory';
 import { dirname, basename } from 'pathe';
 import { z } from 'zod';
 
@@ -30,8 +30,12 @@ export const MemoryWriteInputSchema = z.object({
     .describe('What ultimately worked — key actions that led to success. Use "none" if nothing notable.'),
   tags: z
     .array(z.string())
-    .optional()
-    .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).'),
+    .min(1)
+    .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type. '
+      + 'MUST match the user\'s conversation language. '
+      + 'For Chinese conversations: each concept should have both Chinese and English forms '
+      + 'separated by "/", e.g. ["记忆系统/memory-system", "容量守卫/capacity-guard", "写锁/write-lock"]. '
+      + 'For English conversations: plain English tags only, e.g. ["react", "auth", "deploy"].'),
 });
 
 export type MemoryWriteInput = z.infer<typeof MemoryWriteInputSchema>;
@@ -70,10 +74,9 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
 
         const whatFailed = args.whatFailed?.trim();
         const whatWorked = args.whatWorked?.trim();
-        const tags = normalizeTags(
-          args.tags !== undefined && args.tags.length > 0
-            ? args.tags
-            : generateTags(`${args.userNeed} ${args.approach}`),
+        const tags = await processTags(
+          args.tags ?? [],
+          { fullText: `${args.userNeed} ${args.approach}` },
         );
 
         const memo = createMemoryMemo({

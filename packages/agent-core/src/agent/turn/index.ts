@@ -27,6 +27,28 @@ import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../c
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
+import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
+import { detectConfabulation } from './detectors/confabulation';
+import { injectAntiConfabulation } from './injectors/anti_confabulation';
+import { injectStuckInjector } from './injectors/stuck';
+
+import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, getScore, type WeightLevel } from './variant-registry';
+import { TurnEventLog } from './event-log';
+import { EventSnapshotBuffer } from './event-snapshot';
+import { detectQualityIssue, observeBehavior } from './detectors/quality';
+import { escalateQuality } from './injectors/quality';
+import { detectIntent } from './detectors/intent';
+import { injectIntentGuidance } from './injectors/intent';
+import { InjectBudget } from './injectors/budget';
+import { checkGuard, type StepToolSummary } from './guard-engine';
+import { TruncationTracker } from './truncation-tracker';
+import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendingDoc, formatPendingDocInject } from './memory-rules';
+import { detectSceneMemory } from './detectors/scene-memory';
+import { detectCodeRefQuality } from './detectors/code-ref';
+import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
+import { AttentionPositionStrategy, InsertPosition } from '../injection/position-strategy';
+import { ContentHashCache } from './content-cache';
+import { AuditLogWriter, computeCacheMetrics, buildAuditEntry } from '../usage/audit-log';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -66,6 +88,14 @@ const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
   name: 'goal_continuation',
 };
 
+// Phase24.2: 只读工具集合移至 TruncationTrackerConfig.readOnlyTools
+
+/** Phase 14: 收敛条件接口 — 每个条件是一个 check 函数 + 优先级 */
+interface ConvergenceCondition {
+  readonly check: () => string | null;
+  readonly priority: number;
+}
+
 export class TurnFlow {
   private steerBuffer: BufferedSteer[] = [];
   private turnId = -1;
@@ -84,7 +114,140 @@ export class TurnFlow {
   private verificationFailureInjected = false;
   private readonly MIN_FINAL_RESPONSE_LENGTH = 60;
 
-  constructor(protected readonly agent: Agent) {}
+  // ── Injection injector fields ────────────────────────────────
+  private stepInjectedVariants = new Set<string>();
+  /** 跨步内容去重缓存 (Optim C) */
+  private contentHashCache = new ContentHashCache();
+  private hasCalledLspReferencesThisStep = false;
+  private searchHadResultsThisStep = false;
+  private verifyFailedThisStep = false;
+  private editCalledSuccessThisStep = false;
+  /** Did the Edit touch a code file (as opposed to docs/markdown)? Only this triggers the "MUST check LSP.references" rule. */
+  private editOnCodeFileThisStep = false;
+  private editWithoutLookupCount = 0;
+  private stepToolCounts: Record<string, number> = {};
+  private static readonly BASH_FILE_OPS_RE = /\b(cat|head|tail|less|more)\s+/i;
+  /** Only these file extensions trigger the "must check LSP.references" rule. */
+  private static readonly CODE_FILE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go']);
+
+  // ── Toxicity early interception fields ───────────────────────
+  private deviationChainActive = false;
+  private deviationChainReason = '';
+  private deviationChainBypassUsed = false;
+
+  // ── Deviation chain: resolved tracking (Phase 8) ─────────────
+  private deviationChainResolved = false;
+
+  // ── Phase 8: 三路硬化字段 ─────────────────────────────────────
+  private confabulationBlocked = false;
+  private verifyFailStep = -1;
+  private toolCountsBeforeVerifyRetry: Record<string, number> = {};
+
+  // ── Phase 9: Convergence gate: turn-level LSP/edit tracking ──
+  private turnHasCalledAnyLsp = false;
+  private totalStepsWithEditsThisTurn = 0;
+  /** Only code-file edits (.ts/.js/.py/.rs/.go) — docs (.md/.json/.yaml) excluded. */
+  private totalCodeFileEditsThisTurn = 0;
+
+  // ── Phase 16-17: Code exploration tool priority — 4D smart enforcement ─
+  /** Has any mcp__codegraph__codegraph_* been called this turn (resets per turn). */
+  private hasCalledCodegraphThisTurn = false;
+  /**
+   * Exploratory Read/Grep steps this turn without codegraph (excludes verification reads).
+   * Verification reads: Edit/Write-刚改过的文件；Grep(具体路径)。
+   * ≥3 → injection; ≥5 → hard block via syntheticResult.
+   */
+  private exploratoryStepsWithoutCodegraph = 0;
+  /** Paths edited/written this turn — Read of these = verification (not exploratory). */
+  private recentlyModifiedPathsThisTurn: Set<string> = new Set();
+
+  // ── Phase 18: 代码质量追踪 ─────────────────────────────────
+  /** 本回合代码质量违规记录列表 */
+  private codeQualityViolations: CodeQualityViolation[] = [];
+  /** 本回合代码质量违规检测总次数 */
+  private codeQualityViolationsThisTurn = 0;
+
+  // ── Guard 规则引擎 (Phase 11) ────────────────────────────────
+  private lastBashExitCode: number | null = null;
+  private hasKnowledgeToolsThisStep = false;
+  private hasWriteToolsThisStep = false;
+
+  // ── Phase 12: Guard feedback ────────────────────────────────────
+  private lastGuardFeedback: string | null = null;
+
+  // ── Phase 13: 行为闭环与展示规范 ────────────────────────────────
+  private lastStepCalledMemoryLookup = false;
+  private hasCurrentCodeToolsThisStep = false;
+  private lastUserInputText = '';
+
+  // ── Phase 14: 正反馈每回合一次 ─────────────────────────────────
+  private positiveFeedbackGivenThisTurn = false;
+
+  // ── Phase 24: 截断数据强制恢复 ─────────────────────────────────
+  readonly turnTruncation = new TruncationTracker({ maxConsecutiveBlocks: 3 });
+
+  // ── Phase 14: 收敛条件数组（可组合） ───────────────────────────
+  private convergenceConditions: ConvergenceCondition[] = [];
+
+  // ── Phase 14: 跨回合标记 ───────────────────────────────────────
+  private crossTurnFlags: {
+    lastTurnHadGuardRule1: boolean;
+    lastTurnHadDeviation: boolean;
+    /** 🆕 Phase15: 跨回合 S→S 升级计数（跨回合累积，behaviorObserved 时单个变体重置） */
+    behaviorViolations: Record<string, number>;
+  } = { lastTurnHadGuardRule1: false, lastTurnHadDeviation: false, behaviorViolations: {} };
+  /** 🆕 Phase14 fix: Guard Rule 1 单独追踪（区分于 confabulationBlocked） */
+  private guardRule1FiredThisTurn = false;
+
+  // ── Quality escalation (P2) ───────────────────────────────────
+  private variantRegistry = new VariantRegistry();
+
+  // ── Inject budget (Phase 5) ───────────────────────────────────
+  private readonly injectBudget = new InjectBudget();
+
+  // ── Phase 21: Stuck injection state ───────────────────────────
+  /** 上次注入 system_ref_stuck 的 step (-1 = 从未注入) */
+  private stuckInjectedAtStep = -1;
+  /** 本轮 Edit 的文件路径（用于 stuck 检测） */
+  private editFileThisStep: string | undefined;
+  /** 本轮工具报错（用于 stuck 检测） */
+  private toolErrorThisStep: string | undefined;
+  /** 文件编辑历史 (最近 30 次) */
+  private editFileHistory: string[] = [];
+  /** 工具报错历史 (最近 30 次) */
+  private errorHistory: string[] = [];
+  // ── Interception event log (Phase 10) ──────────────────────────
+  private readonly eventLog = new TurnEventLog();
+
+  // ── Phase 26: 缓存审计日志 ─────────────────────────────────────
+  private auditLogger = new AuditLogWriter();
+  private _lastUsage: import('@scream-code/ltod').TokenUsage | null = null;
+  private _lastModel: string = '';
+
+  // ── Event snapshot persistence (Phase 10+) ─────────────────────
+  private eventBuffer!: EventSnapshotBuffer;
+
+  constructor(protected readonly agent: Agent) {
+    TruncationTracker.current = this.turnTruncation;
+    this.eventBuffer = new EventSnapshotBuffer(agent);
+    // Phase 26: init audit log asynchronously (swallow errors — never crash turn)
+    this.auditLogger.init().catch(() => {});
+    // 🆕 Phase15+: variantRegistry 行为观察回调 → 记录 behavior_feedback 事件
+    this.variantRegistry.onBehaviorObserved = (v, observed) => {
+      this.eventLog.record({
+        kind: 'behavior_feedback', variant: v, action: observed ? 'observed' : 'not_observed',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: observed
+          ? '行为已观察：AI 遵守了该变体的约束'
+          : '行为未观察：AI 忽略了该变体的约束',
+      });
+    };
+  }
+
+  /** 刷新拦截事件日志到磁盘（会话关闭前调用）。 */
+  async flushEventLog(): Promise<void> {
+    await this.eventBuffer.flush();
+  }
 
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
@@ -264,6 +427,7 @@ export class TurnFlow {
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
+      this.turnTruncation.dispose();
     }
   }
 
@@ -382,9 +546,82 @@ export class TurnFlow {
     this.currentStep = 0;
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
+    this.editWithoutLookupCount = 0;
+    this.deviationChainActive = false;
+    this.deviationChainReason = '';
+    this.deviationChainBypassUsed = false;
+    this.deviationChainResolved = false;
+    this.confabulationBlocked = false;
+    this.verifyFailStep = -1;
+    this.toolCountsBeforeVerifyRetry = {};
+    this.turnHasCalledAnyLsp = false;
+    this.totalStepsWithEditsThisTurn = 0;
+    this.totalCodeFileEditsThisTurn = 0;
+    this.hasCalledCodegraphThisTurn = false;
+    this.exploratoryStepsWithoutCodegraph = 0;
+    this.recentlyModifiedPathsThisTurn = new Set();
+    this.variantRegistry.reset();
+    this.currentStep = 0;
+    this.injectBudget.reset();
+    this.resetInjectorStepState();
+    this.eventLog.clear();
+    this.lastBashExitCode = null;
+    this.lastGuardFeedback = null;
+    this.lastUserInputText = input.map(c => c.type === 'text' ? (c.text ?? '') : '').join(' ');
+    this.positiveFeedbackGivenThisTurn = false;
+    this.guardRule1FiredThisTurn = false;
+    this.codeQualityViolations = [];
+    this.codeQualityViolationsThisTurn = 0;
+    this.initConvergenceConditions();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
+
+    // ── Phase 4: 回合意图注入 ─────────────────────────────
+    if (origin.kind === 'user') {
+      const intentDetection = detectIntent(input);
+      if (intentDetection) {
+        injectIntentGuidance(intentDetection, (text, meta) => {
+          this.inject(text, meta);
+        });
+      }
+    }
+
+    // ── Phase 11: 回合开局规则记忆注入 ────────────────────
+    if (origin.kind === 'user' && this.agent.memoStore) {
+      const userText = input.map(c => c.type === 'text' ? (c.text ?? '') : '').join(' ');
+      const sceneQuery = detectSceneQuery(input);
+      if (!sceneQuery && userText.length > 0) {
+        // 无场景关键词匹配时，用用户输入作为搜索 query
+        const turnRules = await searchBehaviorRules(this.agent.memoStore, userText, 1);
+        if (turnRules.length > 0) {
+          this.inject(
+            formatBehaviorRule(turnRules[0]!),
+            { kind: 'system_trigger', name: 'behavior_rule' },
+          );
+        }
+      } else if (sceneQuery) {
+        const turnRules = await searchBehaviorRules(this.agent.memoStore, sceneQuery, 1);
+        if (turnRules.length > 0) {
+          this.inject(
+            formatBehaviorRule(turnRules[0]!),
+            { kind: 'system_trigger', name: 'behavior_rule' },
+          );
+        }
+      }
+    }
+
+    // ── Phase 12: pending-doc 检测（开局注入）─────────────────
+    if (origin.kind === 'user' && this.agent.memoStore) {
+      const pendingDocs = await searchPendingDoc(this.agent.memoStore);
+      if (pendingDocs.length > 0) {
+        const hasP0 = pendingDocs.some(m => m.userNeed.includes('[P0]'));
+        this.inject(
+          formatPendingDocInject(pendingDocs),
+          { kind: 'system_trigger', name: hasP0 ? 'convergence_gate' : 'injection' },
+        );
+      }
+    }
 
     let ended: TurnEndedEvent;
     let completedStopReason: LoopTurnStopReason | undefined;
@@ -451,6 +688,13 @@ export class TurnFlow {
     if (errorEvent !== undefined) {
       this.agent.emitEvent(errorEvent);
     }
+
+    // 🆕 Phase 10+: 回合拦截事件持久化（异步，不阻塞）
+    const turnEvents = this.eventLog.getTurnEvents(turnId);
+    // 🆕 Phase15+: 传预算摘要给持久化
+    const budgetSummary = this.eventLog.getBudgetSummary(turnId);
+    this.eventBuffer.pushTurn(turnId, turnEvents, this.currentStep, budgetSummary ?? undefined);
+
     this.currentStepByTurn.delete(turnId);
     return {
       event: ended,
@@ -533,17 +777,21 @@ export class TurnFlow {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
               this.currentStepHadContent = false;
+              this.injectBudget.beginStep(stepNumber);
               await this.agent.fullCompaction.beforeStep(stepSignal);
 
               const goal = this.agent.goal.getGoal().goal;
-              if (stepNumber === 1 && goal?.status === 'active' && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
-                  'This turn is working toward an active goal. You MUST call TodoList to create or update the plan before making changes.',
-                  { kind: 'system_trigger', name: 'todo_required' },
-                );
+              if (stepNumber === 1) {
+                this.injectCrossTurnFlags();
+                if (goal?.status === 'active' && !this.todoSeenThisTurn) {
+                  this.inject(
+                    'This turn is working toward an active goal. You MUST call TodoList to create or update the plan before making changes.',
+                    { kind: 'system_trigger', name: 'todo_required' },
+                  );
+                }
               }
               if (stepNumber === 2 && !this.todoSeenThisTurn) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'This task spans multiple steps. Use TodoList to track the remaining work and current phase.',
                   { kind: 'system_trigger', name: 'todo_suggested' },
                 );
@@ -552,7 +800,7 @@ export class TurnFlow {
               if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
                 const sessionSummary = this.agent.sessionMemory.getSessionSummary();
                 if (sessionSummary.length > 0) {
-                  this.agent.context.appendSystemReminder(sessionSummary, {
+                  this.inject(sessionSummary, {
                     kind: 'injection',
                     variant: 'session_memory',
                   });
@@ -561,68 +809,84 @@ export class TurnFlow {
 
               // Suggest /dream on the first step when conditions are met
               if (stepNumber === 1 && this.agent.dreamTracker.shouldSuggest()) {
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   this.agent.dreamTracker.getSuggestionMessage(),
                   { kind: 'injection', variant: 'dream_suggestion' },
                 );
               }
 
-              await this.agent.injection.inject();
+              await this.agent.injection.inject(this.currentStep);
               deduper.beginStep();
               return;
             },
             afterStep: async ({ usage }) => {
               this.agent.usage.record(model, usage, 'turn');
               await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage));
+              this._lastUsage = usage;
+              this._lastModel = model;
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
+
+              await this.handleAfterStep();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async ({ signal }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
 
-              // Convergence gate: prevent the turn from ending on an empty step,
-              // a missing TodoList update for an active goal, a blocking (non-exploratory)
-              // tool failure, or a failed verification command. We no longer force
-              // verification just because files were touched — the agent decides whether
-              // a verification pass is appropriate based on the user's intent and the
-              // system prompt guidance.
+              // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
+              if (this.deviationChainActive && !this.deviationChainBypassUsed) {
+                this.deviationChainBypassUsed = true;
+                this.eventLog.record({
+                  kind: 'deviation_chain', variant: 'deviation_chain_intercept', action: 'gate_held',
+                  step: this.currentStep, turnId: this.currentTurnId,
+                  reason: this.deviationChainReason,
+                });
+                // 🆕 Phase15: 差异化拦截消息 — 行为违规 vs 代码级条件
+                let interceptMsg: string;
+                if (this.deviationChainReason.includes('行为变体')) {
+                  // 行为违规累积触发
+                  const violatingVariant = this.detectTriggerVariant();
+                  interceptMsg = this.buildBehaviorInterceptMsg(violatingVariant);
+                } else {
+                  interceptMsg = '偏差链检测到：' + this.deviationChainReason + '\n' +
+                    '- MUST verify all claims with tool calls.\n' +
+                    '- NEVER fabricate outputs. Each claim needs tool evidence.\n' +
+                    '- Fix the root cause. Do NOT work around.';
+                }
+                this.inject(interceptMsg, { kind: 'injection', variant: 'deviation_chain_intercept' });
+                return { continue: true };
+              }
+
+              // Convergence gate: runs all conditions; pure conditions use the
+              // convergenceConditions array, async/side-effect conditions use named methods.
               const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
               const hasPassedVerificationThisTurn = latestVerification?.passed === true;
 
               if (this.convergenceInjections < this.MAX_CONVERGENCE_INJECTIONS) {
                 const reasons: string[] = [];
 
-                if (!this.currentStepHadContent) {
-                  reasons.push(
-                    'The last assistant step produced no content or tool calls. Continue the task.',
-                  );
+                // — 纯条件（来自数组，按优先级排序）—
+                for (const cond of this.convergenceConditions) {
+                  const reason = cond.check();
+                  if (reason) reasons.push(reason);
                 }
 
-                const goal = this.agent.goal.getGoal().goal;
-                if (goal?.status === 'active' && !this.todoSeenThisTurn) {
-                  reasons.push(
-                    'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
-                  );
-                }
-                if (this.lastToolFailure?.isExploratory === false && !hasPassedVerificationThisTurn) {
-                  reasons.push(
-                    `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
-                      'Analyze the error and fix it before reporting completion.',
-                  );
-                }
-                if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
-                  this.verificationFailureInjected = true;
-                  reasons.push(
-                    `The last verification command failed (${latestVerification.command}). ` +
-                      'Fix the failure before re-running verification. Do NOT downgrade to runtime smoke tests.',
-                  );
-                }
+                // — 带副作用的条件（confabulation 含 searchBehaviorRules）—
+                this.collectConfabulationBlockReason(reasons);
+
+                // — 带 await 的条件（pending-doc 需要异步搜索）—
+                await this.collectPendingDocReason(reasons);
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
-                  this.agent.context.appendSystemReminder(
+                  const heldReason = reasons[0] ?? 'unspecified';
+                  this.eventLog.record({
+                    kind: 'convergence_gate', variant: '', action: 'gate_held',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: heldReason.length > 120 ? heldReason.slice(0, 117) + '...' : heldReason,
+                  });
+                  this.inject(
                     reasons.join('\n') +
                       '\n\nDo not report completion until the above is resolved.',
                     { kind: 'system_trigger', name: 'convergence_gate' },
@@ -640,7 +904,7 @@ export class TurnFlow {
                 this.lastAssistantMessageIsTrivial()
               ) {
                 this.summaryGuardInjected = true;
-                this.agent.context.appendSystemReminder(
+                this.inject(
                   'Your final response is too brief or only acknowledges completion. ' +
                     'Before ending the turn, provide a concise but complete summary: ' +
                     'what was done, which files changed, the verification result, and any ' +
@@ -668,6 +932,17 @@ export class TurnFlow {
                 );
                 return { continue: true };
               }
+              // 🆕 Phase 10: 收敛门放行记录
+              if (this.convergenceInjections > 0) {
+                this.eventLog.record({
+                  kind: 'convergence_gate', variant: '', action: 'gate_passed',
+                  step: this.currentStep, turnId: this.currentTurnId,
+                  reason: `Turn allowed to end after ${this.convergenceInjections} gate holds`,
+                });
+              }
+              // 🆕 Phase 14: 跨回合标记序列化 — 下回合预防性提醒
+              if (this.guardRule1FiredThisTurn) this.crossTurnFlags.lastTurnHadGuardRule1 = true;
+              if (this.deviationChainActive) this.crossTurnFlags.lastTurnHadDeviation = true;
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {
@@ -704,6 +979,133 @@ export class TurnFlow {
                         )}s]`,
                       },
                     };
+                  }
+                }
+              }
+
+              // 🆕 A组: 工具执行前注入 — prepareToolExecution
+              if (ctx.toolCall.name === 'Edit') {
+                this.inject(
+                  '修改函数/API 后，必须更新所有调用方。先调 LSP.references 查找所有引用点。',
+                  { kind: 'injection', variant: 'prepare_edit' },
+                );
+              }
+              if (ctx.toolCall.name === 'Write') {
+                const path = (ctx.args as { path?: string }).path ?? '';
+                const text = path.endsWith('.md')
+                  ? 'MUST verify markdown output format after write.'
+                  : path.endsWith('.ts') || path.endsWith('.tsx')
+                    ? 'MUST verify build after writing new code.'
+                    : 'MUST check output correctness after write.';
+                this.inject(text, {
+                  kind: 'injection',
+                  variant: 'prepare_write',
+                });
+              }
+              if (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') {
+                this.inject(
+                  '搜到一个匹配后不要立即编辑。评估所有搜索结果后再动手。',
+                  { kind: 'injection', variant: 'prepare_search' },
+                );
+              }
+              if (ctx.toolCall.name === 'MemoryLookup') {
+                this.inject(
+                  'MUST check whatFailed before repeating approach.',
+                  { kind: 'injection', variant: 'prepare_memory' },
+                );
+              }
+              if (ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (TurnFlow.BASH_FILE_OPS_RE.test(cmd)) {
+                  this.inject(
+                    'NEVER use Bash for file reads. Use Read/Edit/Grep.',
+                    { kind: 'injection', variant: 'prepare_bash_file' },
+                  );
+                }
+              }
+              if (ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.inject(
+                    '验证失败后必须修复根因重新跑完整验证，不准降低验证标准。',
+                    { kind: 'injection', variant: 'prepare_verify' },
+                  );
+                }
+              }
+              // 🆕 Phase 17: 4D 智能拦截 — 探索 vs 验证 / 可用性 / 渐进 escal / 疲劳重置
+              if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') {
+                const codegraphAvailable = this.agent.tools.data().some(t => t.name.startsWith('mcp__codegraph__codegraph'));
+                if (codegraphAvailable && !this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
+                  const n = this.exploratoryStepsWithoutCodegraph;
+                  if (n >= 5) {
+                    return {
+                      syntheticResult: {
+                        isError: true,
+                        output: `已连续 ${n} 次使用 Read/Grep 探索代码而未调用 codegraph。请先用 mcp__codegraph__codegraph_explore 获取相关符号源码+调用路径。确认 Read/Grep 是验证行为而非探索后，可先调一次 codegraph 再继续。`,
+                        stopTurn: false,
+                      },
+                    };
+                  }
+                  if (n >= 4) {
+                    this.inject(
+                      `已连续 ${n} 次 Read/Grep 探索代码未调 codegraph。下一步再不调用 codegraph 将被阻断。mcp__codegraph__codegraph_explore 一次返回完整上下文。`,
+                      { kind: 'injection', variant: 'step_code_explore' },
+                    );
+                  } else if (n >= 3) {
+                    this.inject(
+                      '已连续多次用 Read/Grep 探索代码。建议先用 mcp__codegraph__codegraph_explore — 一次调用返回相关符号源码+调用路径，比多轮 Read/Grep 更高效。',
+                      { kind: 'injection', variant: 'step_code_explore' },
+                    );
+                  }
+                }
+              }
+
+              // ── Phase 18: 代码质量偏差链阻断（Write/Edit 尝试时）──
+              if ((ctx.toolCall.name === 'Write' || ctx.toolCall.name === 'Edit') &&
+                  this.deviationChainActive && !this.deviationChainResolved &&
+                  this.deviationChainReason.includes('代码质量')) {
+                return {
+                  syntheticResult: {
+                    isError: true,
+                    output: '偏差链活跃：代码质量违规未修正。违规列表：\n'
+                      + this.codeQualityViolations.map(v => `  - ${v.file}: ${v.detail}`).join('\n')
+                      + '\n修正违规后再写新代码。',
+                    stopTurn: false,
+                  },
+                };
+              }
+
+              // ── Phase24.2: 截断数据自动恢复 ─────────────────────────
+              if (this.turnTruncation.hasUnrecovered() && this.currentStep > 1) {
+                // 只读工具不触发拦截和 forceResume
+                if (!this.turnTruncation.isReadOnly(ctx.toolCall.name)) {
+                  const keys = this.turnTruncation.pendingKeys();
+                  const recoverResults: string[] = [];
+                  for (const key of keys) {
+                    // Phase24.2: 并行竞争保护 — 同一步已由其他工具 recover 的 key 跳过
+                    if (this.turnTruncation.isAlreadyRecoveredThisStep(key, this.currentStep)) {
+                      continue;
+                    }
+                    const data = this.agent.contentArchive.recover(key);
+                    if (data !== undefined) {
+                      const text = typeof data === 'string' ? data : JSON.stringify(data);
+                      const preview = text.length > 200
+                        ? text.slice(0, 200) + `\n…(共 ${text.length} 字符，已跳过 ${text.length - 200} 字符)`
+                        : text;
+                      recoverResults.push(`[${key}]: ${preview}`);
+                      this.turnTruncation.markRecovered(key);
+                      this.turnTruncation.markStepRecovered(key, this.currentStep);
+                    }
+                  }
+                  if (recoverResults.length > 0) {
+                    this.inject(
+                      `检测到 ContentArchive 中有截断数据，已自动恢复。内容预览：\n${recoverResults.join('\n')}`,
+                      { kind: 'injection', variant: 'truncation_recover_guard' },
+                    );
+                  }
+                  // 未 recover 到的 key 走熔断检查
+                  if (this.turnTruncation.hasUnrecovered()) {
+                    this.turnTruncation.incrementBlockAndCheck();
                   }
                 }
               }
@@ -768,6 +1170,29 @@ export class TurnFlow {
                   }
                 }
               }
+              // 🆕 Phase 8: 验证假通过检测 — 跟踪失败→通过的改动量
+              if (ctx.toolCall.name === 'Bash') {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd) && isError === true && this.verifyFailStep < 0) {
+                  this.verifyFailStep = this.currentStep;
+                  this.toolCountsBeforeVerifyRetry = { ...this.stepToolCounts };
+                }
+                if (looksLikeVerificationCommand(cmd) && isError !== true && this.verifyFailStep >= 0) {
+                  const editDelta = (this.stepToolCounts['Edit'] ?? 0) -
+                    (this.toolCountsBeforeVerifyRetry['Edit'] ?? 0);
+                  const writeDelta = (this.stepToolCounts['Write'] ?? 0) -
+                    (this.toolCountsBeforeVerifyRetry['Write'] ?? 0);
+                  if (editDelta === 0 && writeDelta === 0) {
+                    this.inject(
+                      '验证通过但本轮无实质性改动，可能是假通过。重新验证确认。',
+                      { kind: 'injection', variant: 'post_verify_pass' },
+                    );
+                    if (this.convergenceInjections > 0) this.convergenceInjections--;
+                  } else {
+                    this.verifyFailStep = -1;
+                  }
+                }
+              }
 
               // When the verify agent reports its result, record the structured
               // verification status so the convergence gate can enforce fix-then-
@@ -811,7 +1236,7 @@ export class TurnFlow {
                     : '';
                 const isExploratory =
                   ctx.toolCall.name === 'Agent'
-                    ? subagentType !== 'verify' && subagentType !== 'reviewer'
+                    ? subagentType !== 'verify' && subagentType !== 'reviewer' && subagentType !== 'explore'
                     : this.isExploratoryBashCommand(command);
                 this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
               } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
@@ -822,6 +1247,174 @@ export class TurnFlow {
                 // cleared by a passing verification (markAllVerified above).
                 if (ctx.toolCall.name !== 'Bash' || this.lastToolFailure.isExploratory) {
                   this.lastToolFailure = null;
+                }
+              }
+
+              // 🆕 B组: 工具执行后追踪 (finalizeToolResult)
+              if (isError !== true) {
+                this.stepToolCounts[ctx.toolCall.name] =
+                  (this.stepToolCounts[ctx.toolCall.name] ?? 0) + 1;
+                if (ctx.toolCall.name === 'LSP' || ctx.toolCall.name === 'Grep') {
+                  this.searchHadResultsThisStep = true;
+                  this.hasKnowledgeToolsThisStep = true;
+                  this.hasCurrentCodeToolsThisStep = true;
+                }
+                if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
+                  this.hasCurrentCodeToolsThisStep = true;
+                  this.hasKnowledgeToolsThisStep = true;
+                  // D1 (Phase 17): Only count exploratory reads — reads of recently-modified files are verification
+                  if (!this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
+                    this.exploratoryStepsWithoutCodegraph++;
+                  }
+                }
+                if (ctx.toolCall.name === 'MemoryLookup') {
+                  this.lastStepCalledMemoryLookup = true;
+                }
+                if (ctx.toolCall.name.startsWith('mcp__codegraph__codegraph')) {
+                  this.hasCalledCodegraphThisTurn = true;
+                  this.exploratoryStepsWithoutCodegraph = 0;
+                }
+                if (ctx.toolCall.name === 'Edit') {
+                  this.editCalledSuccessThisStep = true;
+                  const editPath = (ctx.args as { path?: string }).path ?? '';
+                  const ext = editPath.slice(editPath.lastIndexOf('.')).toLowerCase();
+                  if (TurnFlow.CODE_FILE_EXTS.has(ext)) {
+                    this.editOnCodeFileThisStep = true;
+                    this.totalCodeFileEditsThisTurn++;
+                  }
+                  this.hasWriteToolsThisStep = true;
+                  // D1 (Phase 17): Track modified paths so subsequent reads count as verification
+                  if (editPath) {
+                    this.recentlyModifiedPathsThisTurn.add(editPath);
+                    this.editFileThisStep = editPath; // Phase 21: track for stuck detection
+                  }
+                }
+                if (ctx.toolCall.name === 'Write') {
+                  this.hasWriteToolsThisStep = true;
+                  const writePath = (ctx.args as { path?: string }).path ?? '';
+                  if (writePath) this.recentlyModifiedPathsThisTurn.add(writePath);
+                }
+
+                // 🆕 FileActionAudit: 记录成功的文件操作
+                if ((ctx.toolCall.name === 'Edit' || ctx.toolCall.name === 'Write') && ctx.toolCall.id) {
+                  const filePath = (ctx.args as { path?: string }).path ?? '';
+                  const actionType = ctx.toolCall.name === 'Edit' ? 'edit' : 'write';
+                  this.agent.fileActionAudit.push({
+                    toolCallId: ctx.toolCall.id,
+                    action: `${actionType}:${filePath}`,
+                    timestamp: Date.now(),
+                    resultPreview: filePath,
+                    success: true,
+                    durationMs: 0,
+                  });
+                }
+
+                // 🆕 Phase24.2: 截断数据注册 — 工具输出被截断时登记（含长度信息）
+                if ('truncated' in ctx.result && ctx.result.truncated === true) {
+                  const key = `tool:${ctx.toolCall?.id ?? ''}`;
+                  const output = ctx.result?.output ?? '';
+                  const originalLength = typeof output === 'string' ? output.length : 0;
+                  const truncatedLength = originalLength;  // 已截断，truncatedLength 即为当前长度
+                  this.turnTruncation.register(key, ctx.toolCall?.name ?? '', this.currentStep, originalLength, truncatedLength);
+                }
+              }
+              // Track LSP.references specifically for C1 upgrade detection
+              if (ctx.toolCall.name === 'LSP') {
+                const operation = (ctx.args as { operation?: string }).operation;
+                if (operation === 'references') this.hasCalledLspReferencesThisStep = true;
+              }
+              // Track Bash exit code for Guard Rule 1
+              if (ctx.toolCall.name === 'Bash') {
+                const outputText = toolOutputText(output);
+                // Parse exit code from tool output
+                const exitMatch = outputText.match(/Command failed with exit code: (\d+)/);
+                this.lastBashExitCode = exitMatch ? Number(exitMatch[1]) : (isError === true ? 1 : 0);
+                if (isError === true) this.toolErrorThisStep = ctx.toolCall.name;
+              }
+              // Track verify failure for C3
+              if (ctx.toolCall.name === 'Bash' && isError === true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.verifyFailedThisStep = true;
+                  this.eventLog.record({
+                    kind: 'verify_fail', variant: '', action: 'gate_held',
+                    step: this.currentStep, turnId: this.currentTurnId,
+                    reason: `Verification failed: ${cmd.slice(0, 80)}`,
+                  });
+                }
+              }
+
+              // 🆕 B组: 工具执行后注入 — finalizeResult
+              if (ctx.toolCall.name === 'Edit' && isError !== true) {
+                this.inject(
+                  'NEVER leave callers unverified without update.',
+                  { kind: 'injection', variant: 'post_edit' },
+                );
+              }
+              if ((ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
+                const hasContent = toolOutputText(output).trim().length > 0;
+                if (hasContent) {
+                  this.inject(
+                    'Full picture ready. NOW design and apply the change.',
+                    { kind: 'injection', variant: 'post_search' },
+                  );
+                }
+              }
+              if (ctx.toolCall.name === 'Write' && isError !== true) {
+                const text = toolOutputText(output);
+                if (text.length > 500) {
+                  this.inject(
+                    'Large output written. MUST review for correctness.',
+                    { kind: 'injection', variant: 'post_write_large' },
+                  );
+                }
+              }
+              if (ctx.toolCall.name === 'Bash' && isError !== true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.inject(
+                    'Verification passed. Deliver the result.',
+                    { kind: 'injection', variant: 'post_verify_pass' },
+                  );
+                }
+              }
+              if (ctx.toolCall.name === 'Bash' && isError === true) {
+                const cmd = (ctx.args as { command?: string }).command ?? '';
+                if (looksLikeVerificationCommand(cmd)) {
+                  this.inject(
+                    '验证失败后必须修复根因重新跑完整验证，不准降低验证标准。',
+                    { kind: 'injection', variant: 'post_verify_fail' },
+                  );
+                }
+              }
+              if (ctx.toolCall.name === 'MemoryLookup' && isError !== true) {
+                const hasContent = toolOutputText(output).trim().length > 0;
+                if (hasContent) {
+                  this.inject(
+                    'NOW apply whatFailed lessons from results above.',
+                    { kind: 'injection', variant: 'post_memory' },
+                  );
+                }
+              }
+
+              // ── Phase 18: 代码质量检测（Write/Edit 成功时）──
+              if (isError !== true && (ctx.toolCall.name === 'Write' || ctx.toolCall.name === 'Edit')) {
+                const fp = (ctx.args as { path?: string }).path ?? '';
+                if (/\.(ts|tsx|js|jsx)$/.test(fp)) {
+                  const content = toolOutputText(output);
+                  if (content.length > 0) {
+                    const qcResult = scanCodeQuality(content, fp);
+                    if (qcResult.hasViolations) {
+                      this.codeQualityViolations.push(...qcResult.violations);
+                      this.codeQualityViolationsThisTurn += qcResult.violations.length;
+                      this.inject(formatCodeQualityFeedback(qcResult), { kind: 'injection', variant: 'code_quality_feedback' });
+                      this.eventLog.record({
+                        kind: 'code_quality', variant: 'violation', action: 'feedback',
+                        step: this.currentStep, turnId: this.currentTurnId,
+                        reason: `代码质量违规: ${qcResult.violations.map(v => v.type).join(', ')}`,
+                      });
+                    }
+                  }
                 }
               }
 
@@ -913,6 +1506,678 @@ export class TurnFlow {
     this.currentStepByTurn.set(turnId, step);
     this.currentStep = step;
   }
+
+  // ── Inject budget + unified injection (Phase 5) ──────────────
+  /**
+   * 带预算检查 + 权重感知 + VariantRegistry 记录的注入包装。
+   *
+   * system_trigger 穿透预算（收敛机制不应被 budget 拦截）。
+   * quality_escalate_ 穿透预算（升级本身就是 budget 不足的补救）。
+   */
+  /**
+   * 带去重 + 预算 + 权重感知 + VariantRegistry 记录的注入包装。
+   *
+   * 所有 callsite 只需传 text 和 meta。去重/注册由本方法统一处理。
+   * system_trigger 和 quality_escalate_ 穿透预算，走各自独立路径。
+   */
+  private inject(text: string, meta: PromptOrigin): void {
+    // 提取 variant 名（部分 PromptOrigin 不含 variant）
+    const variant = typeof meta === 'object' && 'variant' in meta &&
+      typeof meta.variant === 'string' ? meta.variant : undefined;
+
+    // system_trigger: 穿透一切（收敛机制）
+    if (meta.kind === 'system_trigger') {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    // quality_escalate_: 穿透预算，去重由 escalateQuality() 负责
+    if (variant?.startsWith('quality_escalate_')) {
+      this.agent.context.appendSystemReminder(text, meta);
+      return;
+    }
+
+    // 重复衰减: 同变体触发 5+ 次 → 跳过
+    if (variant) {
+      const record = this.variantRegistry.get(variant);
+      if (repeatDecay(record) === 'skip') return;
+    }
+
+    // 🆕 Phase 9: ResNet 残差注意力 — 注意力还够时跳过注入
+    if (variant) {
+      const vm = VARIANT_META[variant];
+      if (vm) {
+        const record = this.variantRegistry.get(variant);
+        if (!shouldInjectByResidual(record, this.currentStep, vm)) {
+          this.eventLog.record({
+            kind: 'injection_skipped', variant, action: 'skipped_residual',
+            step: this.currentStep, turnId: this.currentTurnId,
+            reason: `R≥T for ${variant}`,
+            agentType: this.agent.type,
+          });
+          return;
+        }
+        // 残差刚过阈值用短文本
+        if (shouldUseShortText(record, this.currentStep, vm)) {
+          text = shortenText(text);
+        }
+      }
+    }
+
+    // 步级去重: 同一步同一 variant 只注入一次
+    if (variant && this.stepInjectedVariants.has(variant)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_dedup',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Dedup skip: ${variant} already injected this step`,
+        agentType: this.agent.type,
+      });
+      return;
+    }
+    if (variant) this.stepInjectedVariants.add(variant);
+
+    // 🆕 Phase26 Optim C: 跨步内容去重 — 与上一步相同 variant 内容一致则跳过
+    if (variant && this.contentHashCache.isDuplicate(variant, text)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_content_dedup',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Content dedup: ${variant} content unchanged from last injection`,
+        agentType: this.agent.type,
+      });
+      return;
+    }
+
+    // Phase22.3: 变体配额调度 — 委托 VariantScheduler
+    if (variant && !this.agent.injection.canInject(variant, this.currentStep)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant, action: 'skipped_quota',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Quota denies ${variant} (count=${this.agent.injection.getInjectionCount(variant)})`,
+        agentType: this.agent.type,
+      });
+      return;
+    }
+
+    const estimatedTokens = Math.ceil(text.length / 4);
+    const level = detectWeightLevel(text);
+    const effectiveLevel = this.getEffectiveLevel(meta, level);
+
+    // 🆕 Phase15: interception_log 穿透 budget — 元日志不是行为约束，且不占用预算/注册表
+    if (variant === 'interception_log') {
+      this.agent.context.appendSystemReminder(text, meta);
+      this.eventLog.record({
+        kind: 'injection_delivered', variant: 'interception_log', action: 'injected',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Injected interception_log (lv=${effectiveLevel})`,
+        level: effectiveLevel, tokenEstimate: estimatedTokens,
+        agentType: this.agent.type,
+      });
+      return;
+    }
+
+    // 毒性绕过: 偏差链激活 → 跳过预算
+    if (this.deviationChainActive) this.injectBudget.bypassBudget();
+
+    if (!this.injectBudget.canInject(estimatedTokens, effectiveLevel)) {
+      this.eventLog.record({
+        kind: 'injection_skipped', variant: variant ?? '', action: 'skipped_budget',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `Budget denies ${variant ?? 'unknown'} (t≈${estimatedTokens}, lv=${effectiveLevel})`,
+        level: effectiveLevel, tokenEstimate: estimatedTokens,
+        agentType: this.agent.type,
+      });
+      return;
+    }
+
+    // Phase4 注意力管控：根据 variant 等级选择注入位置
+    if (effectiveLevel) {
+      const pos = new AttentionPositionStrategy().decidePosition(variant ?? '', effectiveLevel as WeightLevel);
+      if (pos === InsertPosition.AFTER_SYSTEM) {
+        this.agent.context.insertSystemReminderAtHead(text, meta, true);
+      } else if (pos === InsertPosition.MID_CONTEXT) {
+        this.agent.context.insertSystemReminderAtNearHead(text, meta, true);
+      } else {
+        this.agent.context.appendSystemReminder(text, meta);
+      }
+    } else {
+      this.agent.context.appendSystemReminder(text, meta);
+    }
+    this.injectBudget.record(estimatedTokens);
+
+    // 注册到 VariantRegistry（残差系统依赖）
+    if (variant) {
+      this.variantRegistry.record(variant, 'D' as any, this.currentStep);
+    }
+
+    // Phase22.3: 记录到 VariantScheduler
+    if (variant) {
+      this.agent.injection.afterInject(variant, this.currentStep);
+    }
+
+    // Step 6: 同步 router 统计（统一监控入口）
+    if (variant) {
+      this.agent.injection.getRouter().recordInjection(variant, this.currentStep);
+    }
+
+    this.eventLog.record({
+      kind: 'injection_delivered', variant: variant ?? '', action: 'injected',
+      step: this.currentStep, turnId: this.currentTurnId,
+      reason: `Injected ${variant ?? 'unknown'} (lv=${effectiveLevel})`,
+      level: effectiveLevel, tokenEstimate: estimatedTokens,
+      agentType: this.agent.type,
+    });
+  }
+
+  // ── Phase 14: afterStep 分段命名化 ─────────────────────────────
+
+  /**
+   * afterStep 组织层 — 按行为分 7 步执行所有检测和注入。
+   * 每个子方法不超过 45 行。
+   */
+  private async handleAfterStep(): Promise<void> {
+    // Step 1: 步级反馈 + 偏差链追踪
+    this.injectStepAfterVariants();
+    this.detectDeviationChain();
+
+    // Step 2: 反事实检测 + quality 检测
+    const sig = compressStep(this.stepToolCounts, extractLastAssistantText(this.agent.context.history));
+    const snap = buildContextSnapshot(this.stepToolCounts, this.currentStep);
+    const confaResult = detectConfabulation(sig, snap);
+    injectAntiConfabulation(confaResult, this.stepInjectedVariants, (text, meta) => this.inject(text, meta));
+    if (confaResult.confidence >= 3) {
+      this.confabulationBlocked = true;
+      this.eventLog.record({
+        kind: 'confabulation', variant: '', action: 'detected',
+        step: this.currentStep, turnId: this.currentTurnId,
+        reason: `High-confidence unfounded claims (score=${confaResult.confidence})`,
+      });
+    }
+    this.runQualityDetection(sig);
+
+    // 🆕 Phase15: 行为已观察的变体 → 重置跨回合违规计数
+    this.resetObservedBehaviorViolations();
+
+    // Step 3: 偏差链修复 + turn-level 统计
+    this.tryResolveDeviationChain();
+    if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
+    if (this.editCalledSuccessThisStep) this.totalStepsWithEditsThisTurn++;
+
+    // Step 4: 拦截日志增量 + 健康检查
+    this.injectInterceptionSummary();
+    this.checkEventLogHealth();
+
+    // Step 5: 检测器序列（scene, guard, behavior rules, stuck）
+    this.detectSceneMemoryIssue();
+    this.stuckInjectedAtStep = injectStuckInjector(
+      (msg, meta) => this.inject(msg, { kind: 'injection', ...meta }),
+      this.currentStep,
+      this.stuckInjectedAtStep,
+      this.stepInjectedVariants,
+      this.editFileThisStep,
+      this.toolErrorThisStep,
+      this.editFileHistory,
+      this.errorHistory,
+    );
+    await this.runGuardDetection();
+    await this.injectBehaviorRulesAfterStep();
+
+    // ── Phase24.2: 截断数据提醒（仅当自动恢复失败时）──────────────
+    if (this.turnTruncation.hasUnrecovered() && !this.turnTruncation.remindedThisTurn) {
+      this.inject(
+        `有截断数据在 ContentArchive 中但自动恢复未找到对应内容，建议使用 archive_recover 手动获取。`
+        + ` Pending keys: [${this.turnTruncation.pendingKeys().join(', ')}]`,
+        { kind: 'injection', variant: 'truncation_recover_guard' },
+      );
+      this.turnTruncation.markReminded();
+    }
+    // Phase24.2: 清理当前步的 stepRecovered 记录
+    this.turnTruncation.clearStepRecovered(this.currentStep);
+    this.turnTruncation.prune(this.currentStep);
+
+    // Step 6: 正反馈 + CodeRef
+    this.injectPositiveFeedbackThisTurn();
+    this.detectCodeRefIssue();
+
+    // Phase22.2: 收集注入器状态为 flat facts，可选注入
+    // (由 Phase22.3 VariantScheduler 通过 manage.ts 门控注入)
+
+    // Step 7: 重置
+    this.resetInjectorStepState();
+
+    // ── Phase 26: 缓存审计日志写入 + GrowthPredictor 数据投喂 ──
+    if (this._lastUsage && (this._lastUsage.cacheHitTokens !== undefined || this._lastUsage.cacheMissTokens !== undefined)) {
+      const metrics = computeCacheMetrics(this._lastUsage);
+      const compacted = this.agent.fullCompaction.lastCompactedTokens > 0;
+      const compactedTokens = compacted ? this.agent.fullCompaction.lastCompactedTokens : 0;
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, metrics, compacted, compactedTokens);
+      this.auditLogger.write(entry);
+      // 若发生了 compaction，内容缓存失效，重置去重状态
+      if (compacted) this.contentHashCache.reset();
+      // Reset so next turn starts fresh
+      this.agent.fullCompaction.lastCompactedTokens = 0;
+    }
+    // Phase26: 每轮喂 token 数据给 GrowthPredictor
+    if (this._lastUsage) {
+      const totalInput = (this._lastUsage.inputOther || 0) +
+        (this._lastUsage.inputCacheRead || 0) +
+        (this._lastUsage.inputCacheCreation || 0);
+      this.agent.fullCompaction.strategy.recordRound(totalInput);
+    }
+    this._lastUsage = null;
+  }
+
+  /** C组: 步级反馈注入 — 基于当前步工具调用模式注入对应提醒 */
+  private injectStepAfterVariants(): void {
+    if (this.editOnCodeFileThisStep && !this.hasCalledLspReferencesThisStep) {
+      this.editWithoutLookupCount++;
+      if (this.editWithoutLookupCount >= 2) {
+        this.inject('编辑前必须先查 LSP.references 找调用方。', { kind: 'injection', variant: 'step_after_edit' });
+      } else {
+        this.inject('编辑完成。在继续前先用 LSP.references 检查调用方。', { kind: 'injection', variant: 'step_after_edit' });
+      }
+    } else if (this.editOnCodeFileThisStep) {
+      this.editWithoutLookupCount = 0;
+    }
+    if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
+      this.inject('找到引用点了。设计好改动方案后再编辑。', { kind: 'injection', variant: 'step_after_search' });
+    }
+    if (this.verifyFailedThisStep) {
+      this.inject('验证失败后必须修复根因重新跑完整验证，不准降低验证标准。', { kind: 'injection', variant: 'step_after_verify_fail' });
+    }
+  }
+
+  /** 毒性早期检测：偏差链追踪 */
+  private detectDeviationChain(): void {
+    // 条件 1: Edit 脱链（已有）
+    if (this.editWithoutLookupCount >= 3 && !this.deviationChainActive) {
+      this.deviationChainActive = true;
+      this.deviationChainReason = '连续多次 Edit 未查 LSP.references：已触发偏差拦截。';
+    }
+
+    // 条件 2: 验证失败（已有）
+    if (!this.deviationChainActive && this.verifyFailedThisStep) {
+      this.deviationChainActive = true;
+      this.deviationChainReason = '验证失败：已触发偏差拦截。';
+    }
+
+    // 🆕 条件 3: 行为违规累积 → 偏差拦截
+    if (!this.deviationChainActive) {
+      for (const [variant, count] of Object.entries(this.crossTurnFlags.behaviorViolations)) {
+        const meta = VARIANT_META[variant];
+        const threshold = meta?.interceptThreshold ?? 0;
+        if (threshold > 0 && count >= threshold) {
+          this.deviationChainActive = true;
+          this.deviationChainReason = `行为变体 ${variant} 连续 ${count} 回合 S→S 升级但行为未见改善。`;
+          break;
+        }
+      }
+    }
+
+    // 🆕 Phase 18: 代码质量违规 → 偏差链（跨回合累积，interceptThreshold=3）
+    if (!this.deviationChainActive && this.codeQualityViolationsThisTurn > 0) {
+      this.deviationChainActive = true;
+      this.deviationChainReason = '代码质量违规：存在 ' + this.codeQualityViolationsThisTurn + ' 个未修正的规范违反。';
+    }
+  }
+
+  /** 🆕 Phase15: 可进入偏差链拦截的变体白名单 */
+  private static readonly INTERCEPT_VARIANTS = new Set([
+    'guard_feedback_rule_2',
+    'guard_feedback_rule_3',
+    'guard_feedback_rule_4',
+    'scene_memory_recall',
+    'step_after_edit',
+    'step_after_verify_fail',
+  ]);
+
+  /** 🆕 Phase15: 追踪行为变体的跨回合 S→S 违规计数 */
+  private trackBehaviorViolation(variant: string): void {
+    // 只跟踪白名单中的变体
+    if (!TurnFlow.INTERCEPT_VARIANTS.has(variant)) return;
+    // 递增计数（首次设为 1）
+    this.crossTurnFlags.behaviorViolations[variant] =
+      (this.crossTurnFlags.behaviorViolations[variant] || 0) + 1;
+  }
+
+  /** 🆕 Phase15: 检测触发拦截的具体变体 */
+  private detectTriggerVariant(): string {
+    for (const [variant, count] of Object.entries(this.crossTurnFlags.behaviorViolations)) {
+      const meta = VARIANT_META[variant];
+      const threshold = meta?.interceptThreshold ?? 0;
+      if (threshold > 0 && count >= threshold) return variant;
+    }
+    return 'unknown';
+  }
+
+  /** 🆕 Phase15: 生成行为违规拦截的指导消息 */
+  private buildBehaviorInterceptMsg(variant: string): string {
+    const variantGuidance: Record<string, string> = {
+      guard_feedback_rule_2: '— 系统检测到你声称"检查发现"但实际无 Read/Grep/LSP 调用。',
+      guard_feedback_rule_3: '— 系统检测到你声称"已修改"但实际无 Edit/Write 调用。',
+      guard_feedback_rule_4: '— 系统检测到你依赖记忆替代了实际代码验证。',
+      scene_memory_recall:   '— 系统检测到用户提"上次/以前"但你未查 MemoryLookup。',
+      step_after_edit:       '— 系统检测到 Edit 后未查 LSP.references。',
+      step_after_verify_fail:'— 系统检测到验证失败后未按要求修复。',
+    };
+    const specificGuidance = variantGuidance[variant] ?? '— 系统检测到重复行为违规。';
+    const count = this.crossTurnFlags.behaviorViolations[variant] ?? 0;
+    return [
+      `偏差链检测到：行为变体 ${variant} 连续 ${count} 回合 S→S 升级但行为未见改善。`,
+      specificGuidance,
+      '- 要求：MUST 用工具调用验证所有声明。NEVER 声称有证据但实际没有。',
+      '- 修正前本回合将持续拦截。',
+    ].join('\n');
+  }
+
+  /** 质量升级检测 */
+  private runQualityDetection(sig: ReturnType<typeof compressStep>): void {
+    observeBehavior(this.variantRegistry, sig);
+    const qualityIssue = detectQualityIssue(this.variantRegistry, sig, this.currentStep);
+    if (qualityIssue) {
+      // 升级前的 level（旧值）
+      const currentLevel = this.variantRegistry.get(qualityIssue.targetVariant)?.level;
+      escalateQuality(qualityIssue, this.stepInjectedVariants, (text, meta) => this.inject(text, meta));
+      this.variantRegistry.updateLevel(qualityIssue.targetVariant, qualityIssue.suggestedLevel, this.currentStep);
+
+      // 🆕 Phase15: S→S 追踪 — 升级前已是 S 级 = S→S 升级
+      if (currentLevel === 'S') {
+        this.trackBehaviorViolation(qualityIssue.targetVariant);
+      }
+    }
+  }
+
+  /** 偏差链修复跟踪 */
+  private tryResolveDeviationChain(): void {
+    if (!this.deviationChainActive || this.deviationChainResolved) return;
+    if (this.deviationChainReason.includes('Edit 未查 LSP.references')) {
+      if (this.hasCalledLspReferencesThisStep) this.deviationChainResolved = true;
+    } else if (this.deviationChainReason.includes('验证失败')) {
+      const lastText = extractLastAssistantText(this.agent.context.history);
+      const sig = compressStep(this.stepToolCounts, lastText);
+      if (sig.hasVerificationTools) this.deviationChainResolved = true;
+    }
+    // Phase 18: 代码质量偏差链 — 违规消失则已修复
+    if (this.deviationChainReason.includes('代码质量')) {
+      if (this.codeQualityViolationsThisTurn === 0) {
+        this.deviationChainResolved = true;
+      }
+    }
+  }
+
+  /** 拦截日志增量注入 */
+  private injectInterceptionSummary(): void {
+    const eventSummary = this.eventLog.getNewTurnSummary(this.currentTurnId);
+    if (eventSummary.length > 0) {
+      this.inject(eventSummary, { kind: 'injection', variant: 'interception_log' });
+    }
+  }
+
+  /** 元日志健康检查 */
+  private checkEventLogHealth(): void {
+    if (this.currentStep > 10 && this.eventLog.getTurnEvents(this.currentTurnId).length === 0) {
+      this.agent.log.warn('eventLog empty but turn > 10 steps', { turnId: this.currentTurnId, step: this.currentStep });
+    }
+  }
+
+  /** 🆕 Phase15: behaviorObserved 已标记的变体 → 重置跨回合违规计数 */
+  private resetObservedBehaviorViolations(): void {
+    for (const variant of Object.keys(this.crossTurnFlags.behaviorViolations)) {
+      const record = this.variantRegistry.get(variant);
+      if (record?.behaviorObserved === true) {
+        delete this.crossTurnFlags.behaviorViolations[variant];
+      }
+    }
+  }
+
+  /** SceneMemoryDetector — 用户说了"上次/以前"但 AI 没查记忆 */
+  private detectSceneMemoryIssue(): void {
+    if (!this.lastUserInputText || this.currentStep !== 1) return;
+    const sceneMemoryIssue = detectSceneMemory(this.lastUserInputText, this.lastStepCalledMemoryLookup);
+    if (sceneMemoryIssue.needsReminder) {
+      this.inject('用户提到了"上次/以前"——先用 MemoryLookup 查历史记录，不要靠猜。', { kind: 'injection', variant: 'scene_memory_recall' });
+    }
+  }
+
+  /** Guard 规则引擎检测 + 记忆关联 */
+  private async runGuardDetection(): Promise<void> {
+    const guardResult = checkGuard(this.agent.context.history, {
+      hasKnowledgeTools: this.hasKnowledgeToolsThisStep,
+      hasWriteTools: this.hasWriteToolsThisStep,
+      lastBashExitCode: this.lastBashExitCode,
+      hasMemoryLookup: this.lastStepCalledMemoryLookup,
+      hasCurrentCodeTools: this.hasCurrentCodeToolsThisStep,
+    });
+    if (guardResult.rule > 0) {
+      this.lastGuardFeedback = guardResult.feedback;
+      if (this.agent.memoStore) {
+        const memQuery = guardResult.rule === 1 ? '测试 验证 谎报 通过'
+          : guardResult.rule === 2 ? '检查发现 证据 工具调用'
+          : guardResult.rule === 3 ? '已修改 编辑 未改 编造'
+          : '记忆 代替 Read 验证 代码';
+        const relatedRules = await searchBehaviorRules(this.agent.memoStore, memQuery, 1);
+        if (relatedRules.length > 0) {
+          this.lastGuardFeedback += '\n\n' + formatBehaviorRule(relatedRules[0]!);
+        }
+      }
+      if (guardResult.block) {
+        this.confabulationBlocked = true;
+        this.guardRule1FiredThisTurn = true;
+        this.eventLog.record({ kind: 'confabulation', variant: 'guard_rule_1', action: 'detected', step: this.currentStep, turnId: this.currentTurnId, reason: guardResult.reason });
+      } else {
+        this.eventLog.record({ kind: 'guard_observe', variant: `guard_rule_${guardResult.rule}`, action: 'detected', step: this.currentStep, turnId: this.currentTurnId, reason: guardResult.reason });
+        this.inject(this.lastGuardFeedback, { kind: 'injection', variant: 'guard_feedback_rule_' + guardResult.rule });
+      }
+    } else {
+      this.lastGuardFeedback = null;
+    }
+  }
+
+  /** 记忆主动注入 — afterStep 场景触发 */
+  private async injectBehaviorRulesAfterStep(): Promise<void> {
+    const lastAssistantText = extractLastAssistantText(this.agent.context.history);
+    if (lastAssistantText.length > 0 && this.agent.memoStore) {
+      const sceneQuery = detectSceneQuery([{ type: 'text' as const, text: lastAssistantText }]);
+      if (sceneQuery) {
+        const sceneRules = await searchBehaviorRules(this.agent.memoStore, sceneQuery, 1);
+        if (sceneRules.length > 0) {
+          this.inject(formatBehaviorRule(sceneRules[0]!), { kind: 'system_trigger', name: 'behavior_rule' });
+        }
+      }
+    }
+  }
+
+  /** 正反馈注入 — 每回合一次 */
+  private injectPositiveFeedbackThisTurn(): void {
+    if (this.positiveFeedbackGivenThisTurn) return;
+
+    // 行为正反馈（原逻辑）
+    const behaviorClean =
+      !this.confabulationBlocked &&
+      !this.deviationChainActive &&
+      !this.verifyFailedThisStep;
+
+    const hasGoodBehavior =
+      this.hasCalledLspReferencesThisStep ||   // 查了引用
+      this.editWithoutLookupCount === 0;        // 没跳步编辑
+
+    // 代码质量正反馈（Phase 18 新增）
+    const codeQualityClean = this.codeQualityViolationsThisTurn === 0;
+    const hasNonEmptyTurn = this.currentStep >= 1;
+
+    if (behaviorClean && hasGoodBehavior && codeQualityClean && hasNonEmptyTurn) {
+      this.positiveFeedbackGivenThisTurn = true;
+      this.inject('【行为确认】本轮验证流程完整且代码质量合规。继续。', { kind: 'injection', variant: 'feedback_positive' });
+    }
+  }
+
+  /** CodeRefDetector — 检测代码块是否缺路径/行号 */
+  private detectCodeRefIssue(): void {
+    const codeRefAssistantText = extractLastAssistantText(this.agent.context.history);
+    if (codeRefAssistantText.length > 100 && this.currentStep > 1) {
+      const codeRefIssue = detectCodeRefQuality(codeRefAssistantText);
+      if (codeRefIssue.hasMissingRef) {
+        this.inject('Code blocks without file references. ALWAYS prefix with path and line range.', { kind: 'injection', variant: 'step_code_ref_quality' });
+      }
+    }
+  }
+
+  /**
+   * 残差路径优化: 如果变体的行为已被观察，降级预算占用。
+   * 行为已观察 → identity path 直通 → 不需要高预算空间重注入。
+   */
+  private getEffectiveLevel(meta: PromptOrigin, defaultLevel: WeightLevel): WeightLevel {
+    if (typeof meta !== 'object' || !('variant' in meta)) return defaultLevel;
+    const record = this.variantRegistry.get(meta.variant as string);
+    if (record?.behaviorObserved === true) {
+      return 'C';
+    }
+    return defaultLevel;
+  }
+
+  // ── Phase 14: 收敛条件初始化 ────────────────────────────────────
+  private initConvergenceConditions(): void {
+    this.convergenceConditions = [
+      {
+        priority: 10,
+        check: () => !this.currentStepHadContent
+          ? 'The last assistant step produced no content or tool calls. Continue the task.'
+          : null,
+      },
+      {
+        priority: 9,
+        check: () => {
+          const goal = this.agent.goal.getGoal().goal;
+          return goal?.status === 'active' && !this.todoSeenThisTurn
+            ? 'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.'
+            : null;
+        },
+      },
+      {
+        priority: 8,
+        check: () => {
+          const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
+          const hasPassed = latestVerification?.passed === true;
+          if (this.lastToolFailure?.isExploratory === false && !hasPassed) {
+            const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5);
+            const faaSnippet = faaEntries && faaEntries.length > 0
+              ? `\n\nRecent file audit entries (most recent first):\n${faaEntries.map(e =>
+                  `  ${e.action} — ${e.resultPreview}  (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`
+                ).join('\n')}`
+              : '';
+            // 三级分类：BLOCKER（验证失败）/ CRITICAL（OOM/超时）/ WARNING（其他）
+            if (this.verifyFailedThisStep) {
+              return `Step verification failed (${this.lastToolFailure.toolName})。不要跳过验证，修复根因后继续。${faaSnippet}`;
+            }
+            const criticalExit = this.lastBashExitCode;
+            if (criticalExit === 137 || criticalExit === 124) {
+              return `工具 ${this.lastToolFailure.toolName} 异常退出 (exit ${criticalExit})。可能资源耗尽或超时，检查状态后重试。${faaSnippet}`;
+            }
+            return `工具 ${this.lastToolFailure.toolName} 报告错误。检查最近的输出修复它。${faaSnippet}`;
+          }
+          return null;
+        },
+      },
+      {
+        priority: 7,
+        check: () => {
+          const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
+          if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
+            this.verificationFailureInjected = true;
+            return `The last verification command failed (${latestVerification.command}). Fix the failure before re-running verification. Do NOT downgrade to runtime smoke tests.`;
+          }
+          return null;
+        },
+      },
+      {
+        priority: 6,
+        check: () => this.deviationChainActive && !this.deviationChainResolved
+          ? `Deviation chain still active: ${this.deviationChainReason}. Resolve the underlying issue before ending the turn.`
+          : null,
+      },
+      {
+        priority: 5,
+        check: () => this.verifyFailStep >= 0
+          ? 'The last verification pass may be a false pass — no substantive changes were made. Make an actual fix and re-verify.'
+          : null,
+      },
+      {
+        priority: 4,
+        check: () => !this.turnHasCalledAnyLsp && this.totalCodeFileEditsThisTurn >= 3
+          ? 'Edited ' + this.totalCodeFileEditsThisTurn + '+ code files this turn without any LSP.references call. Verify callers before reporting completion.'
+          : null,
+      },
+    ];
+  }
+
+  /** 反事实阻断条件（含 searchBehaviorRules 副作用，提取为命名方法） */
+  private collectConfabulationBlockReason(reasons: string[]): void {
+    if (!this.confabulationBlocked) return;
+    const sig = compressStep(this.stepToolCounts, extractLastAssistantText(this.agent.context.history));
+    if (sig.hasKnowledgeTools) {
+      this.confabulationBlocked = false;
+      return;
+    }
+    if (this.lastGuardFeedback) {
+      reasons.push(this.lastGuardFeedback);
+    } else {
+      reasons.push('High-confidence unfounded claims detected. Provide tool evidence before ending.');
+    }
+    if (this.agent.memoStore) {
+      searchBehaviorRules(this.agent.memoStore, '编造 证据 工具调用 检查发现', 1)
+        .then(convaRules => {
+          if (convaRules.length > 0) {
+            this.inject(formatBehaviorRule(convaRules[0]!), { kind: 'system_trigger', name: 'behavior_rule' });
+          }
+        });
+    }
+  }
+
+  /** pending-doc 未写入检测（含 await） */
+  private async collectPendingDocReason(reasons: string[]): Promise<void> {
+    if (reasons.length > 0 || !this.agent.memoStore) return;
+    const pendingDocs = await searchPendingDoc(this.agent.memoStore);
+    if (pendingDocs.some(m => m.userNeed.includes('[P0]'))) {
+      reasons.push('有 P0 级待写入知识未处理。请先写入 SYSTEM/*.md / DECISIONS/*.md / pitfalls.md 再交付。\n' + formatPendingDocInject(pendingDocs));
+    }
+  }
+
+  /** Phase 14: 跨回合标记注入 — 上回合有拦截事件时下回合预防性提醒 */
+  private injectCrossTurnFlags(): void {
+    // 消费旧值后立即复位（避免 runOneTurn 提前清零导致永不起效）
+    if (this.crossTurnFlags.lastTurnHadGuardRule1) {
+      this.inject(
+        '上回合检测到测试结果矛盾或高置信度无依据声明。本回合请真实运行工具验证后再报告。',
+        { kind: 'system_trigger', name: 'behavior_rule' },
+      );
+    }
+    if (this.crossTurnFlags.lastTurnHadDeviation) {
+      this.inject(
+        '上回合因偏差链被拦截。本回合如涉及修改代码，请先查 LSP.references。',
+        { kind: 'system_trigger', name: 'behavior_rule' },
+      );
+    }
+    this.crossTurnFlags.lastTurnHadGuardRule1 = false;
+    this.crossTurnFlags.lastTurnHadDeviation = false;
+  }
+
+  /** Reset per-step injection tracking state (called at runOneTurn and afterStep). */
+  private resetInjectorStepState(): void {
+    this.stepInjectedVariants.clear();
+    this.hasCalledLspReferencesThisStep = false;
+    this.searchHadResultsThisStep = false;
+    this.verifyFailedThisStep = false;
+    this.editCalledSuccessThisStep = false;
+    this.editOnCodeFileThisStep = false;
+    this.hasKnowledgeToolsThisStep = false;
+    this.hasWriteToolsThisStep = false;
+    this.lastStepCalledMemoryLookup = false;
+    this.hasCurrentCodeToolsThisStep = false;
+    this.stepToolCounts = {};
+    // Phase 21: reset per-step state for stuck injection
+    this.editFileThisStep = undefined;
+    this.toolErrorThisStep = undefined;
+  }
+
   private turnHadMeaningfulWork(): boolean {
     const workingSet = this.agent.workingSet;
     const hasNewPaths = workingSet.getPaths().length > this.turnStartWorkingSetPathCount;
@@ -997,6 +2262,41 @@ export class TurnFlow {
       /\bdu\s+/,
     ];
     return exploratoryPatterns.some((pattern) => pattern.test(normalized));
+  }
+
+  // ── Phase 17: 维度1 — 探索 vs 验证区分 ────────────────────────────
+  /**
+   * 区分探索型 Read/Grep 与验证型 Read/Grep。
+   *
+   * Read 刚改过的文件、Grep 具体路径 = 验证（不计数）。
+   * Grep 无路径/通配、Read 未知路径 = 探索（计入阈值）。
+   *
+   * toolCallContext 参数复用了 prepareToolExecution/finalizeToolResult 的 ctx 类型，
+   * 包含了 toolCall.name 和 args。
+   */
+  private isExploratoryReadGrep(ctx: { toolCall: { name: string }; args: unknown }): boolean {
+    if (ctx.toolCall.name === 'Grep') {
+      const args = ctx.args as { path?: string; pattern?: string };
+      // Grep 有具体路径 → 验证/定位，不计数
+      if (args.path && !/[*?[{]/.test(args.path)) return false;
+      // Grep 无路径或通配 → 探索
+      return true;
+    }
+    // Read / ReadGroup / ReadMediaFile
+    if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
+      const args = ctx.args as { path?: string };
+      if (!args.path) return false; // no path can't be classified
+      const readPath = args.path;
+      // 读刚改过的文件 → 验证
+      for (const modifiedPath of this.recentlyModifiedPathsThisTurn) {
+        if (readPath === modifiedPath || readPath.endsWith('/' + modifiedPath) || modifiedPath.endsWith('/' + readPath)) {
+          return false;
+        }
+      }
+      // 其他 → 探索（查看未知代码路径）
+      return true;
+    }
+    return false;
   }
 
 

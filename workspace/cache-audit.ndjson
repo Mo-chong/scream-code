@@ -1,0 +1,6 @@
+# cache-audit — Phase26 缓存命中审计日志
+# format: JSON Lines (ndjson), one entry per turn
+# fields: turn,model,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts
+# started: 2026-07-04T14:01:30.920Z
+{"turn":1,"model":"custom-deep/deep","ts":"2026-07-05T01:55:13.167Z","totalInput":38862,"cacheHit":0,"cacheMiss":38862,"hitRatio":0,"compacted":false,"compactedTokens":0,"alerts":["缓存接近全 miss (命中率 0%) — 检查注入频率或刚 compaction"]}
+{"turn":1,"model":"custom-deep/deep","ts":"2026-07-05T02:45:05.223Z","totalInput":39317,"cacheHit":38784,"cacheMiss":533,"hitRatio":0.9864435231579215,"compacted":false,"compactedTokens":0,"alerts":[]}

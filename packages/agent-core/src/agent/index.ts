@@ -16,6 +16,7 @@ import {
 import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
+import { FileActionAudit } from './audit/file-action-audit';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -31,10 +32,12 @@ import { FullCompaction, MicroCompaction, type CompactionStrategy } from './comp
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
+import { ContentArchive } from './context/content-archive';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, type EmbeddingEngine } from '@scream-code/memory';
+import { searchPendingDoc } from './turn/memory-rules';
 import { KnowledgeStore } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
@@ -126,11 +129,13 @@ export class Agent {
   readonly cron: CronManager | null;
   readonly goal: GoalMode;
   readonly memoStore: MemoryMemoStore | undefined;
+readonly contentArchive: ContentArchive;
   readonly knowledgeStore: KnowledgeStore | undefined;
   readonly sessionMemory: SessionMemory;
   readonly workingSet: WorkingSet;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
+  readonly fileActionAudit: FileActionAudit;
 
   private lastLlmConfigLogSignature?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
@@ -173,6 +178,8 @@ export class Agent {
     this.fullCompaction = new FullCompaction(this, options.compactionStrategy);
     this.microCompaction = new MicroCompaction(this);
     this.context = new ContextMemory(this);
+    this.contentArchive = new ContentArchive();
+    this.fileActionAudit = new FileActionAudit();
     this.config = new ConfigState(this);
     this.turn = new TurnFlow(this);
     this.injection = new InjectionManager(this);
@@ -551,6 +558,19 @@ export class Agent {
     if (!this.memoStore) return 0;
     await this.memoStore.init();
 
+    // ── Phase 12: pending-doc 退出兜底 ─────────────────────────
+    const pendingDocs = await searchPendingDoc(this.memoStore);
+    if (pendingDocs.length > 0) {
+      this.log.warn('Pending docs unresolved at session exit', {
+        count: pendingDocs.length,
+        topics: pendingDocs.map(m => m.approach.replace(/^\[pending-doc\]\s*/, '')),
+      });
+      // 清理残留 pending-doc（避免越积越多）
+      for (const doc of pendingDocs) {
+        await this.memoStore.delete(doc.id).catch(() => {});
+      }
+    }
+
     const history = this.context.history;
     if (history.length < 4) return 0; // Too short to contain meaningful task loops
 
@@ -593,7 +613,7 @@ export class Agent {
         ? response.message.content
         : response.message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
 
-      const memos = parseMemoryMemos(summary);
+      const memos = await parseMemoryMemos(summary);
       if (memos.length === 0) return 0;
 
       const store = this.memoStore;
@@ -620,9 +640,11 @@ export class Agent {
         sessionId,
       });
       return stored;
-    } catch (error) {
-      this.log.warn('Exit memory extraction failed', { error: String(error) });
-      throw error;
+    } finally {
+      // 兜底刷盘：会话结束时确保 FileActionAudit 落盘
+      this.fileActionAudit.flush().catch((err) => {
+        this.log.warn('FileActionAudit final flush failed', { error: String(err) });
+      });
     }
   }
 

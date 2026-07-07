@@ -173,7 +173,7 @@ describe('Agent turn flow', () => {
       tools: []
       messages:
         user: text "hooked input"
-        user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\nhook response 1\\n</hook_result>\\n<hook_result hook_event=\\"UserPromptSubmit\\">\\nhook response 2\\n</hook_result>"
+        user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\n'hook response 2'\\n</hook_result>"
     `);
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -237,7 +237,7 @@ describe('Agent turn flow', () => {
       tools: []
       messages:
         user: text "hooked input"
-        user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\n{}\\n</hook_result>\\n<hook_result hook_event=\\"UserPromptSubmit\\">\\n{\\"hookSpecificOutput\\":{}}\\n</hook_result>"
+        user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\n'{}'\\n</hook_result>\\n<hook_result hook_event=\\"UserPromptSubmit\\">\\n'{\\"hookSpecificOutput\\":{}}'\\n</hook_result>"
     `);
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -1242,15 +1242,16 @@ describe('Agent turn flow', () => {
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Approved, and I saw the steer." }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 83, "maxContextTokens": 1000000, "contextUsage": 0.000083, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 108, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 108, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 108, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 119, "maxContextTokens": 1000000, "contextUsage": 0.000119, "planMode": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 115, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 115, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 115, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
         <last>
+        user: text "<system-reminder>\\n【行为确认】本轮验证流程完整且代码质量合规。继续。\\n</system-reminder>"
         assistant: text "I will ask first."  calls call_bash:Bash { "command": "printf approved", "timeout": 60 }
         tool[call_bash]: text "approved"
         user: text "Also mention the steer."

@@ -533,17 +533,17 @@ describe('plan mode injection cadence', () => {
     ctx.configure();
     await ctx.agent.planMode.enter('test-plan', false);
 
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
     const afterFull = ctx.agent.context.history.length;
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan mode is active');
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan file:');
 
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
     expect(ctx.agent.context.history).toHaveLength(afterFull);
 
     ctx.appendAssistantTurn(1, 'assistant one');
     ctx.appendAssistantTurn(2, 'assistant two');
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
 
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan mode still active');
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan file:');
@@ -562,7 +562,7 @@ describe('plan mode injection cadence', () => {
       id: 'restored-plan',
     });
 
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
 
     expect(lastUserText(ctx.agent.context.history)).toContain('Re-entering Plan Mode');
     expect(lastUserText(ctx.agent.context.history)).toContain('Read the existing plan file');
@@ -573,14 +573,14 @@ describe('plan mode injection cadence', () => {
     const ctx = testAgent();
     ctx.configure();
     await ctx.agent.planMode.enter('test-plan', false);
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
 
     ctx.agent.planMode.exit();
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
     const afterExit = ctx.agent.context.history.length;
     expect(lastUserText(ctx.agent.context.history)).toContain('Plan mode is no longer active');
 
-    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject(1);
     expect(ctx.agent.context.history).toHaveLength(afterExit);
     await ctx.expectResumeMatches();
   });

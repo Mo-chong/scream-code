@@ -81,6 +81,11 @@ export interface ExecutableToolSuccessResult {
    */
   readonly display?: ToolResultDisplay | undefined;
   /**
+   * 工具输出被截断并存入 ContentArchive 时的存档 key。
+   * 侧通道——不污染 output 数据流，渲染层可据此决定是否提示 AI 调用 archive_recover。
+   */
+  readonly archiveKey?: string | undefined;
+  /**
    * Hint that this result is uneventful and unlikely to be referenced
    * again (e.g. "no matches found", empty output). When set on a tool
    * result entering the context, the corresponding ContextMessage is
@@ -88,6 +93,7 @@ export interface ExecutableToolSuccessResult {
    * actionable information.
    */
   readonly useless?: boolean | undefined;
+
 }
 
 export interface ExecutableToolErrorResult {

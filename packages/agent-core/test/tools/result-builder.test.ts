@@ -235,4 +235,30 @@ describe('ToolResultBuilder', () => {
       expect(result.truncated).toBe(true);
     });
   });
+
+  describe('sanitize option (Phase20)', () => {
+    it('strips ANSI escape sequences when sanitize is true', () => {
+      const builder = new ToolResultBuilder({ sanitize: true });
+      builder.write('\u001B[32mgreen\u001B[0m');
+      const result = builder.ok();
+      expect(result.output).toBe('green');
+    });
+
+    it('collapses \\r-only progress lines when sanitize is true', () => {
+      const builder = new ToolResultBuilder({ sanitize: true });
+      builder.write('header line\n');
+      builder.write('\r 50%\r 100%\n');
+      builder.write('final line');
+      const result = builder.ok();
+      expect(result.output).toContain('header line');
+      expect(result.output).toContain('final line');
+    });
+
+    it('preserves output unchanged when sanitize is false (default)', () => {
+      const builder = new ToolResultBuilder({ maxChars: 200 });
+      builder.write('\u001B[31mred\u001B[0m');
+      const result = builder.ok();
+      expect(result.output).toContain('\u001B[31m');
+    });
+  });
 });
