@@ -53,6 +53,10 @@ export interface AppState {
   contextUsage: number;
   contextTokens: number;
   maxContextTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  lastStepCacheHit: number;
+  lastStepCacheMiss: number;
   isCompacting: boolean;
   lastCompactionFinishedAt: number | undefined;
   autoCompactionCount: number;

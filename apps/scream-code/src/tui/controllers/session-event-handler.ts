@@ -634,6 +634,16 @@ export class SessionEventHandler {
     if (event.contextUsage !== undefined) patch.contextUsage = event.contextUsage;
     if (event.contextTokens !== undefined) patch.contextTokens = event.contextTokens;
     if (event.maxContextTokens !== undefined) patch.maxContextTokens = event.maxContextTokens;
+    // 缓存命中率 — 从 usage.total 提取
+    const total = event.usage?.total;
+    if (total) {
+      const hit = (total.inputCacheRead ?? 0) + (total.inputCacheCreation ?? 0);
+      const miss = total.inputOther ?? 0;
+      patch.lastStepCacheHit = hit;
+      patch.lastStepCacheMiss = miss;
+      patch.cacheHitTokens = this.host.state.appState.cacheHitTokens + hit;
+      patch.cacheMissTokens = this.host.state.appState.cacheMissTokens + miss;
+    }
     if (event.planMode !== undefined) {
       // Agent-core reports planMode as a boolean and planStrategy as 'normal' | 'fusion'.
       patch.planMode = event.planMode

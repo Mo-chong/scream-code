@@ -47,6 +47,10 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     loopVerifying: false,
     recentSessions: [],
     subagentUsage: {},
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    lastStepCacheHit: 0,
+    lastStepCacheMiss: 0,
     ...overrides,
   };
 }

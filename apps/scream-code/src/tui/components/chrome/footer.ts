@@ -435,6 +435,19 @@ export class FooterComponent implements Component {
       line1 = truncateToWidth(leftLine, width, '…');
     }
 
-    return [truncateToWidth(line1, width)];
+    const lines = [truncateToWidth(line1, width)];
+
+    // 第2行：缓存命中率
+    const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens } = state;
+    const stepTotal = lastStepCacheHit + lastStepCacheMiss;
+    const totalTotal = cacheHitTokens + cacheMissTokens;
+    if (stepTotal > 0 && totalTotal > 0) {
+      const stepRate = (lastStepCacheHit / stepTotal * 100).toFixed(1);
+      const totalRate = (cacheHitTokens / totalTotal * 100).toFixed(1);
+      const line2 = `  缓存: ${stepRate}% (此步) | 总: ${totalRate}% (${(cacheHitTokens / 1e6).toFixed(1)}M/${(totalTotal / 1e6).toFixed(1)}M)`;
+      lines.push(truncateToWidth(line2, width));
+    }
+
+    return lines;
   }
 }

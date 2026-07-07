@@ -115,6 +115,10 @@ export class AuthFlowController {
       maxContextTokens: 0,
       contextUsage: 0,
       contextTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      lastStepCacheHit: 0,
+      lastStepCacheMiss: 0,
     });
   }
 }
