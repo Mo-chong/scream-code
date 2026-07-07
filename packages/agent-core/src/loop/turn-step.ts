@@ -8,10 +8,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-
-const _cacheAuditPath = join(process.cwd(), 'workspace', 'cache-audit.ndjson');
 
 import type { TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
@@ -22,7 +18,6 @@ import { chatWithRetry } from './retry';
 import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
 import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
 import { maskToolObservations } from '../utils/mask-tool-observations';
-import { computeCacheMetrics, buildAuditEntry } from '#/agent/usage/audit-log';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -135,22 +130,6 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       inputOther: usage.inputOther,
       step: currentStep,
     });
-  }
-  // 缓存审计日志 — 每步写入 cache-audit.ndjson
-  const metrics = computeCacheMetrics(usage);
-  const entry = buildAuditEntry(
-    currentStep,
-    llm.modelName ?? 'unknown',
-    metrics,
-    false,
-    0,
-  );
-  try {
-    const dir = join(_cacheAuditPath, '..');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(_cacheAuditPath, JSON.stringify(entry) + '\n', 'utf-8');
-  } catch {
-    // non-fatal — 缓存审计写入失败不阻塞主流程
   }
   const stopReason = deriveStepStopReason(response);
 
