@@ -256,7 +256,7 @@ export class EventSnapshotBuffer {
   }
 
   /** 提取 sessionId: homedir = <projectDir>/<sessionId>/agents/<agentId> */
-  private get sessionId(): string {
+  public get sessionId(): string {
     const h = this.agent.homedir;
     if (!h) return 'unknown';
     return basename(dirname(dirname(h)));

@@ -15,6 +15,7 @@ export interface CacheMetrics {
 export interface AuditLogEntry {
   turn: number;
   model: string;
+  sessionId: string;
   /** ISO timestamp */
   ts: string;
   totalInput: number;
@@ -157,6 +158,7 @@ export class AuditLogWriter {
 export function buildAuditEntry(
   turn: number,
   model: string,
+  sessionId: string,
   metrics: CacheMetrics,
   compacted: boolean,
   compactedTokens: number,
@@ -170,6 +172,7 @@ export function buildAuditEntry(
   return {
     turn,
     model,
+    sessionId,
     ts: new Date().toISOString(),
     totalInput: metrics.totalInput,
     cacheHit: metrics.hitTokens,
