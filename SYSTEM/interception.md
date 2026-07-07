@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 拦截日志系统 — Interception
 
 > 源码: `packages/agent-core/src/agent/turn/event-log.ts` (181 行)

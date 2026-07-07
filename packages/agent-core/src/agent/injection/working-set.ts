@@ -1,9 +1,14 @@
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const WORKING_SET_REMINDER_INTERVAL = 3;
 
 export class WorkingSetInjector extends DynamicInjector {
   protected readonly injectionVariant = 'working-set';
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
+  }
 
   protected getInjection(): string | undefined {
     const paths = this.agent.workingSet.getPaths();

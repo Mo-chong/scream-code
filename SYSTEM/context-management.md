@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 上下文管理（Context Management）
 
 > 演化图：`ZHU/DECISIONS/INDEX.md` → **上下文管理子演化线①+②**（06-27~06-28 合并）

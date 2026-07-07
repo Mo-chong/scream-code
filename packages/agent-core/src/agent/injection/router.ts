@@ -12,7 +12,7 @@
 import type { Agent } from '..';
 import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
-import { VariantScheduler } from '../turn/variant-registry';
+import { VariantScheduler, _getVariantLevel } from '../turn/variant-registry';
 
 // ─── Step 11a: CacheGroup ──────────────────────────────────────────
 
@@ -55,6 +55,12 @@ export interface InjectContext {
   readonly messageCount: number;
   /** 剩余可用 token（undefined = 不限制） */
   readonly remainingBudget?: number;
+  /**
+   * [优化C] 缓存命中率预测 (0-1)。
+   * GrowthPredictor 根据历史趋势预估当前步骤的缓存命中率。
+   * undefined = 无预测数据，不启用缓存感知过滤。
+   */
+  readonly predictedHitRatio?: number;
 }
 
 /**
@@ -154,10 +160,14 @@ export class InjectionRouter {
   /**
    * 执行注入管线。
    *
-   * 当前实现：遍历所有注册注入器（未被 disabled），逐次调用 inject()，
-   * 达到 maxInjectionsPerStep 上限后停止。
-   *
-   * TODO(Step 11): 缓存感知 / 注意力路由 / 冷却
+   * 管线步骤：
+   *   1. disabled 检查
+   *   2. VariantScheduler 配额/冷却检查
+   *   3. [优化C] 内容哈希去重 — 同一内容不重复注入
+   *   4. [优化C] 缓存感知路由 — 命中率过低时跳过 B/C 级
+   *   5. 残差注意力衰减检查
+   *   6. Token 预算检查
+   *   7. 执行注入
    */
   async dispatch(context: InjectContext): Promise<InjectResult[]> {
     const results: InjectResult[] = [];
@@ -166,15 +176,27 @@ export class InjectionRouter {
     for (const [id, injector] of this.injectors) {
       if (injectionCount >= this.config.maxInjectionsPerStep) break;
 
-      // Step 9: 运行时停用的注入器跳过
+      // ① 运行时停用的注入器跳过
       if (this.disabled.has(id)) continue;
 
-      // Step 2: 调度器过滤
+      // ② 调度器过滤（配额/冷却）
       if (!this.scheduler.shouldInject(id, context.currentStep)) {
         continue;
       }
 
-      // Step 4: 残差注意力衰减检查（注入器可选配置）
+      // ③ [优化C] 内容哈希去重：避免相同内容重复注入，维持 DeepSeek 前缀缓存的稳定性
+      if (!injector.hasContentChanged()) {
+        continue;
+      }
+
+      // ④ [优化C] 缓存感知路由：缓存命中率过低时跳过低优先级变体
+      const level = _getVariantLevel(id);
+      const predictedHR = context.predictedHitRatio;
+      if (predictedHR !== undefined && predictedHR < 0.3 && (level === 'B' || level === 'C')) {
+        continue;
+      }
+
+      // ⑤ 残差注意力衰减检查（注入器可选配置）
       const residualCfg = injector.getResidualConfig();
       if (residualCfg) {
         const lastStep = this.scheduler.getLastStep(id);
@@ -186,13 +208,13 @@ export class InjectionRouter {
         }
       }
 
-      // Step 7: Token 预算检查（预留）
+      // ⑥ Token 预算检查
       if (!this.tokenBudgetCheck(injectionCount + 1)) {
         continue;
       }
 
+      // ⑦ 执行注入
       try {
-        // DynamicInjector.inject(context) — 传入上下文供步级决策
         await injector.inject(context);
         this.scheduler.record(id, context.currentStep);
         results.push({

@@ -2,6 +2,16 @@ import type { Agent } from '..';
 import { InsertPosition } from './position-strategy';
 import type { InjectContext } from './router';
 
+/** 快速字符串哈希（非加密，仅用于去重比较） */
+export function simpleHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return h.toString(36);
+}
+
 /**
  * 可选的残差注意力配置。
  * 若注入器覆写此方法返回配置，router dispatch 将使用
@@ -17,11 +27,13 @@ export interface ResidualConfig {
 
 export abstract class DynamicInjector {
   protected injectedAt: number | null = null;
+  private _lastContentHash: string | null = null;
 
   constructor(protected readonly agent: Agent) {}
 
   onContextClear(): void {
     this.injectedAt = null;
+    this._lastContentHash = null;
   }
 
   onContextCompacted(compactedCount: number): void {
@@ -61,9 +73,33 @@ export abstract class DynamicInjector {
     return undefined;
   }
 
+  /**
+   * 内容哈希去重：[优化C]
+   * 同一注入器在内容未变更时跳过重复注入，维持 DeepSeek 公共前缀稳定。
+   * 子类可覆写返回 false 以强制每次注入。
+   */
+  hasContentChanged(): boolean {
+    const preview = this.getContentPreview();
+    if (preview === undefined) return true;
+    const hash = simpleHash(preview);
+    if (hash === this._lastContentHash) return false;
+    this._lastContentHash = hash;
+    return true;
+  }
+
+  /**
+   * 返回注入内容预览（同步，轻量）。
+   * 用于内容哈希去重。返回 undefined = 无法预览，视为已变更。
+   */
+  protected getContentPreview(): string | undefined {
+    return undefined;
+  }
+
   async inject(context?: InjectContext): Promise<void> {
     const injection = await this.getInjection();
     if (injection) {
+      // 内容哈希去重：同一内容不重复注入，除非是强制（S级）
+      this._lastContentHash = simpleHash(injection);
       this.injectedAt = this.agent.context.history.length;
       this.agent.context.appendSystemReminder(injection, {
         kind: 'injection',

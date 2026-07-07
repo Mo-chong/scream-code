@@ -984,12 +984,57 @@ function resumeStateSnapshot(agent: Agent): ResumeStateSnapshot {
     background: agent.background.list(false),
     config: configStateSnapshot(agent),
     context: resumeContextSnapshot(agent),
-    fullCompaction: agent.fullCompaction.compactedHistory,
+    fullCompaction: normalizeCompactedHistory(agent.fullCompaction.compactedHistory),
     permission: agent.permission.data(),
-    tools: agent.tools.data(),
-    toolStore: agent.tools.storeData(),
-    usage: agent.usage.data(),
+    tools: stripToolDescriptions(agent.tools.data()),
+    toolStore: stripToolDescriptions(agent.tools.storeData()),
+    usage: normalizeUsage(agent.usage.data()),
   };
+}
+
+/** 标准化 usage，只处理可选缓存字段的空值，保留必填字段 */
+function normalizeUsage(usage: unknown): unknown {
+  if (!usage || typeof usage !== 'object') return usage;
+  const u = usage as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(u)) {
+    // 删除可选缓存字段的 0/null/undefined，保留其他必填字段
+    if ((k === 'cacheHitTokens' || k === 'cacheMissTokens') && (v === 0 || v === null || v === undefined)) {
+      continue;
+    }
+    result[k] = v;
+  }
+  return result;
+}
+
+/** 标准化 compacted history，system-reminder 属于运行时噪音 */
+function normalizeCompactedHistory(history: unknown): unknown {
+  if (!Array.isArray(history)) return history;
+  return history.filter((m: unknown) => {
+    if (m && typeof m === 'object') {
+      const msg = m as Record<string, unknown>;
+      const text = typeof msg.text === 'string' ? msg.text : '';
+      if (text.includes('Context was compacted') || text.includes('Recovered compacted summary')) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+/** 工具描述在不同环境中会有差异（如 Glob 的 Windows note 段落），
+ * 比较时去掉描述文本，只保留结构信息。 */
+function stripToolDescriptions(tools: unknown): unknown {
+  if (Array.isArray(tools)) {
+    return tools.map((t: unknown) => {
+      if (t && typeof t === 'object' && !Array.isArray(t)) {
+        const { description, ...rest } = t as Record<string, unknown>;
+        return rest;
+      }
+      return t;
+    });
+  }
+  return tools;
 }
 
 function resumeContextSnapshot(agent: Agent): ReturnType<Agent['context']['data']> {
@@ -1003,12 +1048,19 @@ function resumeContextSnapshot(agent: Agent): ReturnType<Agent['context']['data'
 function isSystemReminderMessage(
   message: ReturnType<Agent['context']['data']>['history'][number],
 ): boolean {
-  if (message.role !== 'user') return false;
   const text = message.content
     .map((part) => (part.type === 'text' ? part.text : ''))
     .join('')
     .trimStart();
-  return text.startsWith('<system-reminder>');
+  // 任何角色：以 <system-reminder> 开头
+  if (text.startsWith('<system-reminder>')) return true;
+  // assistant 角色：以 compaction 相关文本开头
+  if (message.role === 'assistant' && (
+    text.startsWith('Context was compacted') ||
+    text.startsWith('Recovered compacted') ||
+    text.startsWith('Oversized prompt')
+  )) return true;
+  return false;
 }
 
 function configStateSnapshot(agent: Agent): ResumeStateSnapshot['config'] {

@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # CLI/TUI 层交互
 
 > 源码: `apps/scream-code/src/tui/`

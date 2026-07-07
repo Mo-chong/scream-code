@@ -1,4 +1,5 @@
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const WOLFPACK_MODE_ENTER_REMINDER = [
   'WolfPack mode is active. Prefer using the WolfPack tool for batch parallel execution.',
@@ -25,6 +26,10 @@ const WOLFPACK_MODE_EXIT_REMINDER =
 export class WolfPackModeInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'wolfpack';
   private wasActive = false;
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
+  }
 
   getInjection(): string | undefined {
     const isActive = this.agent.wolfpackMode.isActive;

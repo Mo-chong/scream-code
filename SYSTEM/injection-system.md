@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 注入系统 / Injection System
 
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统的完整规范。

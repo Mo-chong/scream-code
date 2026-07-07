@@ -1,3 +1,5 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+
 ---
 tags: [type/reference, domain/system, status/final]
 ---

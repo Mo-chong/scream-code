@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 记忆系统 — Memory Store
 
 > SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)。tags 存 JSON 不在 FTS5 索引中。踩坑/调试/版本历史在 `SYSTEM/pitfalls.md`。

@@ -903,11 +903,18 @@ class ArchiveRecoverTool implements BuiltinTool {
 **文件**: `packages/knowledge/src/store.ts`
 
 ```sql
--- 4 张核心表
-chunks    — 文档切片（含 embedding BLOB + FTS5 索引）
-events    — LLM 抽取的结构化事件（title/summary/category/keywords）
-entities  — LLM 抽取的命名实体（type/name/description）
-relations — 实体-事件-实体关系嵌入
+-- 6 张核心表 + 3 个 FTS5 全文索引
+sources           — 文件来源记录（name/path/type/status/timestamps）
+documents         — 文档单元（source_id/title/path/page/metadata）
+chunks            — 文档切片 + 向量索引（document_id/content/embedding_vec）
+entities          — LLM 抽取的命名实体（type/name/normalized_name/description，UNIQUE(source_id,type,normalized_name) 去重）
+events            — LLM 抽取的结构化事件（title/description/actors/roles/category/keywords）
+event_entities    — 事件-实体关联边（event_id/entity_id/role，INSERT OR IGNORE 去重）
+
+-- FTS5 全文索引
+sources_fts        — 来源名称/路径全文索引
+documents_fts      — 文档标题全文索引
+chunks_fts         — 切片内容全文索引
 ```
 
 ```typescript
@@ -953,7 +960,7 @@ async function ingestFile(
 | 依赖 | Python + fastembed 包 |
 | LLM 调用 | 每 chunk 1 次（并发 3） |
 | 事务 | 单文件事务保护，失败自动回滚 |
-| 去重 | 支持文件路径去重（重复摄入自动跳过） |
+| 去重 | 实体和边层面 UNIQUE/INSERT OR IGNORE 去重。文件层面重复摄入报错（ingest.ts 行132-139），需先 deleteSource 再重新 ingest |
 
 ### 9.3 multiSearch
 <!-- ref: multiSearch -->
@@ -991,9 +998,9 @@ class KnowledgeLookupTool implements StepTool
 
 | 属性 | 值 |
 |------|-----|
-| 注册条件 | `this.agent.type === 'main' && this.agent.knowledgeStore` |
-| 适用场景 | 概念/定义/背景查询，WebSearch 优先本地 |
-| 不适用场景 | 代码/文件操作 (MemoryLookup/Read/Grep) |
+| 注册条件 | `this.agent.type === 'main' && this.agent.knowledgeStore`（与 Memory 工具对等） |
+| 适用场景 | SYSTEM docs + project source docs 中的概念/定义/问题症状查询 |
+| 不适用场景 | 对话经验（用 MemoryLookup）|
 
 ### 9.5 向量模型
 <!-- ref: EmbeddingModel, createFastEmbedEngine, loadEmbedder -->

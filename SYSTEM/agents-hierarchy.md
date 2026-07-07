@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # AGENTS.md Hierarchy Design [P0]
 
 > 框架: system.md 定义不可违抗的引擎行为 | AGENTS.md 提供领域规则 + 注意力引导 | 两者叠加，各司其职

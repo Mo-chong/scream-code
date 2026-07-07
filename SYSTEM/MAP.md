@@ -23,6 +23,10 @@
 │   ├─ compaction.md              — FullCompaction/MicroCompaction触发条件
 │   └─ phase26-cache-aware.md     — DeepSeek KV缓存感知(注入位置/审计日志/自适应阈值)
 
+├─ 知识库
+│   ├─ knowledge.md               — 知识库系统全景(ingestion/存储/检索/实体抽取/AI使用)
+│   └─ API-REFERENCE.md §9        — API签名(6子节: types/store/ingest/search/extractor/lookup)
+
 ├─ 记忆系统
 │   ├─ memory-store.md            — SQLite+FTS5+vec0存储/混合评分/热冷升降
 │   ├─ dream.md                   — Dream整理/保护标签/合并流程

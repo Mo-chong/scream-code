@@ -1762,6 +1762,12 @@ export class TurnFlow {
         (this._lastUsage.inputCacheRead || 0) +
         (this._lastUsage.inputCacheCreation || 0);
       this.agent.fullCompaction.strategy.recordRound(totalInput);
+      // [优化C] 缓存命中率趋势追踪
+      if (this._lastUsage.cacheHitTokens !== undefined || this._lastUsage.cacheMissTokens !== undefined) {
+        const ht = this._lastUsage.cacheHitTokens ?? 0;
+        const mt = this._lastUsage.cacheMissTokens ?? 0;
+        this.agent.fullCompaction.strategy.recordCacheResult?.(ht, mt);
+      }
     }
     this._lastUsage = null;
   }

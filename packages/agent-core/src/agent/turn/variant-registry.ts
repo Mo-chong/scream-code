@@ -391,9 +391,28 @@ export interface QuotaConfig {
   windowSteps?: number;
 }
 
+/** 根据 weight 确定 weight level */
+export function _getVariantLevel(variant: string): WeightLevel {
+  const meta = VARIANT_META[variant];
+  if (!meta) return 'D';
+  const w = meta.weight;
+  if (w >= 0.95) return 'S';
+  if (w >= 0.75) return 'A';
+  if (w >= 0.55) return 'B';
+  if (w >= 0.35) return 'C';
+  return 'D';
+}
+
+/**
+ * [优化D] Per-weight-level 冷却表。
+ * S 级永不冷却；A/B/C 逐级收紧；D 级不注入。
+ */
 export const QUOTA_TABLE: Record<string, QuotaConfig> = {
-  default: { maxPerConversation: 20, cooldownSteps: 1, windowSteps: 100 },
-  low: { maxPerConversation: 8, cooldownSteps: 3, windowSteps: 50 },
+  S: { maxPerConversation: 999, cooldownSteps: 0, windowSteps: 1000 },
+  A: { maxPerConversation: 30, cooldownSteps: 2, windowSteps: 100 },
+  B: { maxPerConversation: 18, cooldownSteps: 3, windowSteps: 80 },
+  C: { maxPerConversation: 10, cooldownSteps: 5, windowSteps: 50 },
+  D: { maxPerConversation: 0, cooldownSteps: 0, windowSteps: 0 },
 };
 
 // ── Phase22.3: 变体调度器 ─────────────────────────────────────────
@@ -418,7 +437,7 @@ export class VariantScheduler {
 
     if (delta < meta.minStepGap) return false;
 
-    const quotaKey = 'default';
+    const quotaKey = _getVariantLevel(variant);
     const quota = QUOTA_TABLE[quotaKey];
     if (quota) {
       if (delta < quota.cooldownSteps) return false;

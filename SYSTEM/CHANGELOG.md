@@ -1,7 +1,7 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
 ---
-<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 
 ## v0.8.10 — 合并上游 v0.8.10（2026-07-07）
 
@@ -30,6 +30,12 @@ tags: [type/changelog, status/final, domain/system]
 - **agent/index**: 暴露 `memorySearch()`/`memoryAppend()` EmbeddingSearch API，`/knowledge` 命令集成
 - **tui**: `/knowledge filter` 命令，按标签/时间段过滤知识图谱
 - **新建文件**: `knowledge-filter.ts`, `value-classifier.ts`, `category-tagger.ts`
+
+### 文档维护（2026-07-06）
+- **SYSTEM/knowledge.md**: 新增（213 行），覆盖知识库全景：架构/Ingestion 管线/6 表+FTS5+vec0 存储/Extractor 实体事件抽取/7 步多跳图谱检索管线（FTS5+向量+LLM实体抽取+BFS 1跳+re-rank+兜底）/KnowledgeLookup 工具/增量更新状态/记忆对比/源码索引
+- **SYSTEM/API-REFERENCE.md §9**: 修正表结构（4 表→6 表+3 FTS5）、去重描述（自动跳过→报错需先删再入）、工具注册条件（对等 Memory）、适用场景（SYSTEM docs + project source docs）
+- **system.md**: KnowledgeLookup 描述从 1 行扩至 2 行，补充搜索范围（SYSTEM docs + project source docs）和返回值（event entities + search trace）
+- **CHANGELOG.md**: 本条目
 
 ### 合并
 - 上游 v0.8.5 合入本地二开分支

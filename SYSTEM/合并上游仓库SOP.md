@@ -1,4 +1,4 @@
-<!-- maintain: SYSTEM/系统说明书维护SOP.md -->
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 合并上游仓库 SOP（AI 执行手册）[P0]
 
 > **用途**: 二开 fork 合并上游作者仓库，AI 按此流程执行，用户逐条确认。

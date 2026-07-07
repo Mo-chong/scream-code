@@ -1,3 +1,5 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+
 <format>
 本文件使用 compact notation | A → B — 流程 | A / B — 任一 | [P0][P1] — 优先级
 每段独立解读，不依赖上下文顺序

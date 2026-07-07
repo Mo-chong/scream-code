@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # MCP 服务器集成
 
 > Scream Code 通过 MCP 协议连接第三方代码智能/搜索/文档工具。

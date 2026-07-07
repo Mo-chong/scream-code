@@ -45,6 +45,7 @@ export class InjectionManager {
     const context: InjectContext = {
       currentStep,
       messageCount: this.agent.context?.history?.length ?? 0,
+      predictedHitRatio: this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
     };
     await this.router.dispatch(context);
   }

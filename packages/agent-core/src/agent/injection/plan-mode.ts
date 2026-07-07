@@ -1,5 +1,6 @@
 import type { PlanFilePath } from '../plan';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const PLAN_MODE_DEDUP_MIN_TURNS = 2;
 const PLAN_MODE_FULL_REFRESH_TURNS = 5;
@@ -16,6 +17,10 @@ export type PlanModeVariant = 'full' | 'sparse' | 'reentry';
 export class PlanModeInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'plan_mode';
   private wasActive = false;
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.AFTER_SYSTEM;
+  }
 
   override onContextClear(): void {
     super.onContextClear();

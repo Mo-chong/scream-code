@@ -25,10 +25,15 @@
 │   └─ 缓存感知    phase26-cache-aware.md
 ├─ 记忆系统
 │   ├─ 核心存储    memory-store.md
-│   └─ Dream整理   dream.md
+│   ├─ Dream整理   dream.md
+│   └─ 知识系统    knowledge.md
+├─ 知识库维护
+│   └─ 内容分档    知识库维护.md
 ├─ MCP服务器集成   mcp-server.md
 ├─ CLI/TUI         cli-tui.md
 ├─ 拦截日志        interception.md
+├─ 知识库
+│   └─ 外部文档知识库  SYSTEM/knowledge.md
 ├─ 经验库
 │   ├─ 踩坑记录    pitfalls.md
 │   ├─ 变更日志    CHANGELOG.md
@@ -46,9 +51,12 @@
 | 子系统 | 索引文件 | 一句话定位 |
 |--------|----------|-----------|
 | **整体架构(分层图)** | `SYSTEM/architecture-overview.md` | ☑ **优先读这个**：0→4层完整分层，大架构套小架构，看完再查具体模块 |
+| **知识库** 🆕 | `SYSTEM/knowledge.md` | 外部文档知识库：ingestion（吃文档→切块→向量化）→ store（6表+FTS5+vec0）→ search（语义/关键词/混合）→ extractor（实体/事件抽取）→ KnowledgeLookup MCP 工具 |
 | **记忆系统** | `SYSTEM/memory-store.md` | SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)，tags 存 JSON 不在 FTS5 索引中 |
 | **MCP 服务器集成** 🆕 | `SYSTEM/mcp-server.md` | MCP 三层配置（用户级→父目录→项目级），codegraph/context7/anysearch，内置与 MCP 工具无权重差别 |
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
+| **知识系统（knowledge包）** | `SYSTEM/knowledge.md` | 文档→chunk→实体/事件→向量索引，SQLite 6表+3FTS，三级降级搜索 |
+| **知识库维护** 🆕 | `SYSTEM/知识库维护.md` | 按源码逆向分析的分档矩阵：高/中/低/绝对不能放，含自检清单 |
 | **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + W/D/T 三级参数 + VariantScheduler 残差门控 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
 | **注入系统** 🆕 | `SYSTEM/injection-system.md` | 指令权重体系 S/A/B/C/D + InjectionManager + VariantScheduler 残差公式 R=W×D^Δs + 阈值衰减防脱敏 |
@@ -101,6 +109,17 @@
 | Dream 合并标签为什么不继承黑名单 | `SYSTEM/pitfalls.md` §坑 2：Dream 合并跳过 processTags |
 | yongjiu 不生效（构建链陷阱） | `SYSTEM/pitfalls.md` §yongjiu 标签不生效 |
 | 全量验证结果（81+13测试） | `DECISIONS/INDEX.md` §sqlite-vec 对接方案，验证记录在 test/tier-vec0.test.ts + vec0-repro.test.ts |
+
+### 知识库 🆕
+| 问题 | 先查这个文件 |
+|------|-------------|
+| 知识库干啥用 | `SYSTEM/knowledge.md` |
+| 怎么喂文档进去 | `SYSTEM/knowledge.md` §Ingestion / `ingest.ts` |
+| 数据库有哪些表 | `SYSTEM/knowledge.md` §存储 / `store.ts` |
+| 按语义搜怎么搜 | `SYSTEM/knowledge.md` §检索 / `search.ts` |
+| 实体/事件抽取 | `SYSTEM/knowledge.md` §Extractor / `extractor.ts` |
+| AI 怎么在对话中用 | `SYSTEM/knowledge.md` §KnowledgeLookup / `knowledge-lookup.ts` |
+| 跟记忆系统什么区别 | `SYSTEM/knowledge.md` §与记忆系统的区别 |
 
 ### 上下文管理
 | 问题 | 先查这个文件 |
@@ -216,6 +235,16 @@
       memory-lookup.ts            → MemoryLookup 工具
       memory-write.ts             → MemoryWrite 工具
       memory-edit.ts              → MemoryEdit 工具
+    tools/builtin/knowledge/
+      knowledge-lookup.ts         → KnowledgeLookup MCP 工具（AI 对话中查知识库）
+  packages/knowledge/src/
+    index.ts                      → 包入口
+    types.ts                      → 核心类型 (KnowledgeDocument, Chunk, Entity, Event)
+    store.ts                      → SQLite 存储（6表+FTS5+vec0向量）
+    ingest.ts                     → 导入管线（读文件→切块→向量化→入库）
+    chunking.ts                   → 文档切块 + Markdown 清洗
+    extractor.ts                  → 实体/事件抽取 + 归一化 + 关联
+    search.ts                     → 语义/关键词/混合搜索
   packages/memory/src/
     store.ts                      → MemoryMemoStore（SQLite + FTS5 + vec0 向量 + 热冷升降，~1485 行）
     models.ts                     → MemoryMemo 数据模型
@@ -253,3 +282,9 @@ CLI/TUI 源码:
 | inject('injection') 受 5 重限制 | turn/index.ts:1368-1419 | 重复衰减→残差→去重→预算→注册 |
 | **system-ref 废弃 → stuck 注入器 (Phase21)** | turn/injectors/stuck.ts + turn/index.ts:1579-1598 + variant-registry.ts:313 | 旧 system-ref.ts DynamicInjector 绕过所有 guard 被删除；替代为 stuck 注入器走残差系统。检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步），受 budget/dedup/残差三重门控 |
 | **ResNet 双系统** | variant-registry.ts L319-345 + store.ts:1281-1287 + scoring.ts:162-163 | 记忆 ResNet（天级幂衰减）+ 注入调度 ResNet（步级幂衰减），公式均为 R = W×D^Δs |
+| **知识库不是知识图谱** | `SYSTEM/knowledge.md` §4.3 | 11 种实体枚举 + event_entities 多对多，无 RDF/三元组/图遍历 |
+| **knowledge 搜索靠实体起跳** | search.ts entityRecall + seedEvents | 无实体的文档退化为纯 chunk 向量搜索，精度大幅下降 |
+| **三级降级机制** | search.ts §6.3 | full(实体+BFS+rerank)→FTS5→chunk向量，embedding不可用时仍可搜 |
+| **BFS 只有 1 跳** | search.ts EXPANDED_EVENT_LIMIT=100 | 无法多跳推理（因果/溯源/诊断链） |
+| **不支持的：增量更新/精确过滤/跨源融合** | ingest.ts / store.ts UNIQUE约束含source_id | 改文档需删源重来；FTS5不支持短语定位；同名实体不同源各自独立 |
+| **知识库维护分档** | `SYSTEM/知识库维护.md` §2 | 高：带标题层级的文档/ADR | 中：源码/纯概念 | 低：数据表/日志 | 不能放：机密/大文件/非自然语言 |

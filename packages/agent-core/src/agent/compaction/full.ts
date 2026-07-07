@@ -190,7 +190,7 @@ export class FullCompaction {
     blockedByTurn: boolean;
   } | null = null;
   protected _compactedHistory: CompactedHistory[] = [];
-  protected readonly strategy: CompactionStrategy;
+  public readonly strategy: CompactionStrategy;
 
   constructor(
     protected readonly agent: Agent,

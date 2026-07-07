@@ -1,3 +1,5 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+
 <format>
 本文件使用 compact notation。key: value — 定义 | A → B → C — 流程
 A / B / C — 三者任一 | val1 | val2 | val3 — 枚举

@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Dream 记忆整理系统
 
 > 源码: `packages/memory/src/dream.ts` (169 行) — DreamTracker（计时器+建议）

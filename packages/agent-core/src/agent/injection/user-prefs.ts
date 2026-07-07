@@ -2,6 +2,7 @@ import { isRealUserPrompt } from '../context';
 import type { ContextMessage } from '../context/types';
 import { loadRoleAdditional } from '../../profile/context';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const USER_PREFS_VARIANT = 'user_prefs';
 
@@ -18,6 +19,10 @@ const USER_PREFS_VARIANT = 'user_prefs';
  */
 export class UserPrefsInjector extends DynamicInjector {
   protected override readonly injectionVariant = USER_PREFS_VARIANT;
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.AFTER_SYSTEM;
+  }
 
   protected override async getInjection(): Promise<string | undefined> {
     if (this.injectedAt !== null && !this.hasNewUserPromptSince(this.injectedAt)) {

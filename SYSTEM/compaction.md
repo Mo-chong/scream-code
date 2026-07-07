@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 上下文压缩系统 — Compaction
 
 > 源码: `packages/agent-core/src/agent/compaction/`（8 个文件）

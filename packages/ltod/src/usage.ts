@@ -42,8 +42,6 @@ export function emptyUsage(): TokenUsage {
     output: 0,
     inputCacheRead: 0,
     inputCacheCreation: 0,
-    cacheHitTokens: 0,
-    cacheMissTokens: 0,
   };
 }
 
@@ -51,12 +49,18 @@ export function emptyUsage(): TokenUsage {
  * Sum two TokenUsage values.
  */
 export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
+  const result: TokenUsage = {
     inputOther: a.inputOther + b.inputOther,
     output: a.output + b.output,
     inputCacheRead: a.inputCacheRead + b.inputCacheRead,
     inputCacheCreation: a.inputCacheCreation + b.inputCacheCreation,
-    cacheHitTokens: (a.cacheHitTokens ?? 0) + (b.cacheHitTokens ?? 0),
-    cacheMissTokens: (a.cacheMissTokens ?? 0) + (b.cacheMissTokens ?? 0),
   };
+  // 缓存字段可选：只在有实际数据时输出
+  if (a.cacheHitTokens !== undefined || b.cacheHitTokens !== undefined) {
+    result.cacheHitTokens = (a.cacheHitTokens ?? 0) + (b.cacheHitTokens ?? 0);
+  }
+  if (a.cacheMissTokens !== undefined || b.cacheMissTokens !== undefined) {
+    result.cacheMissTokens = (a.cacheMissTokens ?? 0) + (b.cacheMissTokens ?? 0);
+  }
+  return result;
 }

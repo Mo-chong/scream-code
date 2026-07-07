@@ -1,5 +1,6 @@
 import type { ContextMessage } from '../context/types';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const TODO_LIST_TOOL_NAME = 'TodoList';
 const TODO_STORE_KEY = 'todo';
@@ -28,6 +29,10 @@ interface TodoItem {
  */
 export class TodoListReminderInjector extends DynamicInjector {
   protected override readonly injectionVariant = TODO_LIST_REMINDER_VARIANT;
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
+  }
 
   protected override getInjection(): string | undefined {
     if (!this.isTodoListActive()) return undefined;

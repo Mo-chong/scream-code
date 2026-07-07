@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Phase15 系统说明书 — 行为偏差拦截通道
 
 > BEB（Behavior Escalation Bridge）：软约束到硬拦截的升级桥

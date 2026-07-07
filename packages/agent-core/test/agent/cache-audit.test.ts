@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeCacheMetrics, CacheMetrics } from '../../src/agent/usage/audit-log';
+import { computeCacheMetrics } from '../../src/agent/usage/audit-log';
+import type { CacheMetrics } from '../../src/agent/usage/audit-log';
 
 describe('computeCacheMetrics', () => {
   it('returns 0 hitRatio when all tokens are miss', () => {

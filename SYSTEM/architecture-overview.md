@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 整体架构
 
 > 0→4 层分层图。每 `##` 独立 knowledge chunk。Agent 类结构在本文件第 2 层。踩坑/版本历史在 `SYSTEM/pitfalls.md`。

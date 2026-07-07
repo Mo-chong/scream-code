@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { checkGuard } from '../../../src/agent/turn/guard-engine';
-import type { ContextMessage, StepToolSummary } from '../../../src/agent/turn/guard-engine';
+import type { ContextMessage } from '../../../src/agent/context';
+import type { StepToolSummary } from '../../../src/agent/turn/guard-engine';
 
 /** Minimal ContextMessage stub — content uses Array<{type, text}> format */
 function msg(role: 'user' | 'assistant' | 'tool', text: string): ContextMessage {

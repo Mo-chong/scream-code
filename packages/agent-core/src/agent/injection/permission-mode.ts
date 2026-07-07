@@ -1,5 +1,6 @@
 import type { PermissionMode } from '../permission';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const AUTO_MODE_ENTER_REMINDER = [
   'Auto permission mode is active. Tool approvals will be handled automatically while this mode remains enabled.',
@@ -15,6 +16,10 @@ const AUTO_MODE_EXIT_REMINDER = [
 export class PermissionModeInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'permission_mode';
   private lastMode: PermissionMode | undefined;
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.AFTER_SYSTEM;
+  }
 
   getInjection(): string | undefined {
     const mode = this.agent.permission.mode;

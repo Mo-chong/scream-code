@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 回合控制系统 — TurnController
 
 > 源码: `packages/agent-core/src/agent/turn/index.ts` (1737 行)

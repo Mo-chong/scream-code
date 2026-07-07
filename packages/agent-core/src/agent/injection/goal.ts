@@ -1,10 +1,15 @@
 import type { GoalSnapshot } from '../goal';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 const GOAL_REMINDER_INTERVAL = 5;
 
 export class GoalInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'goal';
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
+  }
 
   protected override getInjection(): string | undefined {
     const store = this.agent.goal;

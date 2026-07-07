@@ -1,9 +1,14 @@
 import type { EnabledPluginSessionStart } from '../../plugin/types';
 import type { SkillDefinition } from '../../skill';
 import { DynamicInjector } from './injector';
+import { InsertPosition } from './position-strategy';
 
 export class PluginSessionStartInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'plugin_session_start';
+
+  override getPosition(): InsertPosition {
+    return InsertPosition.MID_CONTEXT;
+  }
 
   protected override async getInjection(): Promise<string | undefined> {
     if (this.injectedAt !== null) return undefined;

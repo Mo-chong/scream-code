@@ -218,7 +218,8 @@ ReadMediaFile: Read image/video. mime + size + content.
 EnterPlanMode: Plan mode. mode: normal|fusion. Write plan file then ExitPlanMode.
 CronCreate: Schedule prompt. 5-field cron + prompt + recurring(default true).
 WolfPack: Batch subagents. subagent_type + prompt_template + items.
-KnowledgeLookup: Knowledge base. query + top_k(max 20).
+KnowledgeLookup: SYSTEM docs + project source docs. query. top_k(max 20). 
+Returns ranked chunks + source doc + heading + event entities + search trace.
 {% endif %}
 
 __SYSTEM_PROMPT_BOUNDARY__

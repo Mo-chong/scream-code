@@ -43,6 +43,10 @@ export interface CompactionStrategy {
   shouldCompactProactively(usedSize: number, maxOutputTokens: number): boolean;
   readonly checkAfterStep: boolean;
   readonly maxCompactionPerTurn: number;
+  /** [优化C] 缓存感知路由 — 返回缓存命中率预测 (0-1)，不实现则返回 1 */
+  getPredictedHitRatio?(): number;
+  /** [优化C] 记录缓存命中/未命中数据，供 GrowthPredictor 预测命中率趋势 */
+  recordCacheResult?(hitTokens: number, missTokens: number): void;
 }
 
 export class DefaultCompactionStrategy implements CompactionStrategy {
@@ -183,6 +187,16 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
 
   get maxCompactionPerTurn(): number {
     return this.config.maxCompactionPerTurn;
+  }
+
+  /** [优化C] 桥接到 GrowthPredictor 的缓存命中率预测 */
+  getPredictedHitRatio(): number {
+    return this.predictor.getPredictedHitRatio();
+  }
+
+  /** [优化C] 记录缓存命中/未命中数据 */
+  recordCacheResult(hitTokens: number, missTokens: number): void {
+    this.predictor.recordCacheResult(hitTokens, missTokens);
   }
 }
 

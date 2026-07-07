@@ -1,3 +1,4 @@
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Guard 规则引擎 — 行为矫正后处理
 
 > 计划文件: `DECISIONS/行为矫正系统-完整实战方案.md`
