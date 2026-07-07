@@ -214,8 +214,8 @@ function cleanFastembedCache(specificDir?: string): void {
   dirsToClean.push(path.join(getLocalCacheDir(), modelName));
 
   // 3. Scream Home cache (used by agent/index.ts: embedCacheDir)
-  if (process.env.SCREAM_HOME) {
-    dirsToClean.push(path.join(process.env.SCREAM_HOME, 'cache', 'fastembed', modelName));
+  if (process.env['SCREAM_HOME']) {
+    dirsToClean.push(path.join(process.env['SCREAM_HOME'] as string, 'cache', 'fastembed', modelName));
   }
 
   // 4. HuggingFace Hub cache

@@ -984,11 +984,11 @@ function resumeStateSnapshot(agent: Agent): ResumeStateSnapshot {
     background: agent.background.list(false),
     config: configStateSnapshot(agent),
     context: resumeContextSnapshot(agent),
-    fullCompaction: normalizeCompactedHistory(agent.fullCompaction.compactedHistory),
+    fullCompaction: normalizeCompactedHistory(agent.fullCompaction.compactedHistory) as Agent['fullCompaction']['compactedHistory'],
     permission: agent.permission.data(),
-    tools: stripToolDescriptions(agent.tools.data()),
-    toolStore: stripToolDescriptions(agent.tools.storeData()),
-    usage: normalizeUsage(agent.usage.data()),
+    tools: stripToolDescriptions(agent.tools.data()) as ReturnType<Agent['tools']['data']>,
+    toolStore: stripToolDescriptions(agent.tools.storeData()) as ReturnType<Agent['tools']['storeData']>,
+    usage: normalizeUsage(agent.usage.data()) as ReturnType<Agent['usage']['data']>,
   };
 }
 
@@ -1013,7 +1013,7 @@ function normalizeCompactedHistory(history: unknown): unknown {
   return history.filter((m: unknown) => {
     if (m && typeof m === 'object') {
       const msg = m as Record<string, unknown>;
-      const text = typeof msg.text === 'string' ? msg.text : '';
+      const text = typeof msg['text'] === 'string' ? msg['text'] : '';
       if (text.includes('Context was compacted') || text.includes('Recovered compacted summary')) {
         return false;
       }

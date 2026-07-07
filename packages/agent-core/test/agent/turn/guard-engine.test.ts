@@ -5,7 +5,7 @@ import type { StepToolSummary } from '../../../src/agent/turn/guard-engine';
 
 /** Minimal ContextMessage stub — content uses Array<{type, text}> format */
 function msg(role: 'user' | 'assistant' | 'tool', text: string): ContextMessage {
-  return { role, content: [{ type: 'text', text }] };
+  return { role, content: [{ type: 'text', text }], toolCalls: [] };
 }
 
 /** Minimal StepToolSummary builder — only set fields you want non-default */
