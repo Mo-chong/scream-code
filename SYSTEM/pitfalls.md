@@ -382,6 +382,9 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 ## Git 与上游合并
 
+> **📖 完整流程 SOP 见 [`合并上游仓库SOP.md`](./合并上游仓库SOP.md)** — 含双 remote 初始化、前置检查列表、冲突策略、guard 验证、force-push 恢复。
+> **本页只记录零散踩坑，不替代 SOP。**
+
 ### 版本标签不一致
 
 **现象**：本地 tag v0.7.2 是上次 merge 点，但 package.json 版本为 0.7.8（本地推进了 100+ commit）。

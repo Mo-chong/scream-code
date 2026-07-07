@@ -32,6 +32,7 @@
 ├─ 经验库
 │   ├─ 踩坑记录    pitfalls.md
 │   ├─ 变更日志    CHANGELOG.md
+│   ├─ 合并上游SOP 合并上游仓库SOP.md
 │   └─ 维护SOP    系统说明书维护SOP.md
 └─ 专题/Phase文档
     ├─ Phase14     phase14-可执行优化.md
@@ -63,6 +64,7 @@
 | **Phase15：行为偏差拦截通道** 🆕 | `SYSTEM/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
 | **Phase26：缓存感知架构** 🆕 | `SYSTEM/phase26-cache-aware.md` | DeepSeek KV Cache 兼容，注入位置修正(A→head/feedback→tail)，实时缓存审计日志 ndjson，动态自适应压缩阈值(GrowthPredictor) |
 | **系统说明书维护SOP** 🆕 | `SYSTEM/系统说明书维护SOP.md` | AI 更新文档的标准流程：决策树→分类→执行→交叉验证，含每个文件的写入规范 |
+| **合并上游仓库SOP** 🆕 | `SYSTEM/合并上游仓库SOP.md` | 二开 fork 合并上游作者仓库的标准流程：双 remote 结构、冲突策略、guard 验证、force-push 恢复 |
 | **行为矫正方案** | `../DECISIONS/行为矫正系统-完整实战方案.md` | 融合 Guard + 记忆注入 + 收敛门的完整计划 |
 
 ---
@@ -170,6 +172,7 @@
 ### Git 与上游合并
 | 问题 | 先查这个文件 |
 |------|-------------|
+| **合并上游完整流程（推荐）** | **`SYSTEM/合并上游仓库SOP.md`** |
 | 作者 force-push 后怎么合并 | `SYSTEM/pitfalls.md` §Git 与仓库管理 |
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |
 | 包名变更导致 import 找不到 | `SYSTEM/pitfalls.md` §包名变更 |

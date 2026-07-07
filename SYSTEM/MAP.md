@@ -40,7 +40,8 @@
 ├─ 经验库
 │   ├─ pitfalls.md                — 踩坑记录(构建链/FTS5/合并等)
 │   ├─ CHANGELOG.md               — 版本变更日志
-│   └─ 系统说明书维护SOP.md       — AI更新文档的标准流程(SOP)
+│   ├─ 系统说明书维护SOP.md       — AI更新文档的标准流程(SOP)
+│   └─ 合并上游仓库SOP.md         — 二开合并上游的标准流程(SOP)
 
 ├─ 专题/Phase文档
 │   ├─ Phase14-可执行优化.md       — afterStep分段/收敛条件数组化

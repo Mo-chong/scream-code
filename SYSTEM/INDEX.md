@@ -7,4 +7,5 @@
 
 → **完整索引 → [`../SYSTEM-INDEX.md`](../SYSTEM-INDEX.md)**
 → **模块地图 → [`MAP.md`](./MAP.md)**
-→ **维护SOP → [`系统说明书维护SOP.md`](./系统说明书维护SOP.md)****
+→ **维护SOP → [`系统说明书维护SOP.md`](./系统说明书维护SOP.md)**
+→ **合并上游SOP → [`合并上游仓库SOP.md`](./合并上游仓库SOP.md)**
