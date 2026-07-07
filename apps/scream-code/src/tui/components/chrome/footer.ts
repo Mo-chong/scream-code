@@ -171,6 +171,13 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
   return colors.textDim;
 }
 
+/** 缓存率颜色：≥90 绿, 80-89.9 黄, <80 红 */
+function pickCacheColor(rate: number, colors: ColorPalette): string {
+  if (rate >= 90) return colors.success;
+  if (rate >= 80) return colors.warning;
+  return colors.error;
+}
+
 // ── Gradient status line for footer line 2 ───────────────────────────
 
 const BRAND_COLORS = ['#72A4E9', '#A78BFA', '#34D399'];
@@ -444,13 +451,11 @@ export class FooterComponent implements Component {
     if (stepTotal > 0 && totalTotal > 0) {
       const rate1 = (lastStepCacheHit / stepTotal * 100).toFixed(1);
       const rate2 = (cacheHitTokens / totalTotal * 100).toFixed(1);
-      // 10格迷你进度条
-      const barLen = 10;
-      const filled = Math.round((lastStepCacheHit / stepTotal) * barLen);
-      const bar = '▰'.repeat(filled) + '▱'.repeat(barLen - filled);
-      const bar2 = Math.round((cacheHitTokens / totalTotal) * barLen);
-      const barTotal = '▰'.repeat(bar2) + '▱'.repeat(barLen - bar2);
-      const raw = ` ⚡ ${bar} ${rate1}%  ┃ ${barTotal} ${rate2}% `;
+      const c1 = pickCacheColor(Number(rate1), colors);
+      const c2 = pickCacheColor(Number(rate2), colors);
+      const dim = chalk.hex(colors.textDim);
+      const bolt = chalk.hex(colors.success)('⚡');
+      const raw = ` ${bolt} ${dim('单：')}${chalk.hex(c1)(rate1 + '%')} ${dim('┃')} ${dim('总：')}${chalk.hex(c2)(rate2 + '%')} `;
       const pad = Math.max(0, Math.floor((width - visibleWidth(raw)) / 2));
       lines.push(' '.repeat(pad) + raw);
     }
