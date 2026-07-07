@@ -10,7 +10,7 @@
 ## §0 本次合并变量 [P0]
 
 ```
-$上次合并tag  = v0.8.5               ← 上次合到的 tag
+$上次合并tag  = v0.8.5               ← 上次合到的 tag（本次合并 v0.8.5→v0.8.10）
 $上游remote   = origin                ← 上游作者仓库
 $本地remote   = mochong               ← 二开 fork 仓库
 $合并分支     = merge/upstream        ← 合并用的临时分支名（固定名，每次都一样）
