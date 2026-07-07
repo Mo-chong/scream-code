@@ -11,19 +11,16 @@
 import type { WeightLevel } from '../turn/variant-registry';
 
 /**
- * 插入位置枚举。
- * AFTER_SYSTEM — 系统提示之后（最高优先级）
- * MID_CONTEXT — 上下文中间（中优先级）
- * AFTER_TOOL_CALL — 工具调用之后（低优先级，默认）
- * CONTEXT_BOTTOM — 上下文底部（NEAR_ZERO 注意力，融合预留）
- * ATTENTION_PEAK — 注意力峰值动态位置（DYNAMIC，融合预留）
+ * 注入位置枚举。
+ *
+ * - `AFTER_SYSTEM` → 系统提示之后（最高优先级，primacy effect）
+ * - `MID_CONTEXT` → 上下文中间（中优先级）
+ * - `AFTER_TOOL_CALL` → 工具调用之后（低优先级，recency effect）
  */
 export enum InsertPosition {
   AFTER_SYSTEM = 'AFTER_SYSTEM',
   MID_CONTEXT = 'MID_CONTEXT',
   AFTER_TOOL_CALL = 'AFTER_TOOL_CALL',
-  CONTEXT_BOTTOM = 'CONTEXT_BOTTOM',
-  ATTENTION_PEAK = 'ATTENTION_PEAK',
 }
 
 /**
@@ -39,14 +36,13 @@ export const POSITION_ATTENTION: Record<string, InsertPosition> = {
 
 /**
  * 根据 InsertPosition 返回排序优先级提升值。
+ * 值越大，在消息列表中位置越靠前。
  */
 export function getPositionPriorityBoost(pos: InsertPosition): number {
   switch (pos) {
     case InsertPosition.AFTER_SYSTEM: return 1000;
     case InsertPosition.MID_CONTEXT: return 500;
     case InsertPosition.AFTER_TOOL_CALL: return 0;
-    case InsertPosition.CONTEXT_BOTTOM: return -500;
-    case InsertPosition.ATTENTION_PEAK: return 9999;
   }
 }
 

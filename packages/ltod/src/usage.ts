@@ -42,6 +42,8 @@ export function emptyUsage(): TokenUsage {
     output: 0,
     inputCacheRead: 0,
     inputCacheCreation: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
   };
 }
 

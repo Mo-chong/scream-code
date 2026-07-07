@@ -815,7 +815,10 @@ export class TurnFlow {
                 );
               }
 
-              await this.agent.injection.inject(this.currentStep);
+              await this.agent.injection.inject({
+                currentStep: this.currentStep,
+                messageCount: this.agent.context?.history?.length ?? 0,
+              });
               deduper.beginStep();
               return;
             },

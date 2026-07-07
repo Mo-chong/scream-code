@@ -19,7 +19,7 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
  */
 export const INJECTION_PLACEHOLDER_ALLOWLIST = [
   '{{timestamp}}', '{{uuid}}', '{{filePath}}',
-  '{{cwd}}', '{{sessionId}}', '{{toolName}}', '{{toolResult}}',
+  '{{cwd}}', '{{sessionId}}',
 ];
 
 /**

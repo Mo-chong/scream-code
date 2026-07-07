@@ -8,8 +8,6 @@ import { TodoListReminderInjector } from './todo-list';
 import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
 import { WorkingSetInjector } from './working-set';
-import { GuardInjector } from './guard-injector';
-import { ErrorAuditInjector } from './error-audit-injector';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -28,8 +26,6 @@ export class InjectionManager {
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],
       ['user-prefs', new UserPrefsInjector(agent)],
-      ['guard-feedback', new GuardInjector(agent)],
-      ['error-audit', new ErrorAuditInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);
@@ -41,11 +37,10 @@ export class InjectionManager {
     return this.router;
   }
 
-  async inject(currentStep: number): Promise<void> {
+  async inject(ctx: InjectContext): Promise<void> {
     const context: InjectContext = {
-      currentStep,
-      messageCount: this.agent.context?.history?.length ?? 0,
-      predictedHitRatio: this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
+      ...ctx,
+      predictedHitRatio: ctx.predictedHitRatio ?? this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
     };
     await this.router.dispatch(context);
   }

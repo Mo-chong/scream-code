@@ -52,6 +52,7 @@ export interface VariantMeta {
 
 `InsertPosition` 决定系统提醒注入到消息列表的位置，利用 Transformer 注意力曲线的 U 形特性：
 
+<<<<<<< Updated upstream
 | 位置 | 注意力等级 | 优先级权重 | 说明 |
 |------|-----------|-----------|------|
 | `'AFTER_SYSTEM'` | HIGH | 1000 | 系统提示之后（primacy effect），用于 S/A 级约束 |
@@ -80,6 +81,17 @@ export const POSITION_ATTENTION: Record<string, InsertPosition> = {
 | B | MID_CONTEXT | 500 |
 | C | AFTER_TOOL_CALL | 0 |
 | D | AFTER_TOOL_CALL | 0 |
+=======
+| 位置 | 注意力等级 | 说明 |
+|------|-----------|------|
+| `'head'` / `'near_head'` | HIGH | 消息列表前部，primacy effect，用于 S/A 级约束 |
+| `'tail'` | MEDIUM | 消息列表末尾，recency effect，常规提醒默认 |
+| `'CONTEXT_BOTTOM'` | LOW | 上下文底部，注意力最低 |
+| `'ATTENTION_PEAK'` | DYNAMIC | 注意力峰值动态位置，由注意力路由决定 |
+
+> `'head'` / `'near_head'` / `'tail'` 是当前使用值（Step 3 将统一为枚举类型）；
+> `'CONTEXT_BOTTOM'` / `'ATTENTION_PEAK'` 为融合计划新增预留值。
+>>>>>>> Stashed changes
 
 ### 当前注册表（31 变体，见 variant-registry.ts:277-331）
 

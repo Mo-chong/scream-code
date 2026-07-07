@@ -14,17 +14,22 @@ export function simpleHash(s: string): string {
 
 /**
  * 可选的残差注意力配置。
- * 若注入器覆写此方法返回配置，router dispatch 将使用
- * ResNet 残差公式 R = weight × decayPerStep^Δstep 判断
- * 注意力是否已低于 threshold，低于则注入。
  */
 export interface ResidualConfig {
-  weight: number;
-  decayPerStep: number;
-  threshold: number;
-  minStepGap: number;
+  /** 每次注入的初始注意力权重（0-1） */
+  readonly weight: number;
+  /** 每步衰减因子（0-1），值越小衰减越快 */
+  readonly decayPerStep: number;
+  /** 最小间隔步数，低于此步数不注入 */
+  readonly minStepGap: number;
+  /** 残差低于此阈值时允许注入 */
+  readonly threshold: number;
 }
 
+/**
+ * 动态注入器基类。
+ * 子类实现有状态的动态注入逻辑，由 InjectionRouter 调度。
+ */
 export abstract class DynamicInjector {
   protected injectedAt: number | null = null;
   private _lastContentHash: string | null = null;
@@ -43,11 +48,6 @@ export abstract class DynamicInjector {
     }
   }
 
-  /**
-   * Called when a single message is removed from the context history (e.g.
-   * by `/undo`). Adjusts the injection position so future injections don't
-   * reference a stale index or re-inject too early.
-   */
   onContextMessageRemoved(index: number): void {
     if (this.injectedAt === null) return;
     if (index < this.injectedAt) {
@@ -62,6 +62,11 @@ export abstract class DynamicInjector {
     return InsertPosition.AFTER_TOOL_CALL;
   }
 
+  /** 子类兼容别名，同 getTargetPosition */
+  getPosition(): InsertPosition {
+    return this.getTargetPosition();
+  }
+
   /**
    * 残差注意力配置。
    * 覆写此方法返回配置后，router dispatch 会在每次注入前
@@ -74,8 +79,8 @@ export abstract class DynamicInjector {
   }
 
   /**
-   * 内容哈希去重：[优化C]
-   * 同一注入器在内容未变更时跳过重复注入，维持 DeepSeek 公共前缀稳定。
+   * [优化C] 内容哈希去重：同一注入器在内容未变更时跳过重复注入，
+   * 维持 DeepSeek 公共前缀稳定。
    * 子类可覆写返回 false 以强制每次注入。
    */
   hasContentChanged(): boolean {
@@ -98,13 +103,20 @@ export abstract class DynamicInjector {
   async inject(context?: InjectContext): Promise<void> {
     const injection = await this.getInjection();
     if (injection) {
-      // 内容哈希去重：同一内容不重复注入，除非是强制（S级）
       this._lastContentHash = simpleHash(injection);
       this.injectedAt = this.agent.context.history.length;
-      this.agent.context.appendSystemReminder(injection, {
-        kind: 'injection',
-        variant: this.injectionVariant,
-      });
+      const pos = this.getTargetPosition();
+      if (pos === InsertPosition.AFTER_SYSTEM) {
+        this.agent.context.insertSystemReminderAtHead(injection, {
+          kind: 'injection',
+          variant: this.injectionVariant,
+        }, true);
+      } else {
+        this.agent.context.appendSystemReminder(injection, {
+          kind: 'injection',
+          variant: this.injectionVariant,
+        });
+      }
     }
   }
 
