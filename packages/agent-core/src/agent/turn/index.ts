@@ -46,7 +46,7 @@ import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendin
 import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
 import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
-import { AttentionPositionStrategy } from '../injection/position-strategy';
+import { AttentionPositionStrategy, InsertPosition } from '../injection/position-strategy';
 import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry } from '../usage/audit-log';
 
@@ -1632,9 +1632,9 @@ export class TurnFlow {
     // Phase4 注意力管控：根据 variant 等级选择注入位置
     if (effectiveLevel) {
       const pos = new AttentionPositionStrategy().decidePosition(variant ?? '', effectiveLevel as WeightLevel);
-      if (pos === 'head') {
+      if (pos === InsertPosition.AFTER_SYSTEM) {
         this.agent.context.insertSystemReminderAtHead(text, meta, true);
-      } else if (pos === 'near_head') {
+      } else if (pos === InsertPosition.MID_CONTEXT) {
         this.agent.context.insertSystemReminderAtNearHead(text, meta, true);
       } else {
         this.agent.context.appendSystemReminder(text, meta);
@@ -1652,6 +1652,11 @@ export class TurnFlow {
     // Phase22.3: 记录到 VariantScheduler
     if (variant) {
       this.agent.injection.afterInject(variant, this.currentStep);
+    }
+
+    // Step 6: 同步 router 统计（统一监控入口）
+    if (variant) {
+      this.agent.injection.getRouter().recordInjection(variant, this.currentStep);
     }
 
     this.eventLog.record({

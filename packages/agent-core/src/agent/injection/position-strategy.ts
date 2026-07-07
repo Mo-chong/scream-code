@@ -10,7 +10,45 @@
 
 import type { WeightLevel } from '../turn/variant-registry';
 
-export type InsertPosition = 'tail' | 'head' | 'near_head';
+/**
+ * 插入位置枚举。
+ * AFTER_SYSTEM — 系统提示之后（最高优先级）
+ * MID_CONTEXT — 上下文中间（中优先级）
+ * AFTER_TOOL_CALL — 工具调用之后（低优先级，默认）
+ * CONTEXT_BOTTOM — 上下文底部（NEAR_ZERO 注意力，融合预留）
+ * ATTENTION_PEAK — 注意力峰值动态位置（DYNAMIC，融合预留）
+ */
+export enum InsertPosition {
+  AFTER_SYSTEM = 'AFTER_SYSTEM',
+  MID_CONTEXT = 'MID_CONTEXT',
+  AFTER_TOOL_CALL = 'AFTER_TOOL_CALL',
+  CONTEXT_BOTTOM = 'CONTEXT_BOTTOM',
+  ATTENTION_PEAK = 'ATTENTION_PEAK',
+}
+
+/**
+ * 注意力权重等级 → InsertPosition 映射
+ */
+export const POSITION_ATTENTION: Record<string, InsertPosition> = {
+  S: InsertPosition.AFTER_SYSTEM,
+  A: InsertPosition.AFTER_SYSTEM,
+  B: InsertPosition.MID_CONTEXT,
+  C: InsertPosition.AFTER_TOOL_CALL,
+  D: InsertPosition.AFTER_TOOL_CALL,
+};
+
+/**
+ * 根据 InsertPosition 返回排序优先级提升值。
+ */
+export function getPositionPriorityBoost(pos: InsertPosition): number {
+  switch (pos) {
+    case InsertPosition.AFTER_SYSTEM: return 1000;
+    case InsertPosition.MID_CONTEXT: return 500;
+    case InsertPosition.AFTER_TOOL_CALL: return 0;
+    case InsertPosition.CONTEXT_BOTTOM: return -500;
+    case InsertPosition.ATTENTION_PEAK: return 9999;
+  }
+}
 
 export interface PositionStrategy {
   decidePosition(variant: string, level: WeightLevel): InsertPosition;
@@ -36,8 +74,8 @@ export class AttentionPositionStrategy implements PositionStrategy {
   private warnedVariants = new Set<string>();
 
   decidePosition(variant: string, level: WeightLevel): InsertPosition {
-    if (level === 'S') return 'head';
-    if (level === 'A') return 'head';
+    if (level === 'S') return InsertPosition.AFTER_SYSTEM;
+    if (level === 'A') return InsertPosition.AFTER_SYSTEM;
 
     // feedback_/post_ 类变体是步级实时反馈，末尾追加
     if (
@@ -45,13 +83,13 @@ export class AttentionPositionStrategy implements PositionStrategy {
       variant.startsWith('post_') ||
       variant.startsWith('step_after_')
     ) {
-      return 'tail';
+      return InsertPosition.AFTER_TOOL_CALL;
     }
 
     // 校验未知 variant：不在已知前缀集合中时告警
     this.warnIfUnknown(variant);
 
-    return 'tail';
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   /**

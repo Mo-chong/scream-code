@@ -13,6 +13,16 @@ const TIMESTAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 /**
+ * 注入文本中允许的占位符白名单。
+ * 注入系统在发送 system reminder 前应检查并替换这些占位符，
+ * 避免原始文本出现在 AI 上下文中引起匹配不稳定。
+ */
+export const INJECTION_PLACEHOLDER_ALLOWLIST = [
+  '{{timestamp}}', '{{uuid}}', '{{filePath}}',
+  '{{cwd}}', '{{sessionId}}', '{{toolName}}', '{{toolResult}}',
+];
+
+/**
  * Replace volatile runtime fields (ISO timestamps, UUIDs) in system-role
  * messages with fixed placeholders so the cache prefix is byte-identical
  * across turns.
