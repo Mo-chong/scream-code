@@ -1,19 +1,24 @@
 import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 
 import type { ApprovalPanelResponse } from '#/tui/components/dialogs/approval-panel';
 import type { ApprovalPanelChoice, ApprovalPanelData, DisplayBlock } from '#/tui/reverse-rpc/types';
 
-const DEFAULT_APPROVAL_CHOICES: ApprovalPanelChoice[] = [
-  { label: '批准一次', response: 'approved' },
-  { label: '批准（当前会话）', response: 'approved_for_session' },
-  { label: '拒绝', response: 'rejected' },
-  { label: '拒绝并反馈', response: 'rejected', requires_feedback: true },
-];
+function getDefaultApprovalChoices(): ApprovalPanelChoice[] {
+  return [
+    { label: t('approval.allow_once'), response: 'approved' },
+    { label: t('approval.allow_session'), response: 'approved_for_session' },
+    { label: t('approval.deny'), response: 'rejected' },
+    { label: t('approval.deny_feedback'), response: 'rejected', requires_feedback: true },
+  ];
+}
 
-const PLAN_REJECT_CHOICES: ApprovalPanelChoice[] = [
-  { label: '拒绝', response: 'rejected', selected_label: '拒绝' },
-  { label: '修订', response: 'rejected', selected_label: '修订', requires_feedback: true },
-];
+function getPlanRejectChoices(): ApprovalPanelChoice[] {
+  return [
+    { label: t('approval.deny'), response: 'rejected', selected_label: t('approval.deny') },
+    { label: t('approval.revise'), response: 'rejected', selected_label: t('approval.revise'), requires_feedback: true },
+  ];
+}
 
 export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData {
   const resolved = resolveDisplay(event.toolName, event.display, event.action);
@@ -184,23 +189,23 @@ function describeApproval(display: ToolInputDisplay, action: string): string {
     case 'command':
       return display.description ?? display.command ?? action;
     case 'diff':
-      return `编辑 ${display.path ?? ''}`.trim();
+      return `${t('approval.edit')}${display.path ?? ''}`.trim();
     case 'file_io':
-      return `${display.operation ?? '文件'} ${display.path ?? ''}`.trim();
+      return `${display.operation ?? t('approval.file')} ${display.path ?? ''}`.trim();
     case 'task_stop':
-      return `停止任务：${display.task_description ?? display.task_id ?? ''}`.trim();
+      return `${t('approval.stop_task')}${display.task_description ?? display.task_id ?? ''}`.trim();
     case 'agent_call':
-      return `启动 ${display.agent_name ?? '智能体'}`;
+      return `${t('approval.start')}${display.agent_name ?? t('approval.agent')}`;
     case 'skill_call':
-      return `调用技能 ${display.skill_name ?? ''}`.trim();
+      return `${t('approval.invoke_skill')}${display.skill_name ?? ''}`.trim();
     case 'url_fetch':
-      return `获取 ${display.url ?? ''}`.trim();
+      return `${t('approval.fetch')}${display.url ?? ''}`.trim();
     case 'search':
-      return `搜索：${display.query ?? ''}`.trim();
+      return `${t('approval.search')}${display.query ?? ''}`.trim();
     case 'todo_list':
-      return `更新待办列表（${String(display.items?.length ?? 0)} 项）`;
+      return t('approval.todo_update', { count: String(display.items?.length ?? 0) });
     case 'background_task':
-      return `${display.status ?? '后台'} 任务 ${display.task_id ?? ''}：${
+      return `${display.status ?? t('approval.background')} ${t('adapter.task_label', { taskId: display.task_id ?? '' })}：${
         display.description ?? ''
       }`.trim();
     default:
@@ -208,19 +213,21 @@ function describeApproval(display: ToolInputDisplay, action: string): string {
   }
 }
 
-const DANGER_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)/i, label: '递归删除' },
-  { pattern: /\bsudo\b/i, label: 'sudo' },
-  { pattern: /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b/i, label: '管道到 shell' },
-  { pattern: /\bdd\b[^|]*\bof=/i, label: 'dd 写入' },
-  { pattern: /\bmkfs\b/i, label: 'mkfs' },
-  { pattern: />\s*\/dev\/(sd|nvme|disk|hd)/i, label: '写入原始设备' },
-  { pattern: /\bchmod\s+-R?\s*777\b/i, label: 'chmod 777' },
-  { pattern: /:\(\)\s*\{\s*:\|:&\s*\}/i, label: 'fork 炸弹' },
-];
+function getDangerPatterns(): Array<{ pattern: RegExp; label: string }> {
+  return [
+    { pattern: /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)/i, label: t('approval.danger.recursive_delete') },
+    { pattern: /\bsudo\b/i, label: 'sudo' },
+    { pattern: /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b/i, label: t('approval.danger.pipe_to_shell') },
+    { pattern: /\bdd\b[^|]*\bof=/i, label: t('approval.danger.dd_write') },
+    { pattern: /\bmkfs\b/i, label: 'mkfs' },
+    { pattern: />\s*\/dev\/(sd|nvme|disk|hd)/i, label: t('approval.danger.raw_device') },
+    { pattern: /\bchmod\s+-R?\s*777\b/i, label: 'chmod 777' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\}/i, label: t('approval.danger.fork_bomb') },
+  ];
+}
 
 function detectDanger(command: string): string | undefined {
-  for (const { pattern, label } of DANGER_PATTERNS) {
+  for (const { pattern, label } of getDangerPatterns()) {
     if (pattern.test(command)) return label;
   }
   return undefined;
@@ -315,7 +322,7 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
       return [
         {
           type: 'brief',
-          text: `停止任务 ${display.task_id ?? ''}：${display.task_description ?? ''}`,
+          text: `${t('approval.stop_task_prefix')}${display.task_id ?? ''}：${display.task_description ?? ''}`,
         },
       ];
     case 'plan_review':
@@ -336,7 +343,7 @@ function adaptChoices(toolName: string, display: ToolInputDisplay): ApprovalPane
     return adaptPlanReviewChoices(display);
   }
 
-  return DEFAULT_APPROVAL_CHOICES.map((choice) => cloneChoice(choice));
+  return getDefaultApprovalChoices().map((choice) => cloneChoice(choice));
 }
 
 function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[] {
@@ -347,8 +354,8 @@ function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[
           response: 'approved' as const,
           selected_label: option.label,
         }))
-      : [{ label: '批准', response: 'approved' as const, selected_label: '批准' }];
-  return [...optionChoices, ...PLAN_REJECT_CHOICES].map((choice) => cloneChoice(choice));
+      : [{ label: t('approval.approve'), response: 'approved' as const, selected_label: t('approval.approve') }];
+  return [...optionChoices, ...getPlanRejectChoices()].map((choice) => cloneChoice(choice));
 }
 
 function cloneChoice(choice: ApprovalPanelChoice): ApprovalPanelChoice {

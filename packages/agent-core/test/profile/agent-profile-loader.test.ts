@@ -182,7 +182,15 @@ describe('default agent profiles', () => {
       expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash']),
     );
     expect(DEFAULT_AGENT_PROFILES['explore']?.tools).not.toContain('Write');
-    expect(DEFAULT_AGENT_PROFILES['plan']?.tools).not.toContain('Bash');
+    expect(DEFAULT_AGENT_PROFILES['plan']?.tools).toContain('Bash');
+  });
+
+  it('merges spawns through extends and resolves them on default profiles', () => {
+    expect(DEFAULT_AGENT_PROFILES['agent']?.spawns).toBeUndefined();
+    expect(DEFAULT_AGENT_PROFILES['plan']?.spawns).toEqual(['explore']);
+    expect(DEFAULT_AGENT_PROFILES['reviewer']?.spawns).toEqual(['explore']);
+    expect(DEFAULT_AGENT_PROFILES['coder']?.spawns).toBeUndefined();
+    expect(DEFAULT_AGENT_PROFILES['explore']?.spawns).toBeUndefined();
   });
 
   it('renders the model-invocable skill listing for bundled prompts', () => {

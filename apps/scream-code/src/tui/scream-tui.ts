@@ -10,6 +10,7 @@ import type {
   Session,
 } from '@scream-code/scream-code-sdk';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
+import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
 
 import {
@@ -34,7 +35,7 @@ import { LifecycleController, type LifecycleControllerHost } from './controllers
 import { InputController, type InputControllerHost } from './controllers/input-controller';
 import type { TuiConfig } from './config';
 import {
-  NO_ACTIVE_SESSION_MESSAGE,
+  getNoActiveSessionMessage,
 } from './constant/scream-tui';
 
 import { readUpdateCache } from '#/cli/update/cache';
@@ -96,6 +97,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     : input.cliOptions.yolo
       ? 'yolo'
       : 'manual';
+  setLocale(input.tuiConfig.language);
   return {
     model: '',
     workDir: input.workDir,
@@ -117,6 +119,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     hasNewVersion: false,
     latestVersion: null,
     editorCommand: input.tuiConfig.editorCommand,
+    language: input.tuiConfig.language,
     notifications: input.tuiConfig.notifications,
     like: input.tuiConfig.like,
     fusionPlan: input.tuiConfig.fusionPlan,
@@ -349,7 +352,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     }
     const resumeState = this.session?.getResumeState();
     if (resumeState?.warning !== undefined) {
-      this.showStatus(`警告：${resumeState.warning}`, this.state.theme.colors.warning);
+      this.showStatus(t('tui.resume_warning', { warning: resumeState.warning }), this.state.theme.colors.warning);
     }
     void this.refreshSkillCommands(this.session);
   }
@@ -393,7 +396,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
-    this.showStatus('正在整理会话记忆...', this.state.theme.colors.textDim);
+    this.showStatus(t('tui.organizing_memory'), this.state.theme.colors.textDim);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -498,7 +501,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.beginSessionRequest();
     void session.activateSkill(skillName, skillArgs).catch((error: unknown) => {
       const message = formatErrorMessage(error);
-      this.failSessionRequest(`Skill "${skillName}" 执行失败：${message}`);
+      this.failSessionRequest(t('tui.skill_failed', { skill: skillName, message }));
     });
   }
 
@@ -663,7 +666,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   requireSession(): Session {
     if (this.session === undefined) {
-      throw new Error(NO_ACTIVE_SESSION_MESSAGE);
+      throw new Error(getNoActiveSessionMessage());
     }
     return this.session;
   }
@@ -719,7 +722,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   async createNewSession(): Promise<void> {
     if (this.state.appState.isReplaying) {
-      this.showError('历史回放期间无法启动新会话。');
+      this.showError(t('tui.replay_no_new_session'));
       return;
     }
 

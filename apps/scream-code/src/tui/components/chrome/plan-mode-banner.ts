@@ -9,6 +9,7 @@
 
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { pathToFileURL } from 'node:url';
@@ -19,10 +20,10 @@ import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { PlanModeState } from '#/tui/types';
 
-const PLAN_LABEL: Record<Exclude<PlanModeState, 'off'>, string> = {
-  plan: '计划模式',
-  fusionplan: '融合计划模式',
-};
+function getPlanLabel(mode: Exclude<PlanModeState, 'off'>): string {
+  if (mode === 'fusionplan') return t('planmode.fusionplan');
+  return t('planmode.plan');
+}
 
 export class PlanModeBannerComponent implements Component {
   private mode: PlanModeState = 'off';
@@ -51,7 +52,7 @@ export class PlanModeBannerComponent implements Component {
     if (this.mode === 'off') return [];
 
     const tone = this.mode === 'fusionplan' ? this.colors.fusionPlanMode : this.colors.planMode;
-    const label = PLAN_LABEL[this.mode];
+    const label = getPlanLabel(this.mode);
     const prefix = `${chalk.hex(tone)(STATUS_BULLET)}${chalk.hex(tone).bold(label)}`;
 
     const basename = this.planPath !== undefined && this.planPath.length > 0

@@ -9,6 +9,7 @@ import {
   type Session,
   type SessionStatus,
 } from '@scream-code/scream-code-sdk';
+import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import type { CLIOptions, PromptOutputFormat } from './options';
@@ -60,9 +61,11 @@ export async function runPrompt(
   let promptTuiConfig;
   try {
     promptTuiConfig = await loadTuiConfig();
+    setLocale(promptTuiConfig.language);
   } catch (error) {
     if (!(error instanceof TuiConfigParseError)) throw error;
     promptTuiConfig = error.fallback;
+    setLocale(promptTuiConfig.language);
   }
   const promptSubagentModels = promptTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => promptSubagentModels);
@@ -98,7 +101,7 @@ export async function runPrompt(
   try {
     await harness.ensureConfigFile();
     const config = await harness.getConfig();
-    const { session, resumed, restorePermission } = await resolvePromptSession(
+    const { session, restorePermission } = await resolvePromptSession(
       harness,
       opts,
       workDir,
@@ -110,24 +113,9 @@ export async function runPrompt(
     );
     restorePromptSessionPermission = restorePermission;
 
-    // Fusion-plan worker subagents set SCREAM_FUSIONPLAN_SUBAGENT=1. Their
-    // sessions are scratch — the synthesized plan is the only output the
-    // user cares about. Delete the session on cleanup so /sessions is not
-    // polluted with one orphan per worker per fusion run.
-    if (process.env['SCREAM_FUSIONPLAN_SUBAGENT'] === '1' && !resumed) {
-      const ephemeralSessionId = session.id;
-      cleanupEphemeralSession = async (): Promise<void> => {
-        await harness.deleteSession(ephemeralSessionId).catch(() => {});
-      };
-    }
-
     const outputFormat = opts.outputFormat ?? 'text';
     await runPromptTurn(session, opts.prompt!, outputFormat, stdout, stderr);
-    // Skip the resume hint for ephemeral fusion-worker sessions: the session
-    // is about to be deleted, so "scream -r <id>" would point at nothing.
-    if (process.env['SCREAM_FUSIONPLAN_SUBAGENT'] !== '1') {
-      writeResumeHint(session.id, outputFormat, stdout, stderr);
-    }
+    writeResumeHint(session.id, outputFormat, stdout, stderr);
   } finally {
     await cleanupPromptRun();
   }
