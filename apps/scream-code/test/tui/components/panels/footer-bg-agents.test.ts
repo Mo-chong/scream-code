@@ -29,6 +29,10 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
     availableModels: {},
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    lastStepCacheHit: 0,
+    lastStepCacheMiss: 0,
     ...overrides,
   } as AppState;
 }
