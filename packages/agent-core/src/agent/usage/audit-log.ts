@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { writeFile, appendFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import type { TokenUsage } from '@scream-code/ltod';
@@ -71,6 +71,8 @@ export class AuditLogWriter {
   private stream: ReturnType<typeof createWriteStream> | null = null;
   private entryCount = 0;
   private flushIntervalMs: number;
+  /** 当前打开的日期, YYYY-MM-DD */
+  private currentDate: string = '';
 
   constructor(config: AuditLoggerConfig = {}) {
     this.logDir = config.logDir ?? 'workspace';
@@ -85,13 +87,14 @@ export class AuditLogWriter {
   }
 
   private get filePath(): string {
-    return join(this.logDir, 'cache-audit.ndjson');
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    return join(this.logDir, `cache-audit-${date}.ndjson`);
   }
 
   async init(): Promise<void> {
     await this.ensureDir();
+    this.currentDate = new Date().toISOString().slice(0, 10);
     const fp = this.filePath;
-    // Write header comment on first open
     if (!existsSync(fp)) {
       await writeFile(
         fp,
@@ -106,8 +109,24 @@ export class AuditLogWriter {
 
   write(entry: AuditLogEntry): void {
     if (!this.stream) {
-      // Silent drop if not initialized — don't crash the turn
       return;
+    }
+    // 按日期轮转：新的一天 → 关旧流开新流
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.currentDate) {
+      this.stream.end();
+      this.currentDate = today;
+      const fp = join(this.logDir, `cache-audit-${today}.ndjson`);
+      if (!existsSync(fp)) {
+        appendFileSync(
+          fp,
+          `# cache-audit — Phase26 缓存命中审计日志\n` +
+          `# fields: turn,model,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts\n` +
+          `# started: ${new Date().toISOString()}\n`,
+          'utf-8',
+        );
+      }
+      this.stream = createWriteStream(fp, { flags: 'a', encoding: 'utf-8' });
     }
     const line = JSON.stringify(entry) + '\n';
     this.stream.write(line);
