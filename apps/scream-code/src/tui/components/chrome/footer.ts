@@ -437,15 +437,22 @@ export class FooterComponent implements Component {
 
     const lines = [truncateToWidth(line1, width)];
 
-    // 第2行：缓存命中率
+    // 第2行：缓存命中率 — 居中显示
     const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens } = state;
     const stepTotal = lastStepCacheHit + lastStepCacheMiss;
     const totalTotal = cacheHitTokens + cacheMissTokens;
     if (stepTotal > 0 && totalTotal > 0) {
-      const stepRate = (lastStepCacheHit / stepTotal * 100).toFixed(1);
-      const totalRate = (cacheHitTokens / totalTotal * 100).toFixed(1);
-      const line2 = `  缓存: ${stepRate}% (此步) | 总: ${totalRate}% (${(cacheHitTokens / 1e6).toFixed(1)}M/${(totalTotal / 1e6).toFixed(1)}M)`;
-      lines.push(truncateToWidth(line2, width));
+      const rate1 = (lastStepCacheHit / stepTotal * 100).toFixed(1);
+      const rate2 = (cacheHitTokens / totalTotal * 100).toFixed(1);
+      // 10格迷你进度条
+      const barLen = 10;
+      const filled = Math.round((lastStepCacheHit / stepTotal) * barLen);
+      const bar = '▰'.repeat(filled) + '▱'.repeat(barLen - filled);
+      const bar2 = Math.round((cacheHitTokens / totalTotal) * barLen);
+      const barTotal = '▰'.repeat(bar2) + '▱'.repeat(barLen - bar2);
+      const raw = ` ⚡ ${bar} ${rate1}%  ┃ ${barTotal} ${rate2}% `;
+      const pad = Math.max(0, Math.floor((width - visibleWidth(raw)) / 2));
+      lines.push(' '.repeat(pad) + raw);
     }
 
     return lines;
