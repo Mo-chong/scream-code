@@ -444,7 +444,7 @@ export class FooterComponent implements Component {
 
     const lines = [truncateToWidth(line1, width)];
 
-    // 第2行：缓存命中率 — 居中显示
+    // 第2行：左 cwd + 中缓存率
     const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens } = state;
     const stepTotal = lastStepCacheHit + lastStepCacheMiss;
     const totalTotal = cacheHitTokens + cacheMissTokens;
@@ -455,9 +455,12 @@ export class FooterComponent implements Component {
       const c2 = pickCacheColor(Number(rate2), colors);
       const dim = chalk.hex(colors.textDim);
       const bolt = chalk.hex(colors.success)('⚡');
-      const raw = ` ${bolt} ${dim('单：')}${chalk.hex(c1)(rate1 + '%')} ${dim('┃')} ${dim('总：')}${chalk.hex(c2)(rate2 + '%')} `;
-      const pad = Math.max(0, Math.floor((width - visibleWidth(raw)) / 2));
-      lines.push(' '.repeat(pad) + raw);
+      // 启动目录（末两层）
+      const cwdParts = process.cwd().replace(/\\/g, '/').split('/').filter(Boolean);
+      const shortCwd = dim(cwdParts.slice(-2).join('\\'));
+      const cacheText = ` ${bolt} ${dim('单：')}${chalk.hex(c1)(rate1 + '%')} ${dim('┃')} ${dim('总：')}${chalk.hex(c2)(rate2 + '%')} `;
+      const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText)) / 2));
+      lines.push(shortCwd + ' '.repeat(pad) + cacheText);
     }
 
     return lines;
