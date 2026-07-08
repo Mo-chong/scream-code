@@ -3,6 +3,22 @@
 tags: [type/changelog, status/final, domain/system]
 ---
 
+## v0.9.3 — 缓存审计 UI + 日志轮转 + sessionId（2026-07-08）
+
+### 新功能
+- UI footer 第二行显示缓存命中率：`ScreamCode\ZHU    ⚡ 单：96.9% ┃ 总：96.8%`
+  - 百分比颜色：≥90% 绿 / 80-89.9% 黄 / <80% 红
+  - 左端显示启动目录（末两层），灰色对齐上下文行
+  - 单步缓存率来自 `currentTurn`，总缓存率来自 `total`（对话累计）
+- 缓存审计日志按日期轮转：`cache-audit-YYYY-MM-DD.ndjson`，每日一个文件
+- 审计日志每行新增 `sessionId` 字段，支持按对话查询
+
+### 修复
+- UI 缓存率翻倍 bug：`event.usage.total` 已是累计值，旧代码再次累加导致指数增长
+
+### 二开影响
+无。内部 UI 改动 + 审计日志内部实现，无对外接口变更。
+
 ## v0.9.2 — 合并上游 v0.9.2（2026-07-08）
 
 ### 新功能
