@@ -99,9 +99,38 @@ DefaultCompactionStrategy:
 
 micro.ts:20: keepRecentMessages: 30 (从 20 改)
 
-## P2 — 未实现
+## P1 — 缓存诊断日志（Phase29）
 
-TUI usage-panel 缓存命中率展示。格式: `⚡ usage: 12.4K in / 1.2K out | 缓存命中率: 66%`
+### AuditLogEntry.injected 字段
+
+audit-log.ts:17: `injected: string[]` — 本轮注入成功的变体名列表，空数组表示无注入。
+
+数据流: dispatch() 末尾保存 `_lastInjectResults` → getLastInjectResults() 暴露 → turn/index.ts afterStep 读取 → buildAuditEntry(..., injectedNames) → ndjson
+
+每行记录示例:
+```json
+{"turn":5,"injected":["guard_feedback_rule_3","post_verify_pass"],"cacheMiss":438,"hitRatio":0.997}
+```
+
+### 缓存事故分析流程
+
+1. `grep '"injected":\\[.*\\]' cache-audit-*.ndjson` — 找出所有有注入的轮次
+2. `grep injected cache-audit-$DATE.ndjson | cut -d',' -f1,6,7,14` — 按模型/缓存率/注入分类
+3. 对比同 turn 的 cacheMiss 变化判断注入影响
+
+### 已知注入破坏等级
+
+| 注入位置 | 变体等级 | 缓存破坏范围 | 备注 |
+|---------|---------|------------|------|
+| AFTER_SYSTEM(head) | S/A | 系统性提示群后全部 | 已从 near_head 修正到 head，保留 protected |
+| tail | B/C/D/feedback_/post_ | ~200-300 tokens | 高频低影响，B/C 有缓存感知路由跳过 |
+
+## P2 — 已实现（Phase29）
+
+TUI footer 第二行缓存命中率展示: `ScreamCode\ZHU    ⚡ 单：96.9% ┃ 总：96.8%`
+- AppState 字段: cacheHitTokens / cacheMissTokens / lastStepCacheHit / lastStepCacheMiss
+- footer.ts: pickCacheColor() — ≥90% 绿 / 80-89.9% 黄 / <80% 红
+- 左端灰色显示启动目录（末两层）
 
 ## 已修复缺口
 
