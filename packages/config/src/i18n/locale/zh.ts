@@ -215,9 +215,22 @@ export const zh: Record<string, string> = {
   'knowledge.search_effect': '输入查询，测试多跳检索效果',
   'knowledge.web': '知识图谱',
   'knowledge.web_desc': '在浏览器中查看交互式知识图谱',
+  'knowledge.download_model': '下载向量模型',
+  'knowledge.download_model_desc': '手动下载 bge-small-zh-v1.5 模型（约 95 MB）以启用语义搜索',
+  'knowledge.download_model_installed': '（已安装）',
+  'knowledge.download_model_retry_hint': '可返回菜单重新选择「下载向量模型」重试，建议科学上网',
   'knowledge.menu_title': 'SAG知识库管理',
   'knowledge.menu_hint': '选择操作（esc 退出）',
   'knowledge.op_failed': '操作失败: {msg}',
+
+  // ─── Init ─────────────────────
+  'init.select_title': '选择 AGENTS.md 生成位置',
+  'init.select_hint': '当前目录：{currentDir} · 项目根目录：{projectRoot}',
+  'init.current_dir': '当前目录',
+  'init.current_dir_desc': '仅在当前目录生成并分析',
+  'init.project_root': '项目根目录',
+  'init.project_root_desc': '基于当前目录，允许 AI 自行向上探索后生成',
+  'init.cancelled': '已取消初始化',
 
   // ─── 循环 ─────────────────────
   'loop.permission_auto': '权限已切到 auto（循环期间不再弹审批）。',
@@ -1251,6 +1264,8 @@ export const zh: Record<string, string> = {
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': 'English',
   'kw.embedding_downloading': '向量模型下载中…',
-  'kw.embedding_failed': '向量模型加载失败（建议科学上网，5分钟后自动重试）',
+  'kw.embedding_failed': '向量模型加载失败，请返回菜单选择重新下载（建议科学上网）',
   'kw.embedding_ready': '向量模型已就绪',
+  'kw.embedding_not_downloaded': '向量模型未下载（选择「下载向量模型」手动下载）',
+  'kw.embedding_already_installed': '向量模型已安装，无需重新下载',
 };
