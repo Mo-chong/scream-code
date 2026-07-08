@@ -215,9 +215,22 @@ export const en: Record<string, string> = {
   'knowledge.search_effect': 'Enter a query to test multi-hop retrieval',
   'knowledge.web': 'Graph',
   'knowledge.web_desc': 'View interactive knowledge graph in browser',
+  'knowledge.download_model': 'Download vector model',
+  'knowledge.download_model_desc': 'Manually download the bge-small-zh-v1.5 model (~95 MB) to enable semantic search',
+  'knowledge.download_model_installed': ' (installed)',
+  'knowledge.download_model_retry_hint': 'Return to the menu and select Download vector model to retry. A proxy is recommended.',
   'knowledge.menu_title': 'SAG Knowledge Base',
   'knowledge.menu_hint': 'Select an action (Esc to exit)',
   'knowledge.op_failed': 'Operation failed: {msg}',
+
+  // ─── Init ─────────────────────
+  'init.select_title': 'Select AGENTS.md location',
+  'init.select_hint': 'Current: {currentDir} · Project root: {projectRoot}',
+  'init.current_dir': 'Current directory',
+  'init.current_dir_desc': 'Generate and analyze current directory only',
+  'init.project_root': 'Project root',
+  'init.project_root_desc': 'Start from current directory, let AI explore upward to find root',
+  'init.cancelled': 'Initialization cancelled',
 
   // ─── Loop ─────────────────────
   'loop.permission_auto': 'Permissions switched to auto (no approvals during loop).',
@@ -1251,6 +1264,8 @@ export const en: Record<string, string> = {
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': '中文',
   'kw.embedding_downloading': 'Vector model downloading…',
-  'kw.embedding_failed': 'Vector model load failed (try VPN, auto-retry in 5 min)',
+  'kw.embedding_failed': 'Vector model load failed. Return to the menu and select Download to retry.',
   'kw.embedding_ready': 'Vector model ready',
+  'kw.embedding_not_downloaded': 'Vector model not downloaded (select Download vector model)',
+  'kw.embedding_already_installed': 'Vector model already installed, no need to re-download',
 };

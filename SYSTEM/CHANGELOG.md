@@ -3,6 +3,24 @@
 tags: [type/changelog, status/final, domain/system]
 ---
 
+## v0.9.2 — 合并上游 v0.9.2（2026-07-08）
+
+### 新功能
+- /knowledge：手动下载 vector 模型，移除自动下载
+- /init：显示 project root 并在执行前确认
+- init.md 使用 `<TARGET_DIR>` 占位符通过 prompt-placeholders 测试
+
+### 修复
+- postinstall 语法错误，fastembed 从 node-sdk bundle 中排除
+- embeddings.ts return-await lint error
+
+### 二开影响
+低。4 文件冲突：
+- `tsdown.config.ts` `store.ts`: 取 HEAD（保留 fork 增强）
+- `index.ts`: 互补合并
+- `embeddings.ts`: 取 HEAD + 加 `clearEmbeddingModelCache` 别名桥接（兼容上游 `knowledge-store.ts` 调用方）
+- `system.md`: 零改动（上游无变化）
+
 ## v0.8.10 — 合并上游 v0.8.10（2026-07-07）
 
 ### 新功能

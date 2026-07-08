@@ -201,41 +201,47 @@ async function initWithTimeout<T>(
  * If `specificDir` is provided (the actual cacheDir in use), clean that first.
  * Then also clean known fallback locations.
  */
-function cleanFastembedCache(specificDir?: string): void {
-  const modelName = 'fast-bge-small-zh-v1.5';
-  const dirsToClean: string[] = [];
+export function cleanFastembedCache(specificDir?: string): void {
+	  const modelName = 'fast-bge-small-zh-v1.5';
+	  const dirsToClean: string[] = [];
 
-  // 1. The actual cacheDir in use (most important — caller's specific dir)
-  if (specificDir !== undefined) {
-    dirsToClean.push(path.join(specificDir, modelName));
-  }
+	  // 1. The actual cacheDir in use (most important — caller's specific dir)
+	  if (specificDir !== undefined) {
+	    dirsToClean.push(path.join(specificDir, modelName));
+	  }
 
-  // 2. Project-local cache (fallback when no cacheDir passed)
-  dirsToClean.push(path.join(getLocalCacheDir(), modelName));
+	  // 2. Project-local cache (fallback when no cacheDir passed)
+	  dirsToClean.push(path.join(getLocalCacheDir(), modelName));
 
-  // 3. Scream Home cache (used by agent/index.ts: embedCacheDir)
-  if (process.env['SCREAM_HOME']) {
-    dirsToClean.push(path.join(process.env['SCREAM_HOME'] as string, 'cache', 'fastembed', modelName));
-  }
+	  // 3. Scream Home cache (used by agent/index.ts: embedCacheDir)
+	  if (process.env['SCREAM_HOME']) {
+	    dirsToClean.push(path.join(process.env['SCREAM_HOME'] as string, 'cache', 'fastembed', modelName));
+	  }
 
-  // 4. HuggingFace Hub cache
-  const hfHub = process.env['HF_HOME']
-    ? path.join(process.env['HF_HOME'], 'hub')
-    : path.join(os.homedir(), '.cache', 'huggingface', 'hub');
-  dirsToClean.push(path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5'));
+	  // 4. HuggingFace Hub cache
+	  const hfHub = process.env['HF_HOME']
+	    ? path.join(process.env['HF_HOME'], 'hub')
+	    : path.join(os.homedir(), '.cache', 'huggingface', 'hub');
+	  dirsToClean.push(path.join(hfHub, 'models--Xenova--bge-small-zh-v1.5'));
 
-  // 5. Fastembed default fallback (~/.cache/fastembed/)
-  dirsToClean.push(path.join(os.homedir(), '.cache', 'fastembed', modelName));
+	  // 5. Fastembed default fallback (~/.cache/fastembed/)
+	  dirsToClean.push(path.join(os.homedir(), '.cache', 'fastembed', modelName));
 
-  for (const dir of dirsToClean) {
-    try {
-      if (existsSync(dir)) {
-        rmSync(dir, { recursive: true, force: true });
-        process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${dir}\n`);
-      }
-    } catch { /* best-effort */ }
-  }
-}
+	  for (const dir of dirsToClean) {
+	    try {
+	      if (existsSync(dir)) {
+	        rmSync(dir, { recursive: true, force: true });
+	        process.stderr.write(`[loadEmbedder] removed corrupt model cache: ${dir}\n`);
+	      }
+	    } catch { /* best-effort */ }
+	  }
+	}
+
+	/**
+	 * Alias for `cleanFastembedCache`. Added for compatibility with upstream v0.9.2
+	 * consumer (`knowledge-store.ts` calls `clearEmbeddingModelCache`).
+	 */
+	export const clearEmbeddingModelCache = cleanFastembedCache;
 
 async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
   // Fallback to absolute path when no cacheDir provided (local enhancement)
