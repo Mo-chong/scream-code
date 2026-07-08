@@ -15,7 +15,7 @@ Phase26 Phase26-cache-aware. 横跨 injection / compaction / usage / ltod 四个
 
 ## 核心数据流
 
-LLM 响应 → openai-common.extractUsage (解析 prompt_cache_hit/miss) → TokenUsage (cacheHitTokens?/cacheMissTokens?) → handleAfterStep → computeCacheMetrics → buildAuditEntry → AuditLogWriter.write → workspace/cache-audit-YYYY-MM-DD.ndjson
+LLM 响应 → openai-common.extractUsage (解析 prompt_cache_hit/miss) → TokenUsage (cacheHitTokens?/cacheMissTokens?) → handleAfterStep → computeCacheMetrics → detectApiKeySwitch(prev,curr) → buildAuditEntry → AuditLogWriter.write → workspace/cache-audit-YYYY-MM-DD.ndjson
 
 第二轮后：predictor.recordRound(totalInput) → GrowthPredictor (recentRounds) → strategy.shouldCompact (优先用 predictor，fallback triggerRatio)
 
@@ -54,11 +54,11 @@ LLM 响应 usage 对象:
 | 导出 | 类型 | 用途 |
 |------|------|------|
 | CacheMetrics | interface | hitRatio / hitTokens / missTokens / totalInput |
-| AuditLogEntry | interface | sessionId / turn / model / ts / totalInput / cacheHit / cacheMiss / hitRatio / compacted / compactedTokens / alerts / injected |
+| AuditLogEntry | interface | sessionId / turn / model / ts / totalInput / cacheHit / cacheMiss / hitRatio / compacted / compactedTokens / alerts / injected / apiKeySwitched |
 | ALERT_RULES | const[] | check: hitRatio<0.2 → 告警 | hitRatio<0.3 → 低警告 | hitRatio>0.8 → 静默 |
 | computeCacheMetrics | (usage) → CacheMetrics | hitTokens+missTokens>0 才算，否则 hitRatio=0 |
 | AuditLogWriter | class | init → write 每轮 ndjson 按日轮转 | flush | destroy |
-| buildAuditEntry | (turn,model,sessionId,metrics,compacted,compactedTokens,injectedVariants?) → AuditLogEntry | 检查 ALERT_RULES | 加时间戳 |
+| buildAuditEntry | (turn,model,sessionId,metrics,compacted,compactedTokens,injectedVariants?,modelChanged?,apiKeySwitched?) → AuditLogEntry | 检查 ALERT_RULES | 加时间戳 |
 
 AuditLogWriter.init(): try/catch 吞错误 — 不阻塞流程 | write(): stream 为空则静默丢弃
 

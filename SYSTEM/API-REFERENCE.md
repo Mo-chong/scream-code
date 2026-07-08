@@ -590,6 +590,7 @@ interface AuditLogEntry {
   compactedTokens: number  // compaction 压缩掉的 tokens
   alerts: string[]         // 告警列表
   injected: string[]       // 本轮注入成功的变体名列表（空=无注入）
+  apiKeySwitched: boolean  // 启发式检测：model不变+无注入+缓存率骤降→疑似API key切到不同后端
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics
@@ -611,13 +612,28 @@ function buildAuditEntry(
   metrics: CacheMetrics,
   compacted: boolean,
   compactedTokens: number,
-  injectedVariants?: string[]
+  injectedVariants?: string[],
+  modelChanged?: boolean,
+  apiKeySwitched?: boolean
 ): AuditLogEntry
+
+function detectApiKeySwitch(
+  prevMetrics: CacheMetrics | null,
+  currMetrics: CacheMetrics,
+  modelChanged: boolean,
+  compacted: boolean,
+  injectedCount: number
+): boolean
+  // 启发式：model未变 + 无注入 + 非compaction + 前步缓存>30% + 输入量比<3x +
+  //   expectedHitTokens(prevRatio×currInput)  vs  actualHitTokens
+  //   实际/期望 < 30% 且 降幅≥20pp → true (疑似API key切到不同后端)
+  // DeepSeek 公共前缀缓存仍可能部分命中，故用比值而非硬阈值
   // ALERT_RULES: hitRatio<0.2→告警, hitRatio<0.3→低警告, >0.8→静默
 ```
 
 输出路径: `workspace/cache-audit-YYYY-MM-DD.ndjson`（按日轮转，每轮追加一行）
 告警格式: `ALERT: hitRatio < 0.2 (0.15) — awaiting recovery`
+切换判断: `modelChanged=true` → 模型切换；`apiKeySwitched=true` → 同模型但不同后端
 
 ---
 

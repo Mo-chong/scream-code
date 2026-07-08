@@ -28,6 +28,11 @@ export interface AuditLogEntry {
   alerts: string[];
   /** 本轮注入的变体名列表，空表示无注入 */
   injected: string[];
+  /**
+   * API 后端切换检测（heuristic）。
+   * true 表示: model未变 + 无注入 + 非compaction + 前一步有缓存 + 当前缓存率骤降 + 输入量可比 → 疑似API key切换导致不同后端
+   */
+  apiKeySwitched: boolean;
 }
 
 export interface AuditLoggerConfig {
@@ -105,7 +110,7 @@ export class AuditLogWriter {
         `# cache-audit — 缓存命中审计\n` +
         `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过\n` +
         `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
-        `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
+        `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched\n` +
         `# started: ${new Date().toISOString()}\n`,
       );
     }
@@ -128,7 +133,7 @@ export class AuditLogWriter {
 	  `# cache-audit — 缓存命中审计\n` +
 	  `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过\n` +
 	  `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
-	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
+	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched\n` +
 	  `# started: ${new Date().toISOString()}
 `,
         );
@@ -161,6 +166,67 @@ export class AuditLogWriter {
 
 // ── Entry builder ─────────────────────────────────────────────────
 
+/**
+ * Detect if a cache miss is likely caused by an API endpoint switch
+ * (different backend has no shared cache) rather than injection or context growth.
+ *
+ * DeepSeek KV 缓存特性：
+ * - 完整前缀单元缓存，公共前缀（如 system prompt）跨请求检测落盘
+ * - 切换后端后公共前缀可能仍命中，但对话特定内容必然 miss
+ * - 因此 hit ratio 不会降到 0%，只会从 ~95% 降到 20-60%
+ *
+ * 最优方案：用 期望命中 vs 实际命中 的比值代替硬阈值。
+ * expectedHitTokens = prevRatio × currTotalInput（如缓存行为不变应有的命中数）
+ * actualHitTokens = currMetrics.hitTokens
+ * 若 actual / expected < 0.3 → 缓存严重退化，排除其他因素后判定为后端切换
+ *
+ * 排除条件：modelChanged / compacted / injected / 无可比前一步 /
+ *   前一步无缓存 / 输入量不可比（>3x 排除上下文暴涨）
+ */
+export function detectApiKeySwitch(
+  prevMetrics: CacheMetrics | null,
+  currMetrics: CacheMetrics,
+  modelChanged: boolean,
+  compacted: boolean,
+  injectedCount: number,
+): boolean {
+  if (modelChanged) return false;
+  if (compacted) return false;
+  if (!prevMetrics) return false;
+
+  // 前一步必须有可观的缓存
+  if (prevMetrics.hitRatio < 0.3) return false;
+
+  // 输入量可比（排除上下文暴涨稀释缓存）
+  const inputRatio = Math.max(currMetrics.totalInput, prevMetrics.totalInput) /
+    Math.min(currMetrics.totalInput, prevMetrics.totalInput);
+  if (inputRatio > 3) return false;
+
+  // 核心：期望命中 vs 实际命中
+  // 如果缓存行为没变，当前步应有的命中数 = 前一步命中率 × 当前步总输入
+  const expectedHitTokens = prevMetrics.hitRatio * currMetrics.totalInput;
+  const actualHitTokens = currMetrics.hitTokens;
+
+  // 避免 0/0 和实际 > 期望的正常情况
+  if (expectedHitTokens <= 0) return false;
+  if (actualHitTokens >= expectedHitTokens) return false;
+
+  // 实际命中不到期望的 30% → 缓存严重退化
+  const hitEfficiency = actualHitTokens / expectedHitTokens;
+  if (hitEfficiency >= 0.3) return false;
+
+  // 降幅 >= 20pp 确认是大幅退化
+  const drop = prevMetrics.hitRatio - currMetrics.hitRatio;
+  if (drop < 0.2) return false;
+
+  // 注入保护：有注入但缓存退化不够极端（效率≥5%）→ 判定为注入导致
+  // 若效率极低（<5%）即使有注入也判定为API切换
+  // 理由：实际数据验证——API切换效率0-5%；注入（含S级）效率50%+，完全可分
+  if (injectedCount > 0 && hitEfficiency >= 0.05) return false;
+
+  return true;
+}
+
 export function buildAuditEntry(
   turn: number,
   model: string,
@@ -170,6 +236,7 @@ export function buildAuditEntry(
   compactedTokens: number,
   injectedVariants: string[] = [],
   modelChanged = false,
+  apiKeySwitched = false,
 ): AuditLogEntry {
   const alerts: string[] = [];
   for (const rule of ALERT_RULES) {
@@ -191,5 +258,6 @@ export function buildAuditEntry(
     compactedTokens,
     alerts,
     injected: injectedVariants,
+    apiKeySwitched,
   };
 }
