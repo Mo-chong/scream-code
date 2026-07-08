@@ -237,6 +237,8 @@ InjectionRouter.dispatch(context)
   └─ 返回排序后的 InjectResult[]
 ```
 
+**缓存诊断**: `dispatch()` 末尾保存本轮注入结果到 `_lastInjectResults`，通过 `getLastInjectResults(): InjectResult[]` 暴露。`turn/index.ts:afterStep` 读取后传入 `buildAuditEntry` 写入审计日志。
+
 ### 4.2 InjectionManager 接口
 
 定义于 `packages/agent-core/src/agent/injection/manager.ts`（融合后重写）。InjectionManager 包裹 InjectionRouter，提供高层 API：

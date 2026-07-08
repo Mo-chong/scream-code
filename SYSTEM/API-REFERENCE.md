@@ -578,13 +578,18 @@ interface CacheMetrics {
 }
 
 interface AuditLogEntry {
-  turnId: string
-  model: string
-  timestamp: string
-  cache: CacheMetrics
-  compacted: boolean
-  compactedTokens: number
-  alerts: string[]
+  sessionId: string        // 对话会话 ID
+  turn: number             // 轮次
+  model: string            // 模型标识
+  ts: string               // ISO 时间戳
+  totalInput: number       // 总输入 tokens
+  cacheHit: number         // 缓存命中 tokens
+  cacheMiss: number        // 缓存未命中 tokens
+  hitRatio: number         // 缓存命中率
+  compacted: boolean       // 是否刚 compaction
+  compactedTokens: number  // compaction 压缩掉的 tokens
+  alerts: string[]         // 告警列表
+  injected: string[]       // 本轮注入成功的变体名列表（空=无注入）
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics
@@ -600,16 +605,18 @@ class AuditLogWriter {
 }
 
 function buildAuditEntry(
-  turnId: string,
+  turn: number,
   model: string,
+  sessionId: string,
   metrics: CacheMetrics,
   compacted: boolean,
-  compactedTokens: number
+  compactedTokens: number,
+  injectedVariants?: string[]
 ): AuditLogEntry
-  // 检查 ALERT_RULES: hitRatio<0.2 → 告警, >0.8 → 静默
+  // ALERT_RULES: hitRatio<0.2→告警, hitRatio<0.3→低警告, >0.8→静默
 ```
 
-输出路径: `workspace/cache-audit.ndjson`（每轮追加一行）
+输出路径: `workspace/cache-audit-YYYY-MM-DD.ndjson`（按日轮转，每轮追加一行）
 告警格式: `ALERT: hitRatio < 0.2 (0.15) — awaiting recovery`
 
 ---

@@ -11,11 +11,11 @@ A / B / C — 三者任一 | val1 | val2 | val3 — 枚举
 
 Phase26 Phase26-cache-aware. 横跨 injection / compaction / usage / ltod 四个子系统的优化。目的：DeepSeek KV Cache 兼容性 + 缓存效率可观测 + 动态自适应压缩阈值。
 
-两个缺口：P2 TUI 命中率展示（未实现）| P1 recordRound 集成缺口（已修复 2026-07-04）
+两个缺口：P1 缓存诊断（已实现 Phase29）| P1 recordRound 集成缺口（已修复 2026-07-04）
 
 ## 核心数据流
 
-LLM 响应 → openai-common.extractUsage (解析 prompt_cache_hit/miss) → TokenUsage (cacheHitTokens?/cacheMissTokens?) → handleAfterStep → computeCacheMetrics → buildAuditEntry → AuditLogWriter.write → workspace/cache-audit.ndjson
+LLM 响应 → openai-common.extractUsage (解析 prompt_cache_hit/miss) → TokenUsage (cacheHitTokens?/cacheMissTokens?) → handleAfterStep → computeCacheMetrics → buildAuditEntry → AuditLogWriter.write → workspace/cache-audit-YYYY-MM-DD.ndjson
 
 第二轮后：predictor.recordRound(totalInput) → GrowthPredictor (recentRounds) → strategy.shouldCompact (优先用 predictor，fallback triggerRatio)
 
@@ -54,19 +54,19 @@ LLM 响应 usage 对象:
 | 导出 | 类型 | 用途 |
 |------|------|------|
 | CacheMetrics | interface | hitRatio / hitTokens / missTokens / totalInput |
-| AuditLogEntry | interface | turn / model / ts / cache / compacted / alerts |
-| ALERT_RULES | const[] | check: hitRatio<0.2 → 告警 | hitRatio>0.8 → 静默 |
+| AuditLogEntry | interface | sessionId / turn / model / ts / totalInput / cacheHit / cacheMiss / hitRatio / compacted / compactedTokens / alerts / injected |
+| ALERT_RULES | const[] | check: hitRatio<0.2 → 告警 | hitRatio<0.3 → 低警告 | hitRatio>0.8 → 静默 |
 | computeCacheMetrics | (usage) → CacheMetrics | hitTokens+missTokens>0 才算，否则 hitRatio=0 |
-| AuditLogWriter | class | init → write 每轮 ndjson | flush | destroy |
-| buildAuditEntry | (turn,model,metrics,compacted,compactedTokens) → AuditLogEntry | 检查 ALERT_RULES | 加时间戳 |
+| AuditLogWriter | class | init → write 每轮 ndjson 按日轮转 | flush | destroy |
+| buildAuditEntry | (turn,model,sessionId,metrics,compacted,compactedTokens,injectedVariants?) → AuditLogEntry | 检查 ALERT_RULES | 加时间戳 |
 
 AuditLogWriter.init(): try/catch 吞错误 — 不阻塞流程 | write(): stream 为空则静默丢弃
 
 ### turn/index.ts 集成
 
 turn/index.ts:1722-1732 (审计日志块):
-- 条件: this._lastUsage && (cacheHitTokens !== undefined || cacheMissTokens !== undefined)
-- 动作: computeCacheMetrics → buildAuditEntry → auditLogger.write → lastCompactedTokens 重置
+- 条件: this._lastUsage（移除 cacheHitTokens/missTokens 非空限制，?? 0 兜底）
+- 动作: computeCacheMetrics → buildAuditEntry(..., injectedNames) → auditLogger.write → lastCompactedTokens 重置
 
 turn/index.ts:1733-1738 (predictor 块):
 - 条件: this._lastUsage (不限模型)
@@ -110,6 +110,14 @@ audit-log.ts:17: `injected: string[]` — 本轮注入成功的变体名列表�
 每行记录示例:
 ```json
 {"turn":5,"injected":["guard_feedback_rule_3","post_verify_pass"],"cacheMiss":438,"hitRatio":0.997}
+```
+
+**文件头部**（每次创建新日期文件自动写入）:
+```
+# cache-audit — 缓存命中审计
+# 用途: 诊断注入/compaction 对 KV 缓存的影响 | sessionId 按对话查 | injected 列出本轮注入变体 | hitRatio<0.3 查 alerts
+# 查: grep "injected" cache-audit-*.ndjson 找出有注入的轮次
+# fields: turn,model,sessionId,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected
 ```
 
 ### 缓存事故分析流程
