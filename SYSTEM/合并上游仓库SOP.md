@@ -12,7 +12,7 @@
 ## §0 本次合并变量 [P0]
 
 ```
-$上次合并tag  = v0.8.5               ← 上次合到的 tag（本次合并 v0.8.5→v0.8.10）
+$上次合并tag  = v0.9.2               ← 上次合到的 tag（本次合并 v0.9.2）
 $上游remote   = origin                ← 上游作者仓库
 $本地remote   = mochong               ← 二开 fork 仓库
 $合并分支     = merge/upstream        ← 合并用的临时分支名（固定名，每次都一样）
@@ -384,5 +384,6 @@ system.md 同步完成后 → 更新本次 baseline 以备下次对比。
 | 2026-06 | v0.7.2→v0.8.4 | 8 | 互补冲突双方保留 |
 | 2026-06 | v0.8.5 | 6 | 架构冲突上游为基底 |
 | 2026-07 | v0.8.5→v0.8.10 | 7 | system.md 同步 2 条：Knowledge Library + User Preferences 块 |
+| 2026-07 | v0.9.2 | 4 | cleanFastembedCache 别名桥接；HEAD 保留增强 |
 
 <!-- EOF -->

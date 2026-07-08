@@ -653,4 +653,13 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 - 全在 stash 里=全没提交，拦截器认为改动不存在。
 - 提交信息写清楚修改范围和验证结果，作为链条件解的证据锚点。
 - 遇到持续拦截时不要重复反驳，先 commit 再展示 `git diff --stat`。
-
+
+### 取 ours 后丢上游导出函数 — 别名桥接修复法
+
+**现象**：v0.9.2 merge 中 `embeddings.ts` 取 ours（保留 fork 自动下载增强），但上游在 `index.ts` 新增了 `clearEmbeddingModelCache` 导出，且 `knowledge-store.ts`（自动合并无冲突）已引用它。构建时报 `clearEmbeddingModelCache is not defined`。
+
+**根因**：`git checkout --ours` 只还原了文件本身——它不会分析文件间的符号依赖。如果取 ours 的文件正好少了上游新增的导出函数，其他自动合并的文件（它们的导入路径是自动保留的）就会变成悬空引用。
+
+**解决**：在 `embeddings.ts` 中添加 `export const clearEmbeddingModelCache = cleanFastembedCache` 别名桥接。不重写函数体，不改调用方，零风险。
+
+**教训**：commit 前必须检查每个 ours 文件是否是最新版引用链的末端。找出"自动合并的文件会调用但 ours 文件没导出"的函数，做别名桥接或 wrapper。
