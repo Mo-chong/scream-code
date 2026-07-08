@@ -101,9 +101,10 @@ export class AuditLogWriter {
     if (!existsSync(fp)) {
       await writeFile(
         fp,
-        `# cache-audit — Phase26 缓存命中审计日志\n` +
-        `# format: JSON Lines (ndjson), one entry per turn\n` +
-        `# fields: turn,model,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts\n` +
+        `# cache-audit — 缓存命中审计\n` +
+        `# 用途: 诊断注入/compaction 对 KV 缓存的影响 | sessionId 按对话查 | injected 列出本轮注入变体 | hitRatio<0.3 查 alerts\n` +
+        `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep -oP '"injected":\\[\\K[^\\]]+' | tr ',' '\\n' | sort | uniq -c | sort -rn 统计注入频次\n` +
+        `# fields: turn,model,sessionId,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
         `# started: ${new Date().toISOString()}\n`,
       );
     }
