@@ -324,16 +324,20 @@ tags: [type/changelog, status/final, domain/system]
   - 单步缓存率来自 `currentTurn`，总缓存率来自 `total`（对话累计）
 - 缓存审计日志按日期轮转：`cache-audit-YYYY-MM-DD.ndjson`，每日一个文件
 - 审计日志每行新增 `sessionId` 字段，支持按对话查询
+- **缓存诊断**：`AuditLogEntry.injected` 记录每轮注入的变体名，定位缓存破坏源头
 
 #### 修复
 - UI 缓存率翻倍 bug：`event.usage.total` 已是累计值，旧代码再次累加导致指数增长
+- 审计日志注入诊断链路：dispatch() → `getLastInjectResults()` → `buildAuditEntry(injectedNames)` → ndjson
 
 #### 框架源码引用
 - `packages/ltod/src/providers/openai-common.ts` L228-258 — `extractUsage()` 提取 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`
 - `packages/agent-core/src/agent/usage/index.ts` L43-50 — `UsageRecorder.data()` 中 `total`/`currentTurn` 来源
-- `packages/agent-core/src/agent/usage/audit-log.ts` L69-145 — `AuditLogWriter` 按日轮转 + sessionId
+- `packages/agent-core/src/agent/usage/audit-log.ts` L69-145 — `AuditLogWriter` 按日轮转 + sessionId + injected
+- `packages/agent-core/src/agent/injection/router.ts` — `getLastInjectResults()` 暴露注入诊断
 - `apps/scream-code/src/tui/components/chrome/footer.ts` L155-175 — `pickCacheColor` + 第二行渲染
 - `apps/scream-code/src/tui/controllers/session-event-handler.ts` L636-651 — 缓存字段提取到 AppState
+- `SYSTEM/phase26-cache-aware.md` — 缓存诊断字段表 + 注入破坏等级表
 
 #### 文档
 - `SYSTEM/CHANGELOG.md` — Phase29 条目
