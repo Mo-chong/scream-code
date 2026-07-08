@@ -15,6 +15,7 @@ export interface CacheMetrics {
 export interface AuditLogEntry {
   turn: number;
   model: string;
+  modelChanged: boolean;
   sessionId: string;
   /** ISO timestamp */
   ts: string;
@@ -102,9 +103,9 @@ export class AuditLogWriter {
       await writeFile(
         fp,
         `# cache-audit — 缓存命中审计\n` +
-        `# 用途: 诊断注入/compaction 对 KV 缓存的影响 | sessionId 按对话查 | injected 列出本轮注入变体 | hitRatio<0.3 查 alerts\n` +
-        `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep -oP '"injected":\\[\\K[^\\]]+' | tr ',' '\\n' | sort | uniq -c | sort -rn 统计注入频次\n` +
-        `# fields: turn,model,sessionId,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
+        `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过\n` +
+        `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
+        `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
         `# started: ${new Date().toISOString()}\n`,
       );
     }
@@ -124,14 +125,10 @@ export class AuditLogWriter {
       if (!existsSync(fp)) {
         appendFileSync(
           fp,
-	  `# cache-audit — 缓存命中审计
-` +
-	  `# 用途: 诊断注入/compaction 对 KV 缓存的影响 | sessionId 按对话查 | injected 列出本轮注入变体 | hitRatio<0.3 查 alerts
-` +
-	  `# 查: grep "injected" cache-audit-*.ndjson 找出有注入的轮次
-` +
-	  `# fields: turn,model,sessionId,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected
-` +
+	  `# cache-audit — 缓存命中审计\n` +
+	  `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过\n` +
+	  `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
+	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected\n` +
 	  `# started: ${new Date().toISOString()}
 `,
         );
@@ -172,6 +169,7 @@ export function buildAuditEntry(
   compacted: boolean,
   compactedTokens: number,
   injectedVariants: string[] = [],
+  modelChanged = false,
 ): AuditLogEntry {
   const alerts: string[] = [];
   for (const rule of ALERT_RULES) {
@@ -183,6 +181,7 @@ export function buildAuditEntry(
     turn,
     model,
     sessionId,
+    modelChanged,
     ts: new Date().toISOString(),
     totalInput: metrics.totalInput,
     cacheHit: metrics.hitTokens,
