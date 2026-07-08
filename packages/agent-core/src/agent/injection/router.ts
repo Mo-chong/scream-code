@@ -106,6 +106,8 @@ export class InjectionRouter {
   private readonly disabled = new Set<string>();
   /** Step 7: 当前剩余 token 预算 (undefined = 不限制) */
   private remainingBudget: number | undefined;
+  /** 最近一次 dispatch() 的注入结果（缓存诊断用） */
+  private _lastInjectResults: InjectResult[] = [];
 
   constructor(config?: Partial<RouterConfig>) {
     this.config = { ...DEFAULT_ROUTER_CONFIG, ...config };
@@ -235,12 +237,18 @@ export class InjectionRouter {
       }
     }
 
+    this._lastInjectResults = results;
     return results;
   }
 
   /** 调度器接口暴露（供 Step 6 注入迁移时问询） */
   shouldInject(variant: string, currentStep: number): boolean {
     return this.scheduler.shouldInject(variant, currentStep);
+  }
+
+  /** 返回上一次 dispatch() 的注入结果清单（缓存诊断用） */
+  getLastInjectResults(): InjectResult[] {
+    return this._lastInjectResults;
   }
 
   getInjectionCount(variant: string): number {

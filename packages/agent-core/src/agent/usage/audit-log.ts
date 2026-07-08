@@ -25,6 +25,8 @@ export interface AuditLogEntry {
   compacted: boolean;
   compactedTokens: number;
   alerts: string[];
+  /** 本轮注入的变体名列表，空表示无注入 */
+  injected: string[];
 }
 
 export interface AuditLoggerConfig {
@@ -162,6 +164,7 @@ export function buildAuditEntry(
   metrics: CacheMetrics,
   compacted: boolean,
   compactedTokens: number,
+  injectedVariants: string[] = [],
 ): AuditLogEntry {
   const alerts: string[] = [];
   for (const rule of ALERT_RULES) {
@@ -181,5 +184,6 @@ export function buildAuditEntry(
     compacted,
     compactedTokens,
     alerts,
+    injected: injectedVariants,
   };
 }

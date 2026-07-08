@@ -1752,7 +1752,10 @@ export class TurnFlow {
       const metrics = computeCacheMetrics(this._lastUsage);
       const compacted = this.agent.fullCompaction.lastCompactedTokens > 0;
       const compactedTokens = compacted ? this.agent.fullCompaction.lastCompactedTokens : 0;
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens);
+      // 缓存诊断：提取本轮注入的变体名
+      const lastInjects = this.agent.injection.getRouter().getLastInjectResults?.() ?? [];
+      const injectedNames = lastInjects.filter((r) => r.success).map((r) => r.variant);
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedNames);
       this.auditLogger.write(entry);
       // 若发生了 compaction，内容缓存失效，重置去重状态
       if (compacted) this.contentHashCache.reset();
