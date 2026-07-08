@@ -100,7 +100,10 @@ export abstract class DynamicInjector {
     return undefined;
   }
 
+  protected _lastInjectContext?: InjectContext;
+
   async inject(context?: InjectContext): Promise<void> {
+    this._lastInjectContext = context;
     const injection = await this.getInjection();
     if (injection) {
       this._lastContentHash = simpleHash(injection);

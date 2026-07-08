@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/interception, status/final]
+keywords: [拦截, interception, 日志, event-log, audit]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 拦截日志系统 — Interception
 
+> **参见：** [`turn-control.md`](turn-control.md)（回合控制权威） | [`guard-engine.md`](guard-engine.md)（行为矫正）
+>
 > 源码: `packages/agent-core/src/agent/turn/event-log.ts` (181 行)
 > 持久化: `packages/agent-core/src/agent/turn/event-snapshot.ts` (283 行)
 

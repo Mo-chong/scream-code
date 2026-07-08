@@ -1,4 +1,12 @@
+---
+tags: [type/reference, domain/prompt, status/final]
+keywords: [提示词, prompt, assembly, system-reminder, 组装]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+
+> **参见：** [`injection-system.md`](injection-system.md)（注入管线） | [`context-management.md`](context-management.md)（上下文组装） | [`turn-control.md`](turn-control.md)（回合触发时机） | [`architecture-overview.md`](architecture-overview.md)（架构全景）
 
 <format>
 本文件使用 compact notation | A → B — 流程 | A / B — 任一 | [P0][P1] — 优先级
@@ -93,6 +101,9 @@ buildTemplateVars(context: SystemPromptContext): Record<string, string> {
 
 ## 4. 模板渲染引擎 [P1]
 
+> 别名：模板渲染 / 渲染引擎 / TemplateRenderer
+> 对应代码：prompt-utils/render-prompt.ts
+
 文件：`utils/render-prompt.ts` (19 行)
 
 ```typescript
@@ -110,6 +121,9 @@ nunjucks.Environment(null, {
 ---
 
 ## 5. 装配管线（完整数据流）[P0]
+
+> 别名：装配管线 / 数据流 / PromptAssembler
+> 对应代码：prompt-assembly/assembler.ts
 
 ```
                                     Build time (一次)

@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/knowledge, status/final]
+keywords: [知识库, knowledge, chunk, 向量检索, FTS5]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Knowledge 知识库系统 [P2]
 
+> **参见：** [`知识库维护.md`](知识库维护.md)（知识库维护指南） | [`memory-store.md`](memory-store.md)（共享 vec0/SQLite 基础设施的平行系统）
+>
 > 外部文档知识库 — 用户喂文档 → 自动切块/向量化/AI 对话时搜到并引用。与记忆系统（对话经验）互补。
 > 源码：`packages/knowledge/` | 上层工具：`packages/agent-core/src/tools/builtin/knowledge/knowledge-lookup.ts`
 
@@ -48,6 +56,9 @@ AI 对话时靠记忆系统只能回忆"之前聊过什么"，无法引用**你�
 ---
 
 ## §3 文档"吃"进来 — Ingestion 管线 [P2]
+
+> 别名：知识摄入 / 文档摄入 / 摄入管道 / IngestionPipeline
+> 对应代码：KnowledgeIngestion (packages/knowledge/src/ingestion/)
 
 ### 3.1 流程
 
@@ -105,6 +116,9 @@ SQLite 数据库文件，路径由配置决定。默认在 scream-code 数据目
 
 ## §5 抽实体和事件 — Extractor [P2]
 
+> 别名：实体提取 / EntityExtractor / 实体抽取
+> 对应代码：extractor.ts (packages/knowledge/src/)
+
 ### 5.1 功能
 
 从碎片的纯文字中自动识别结构化信息：
@@ -129,6 +143,9 @@ SQLite 数据库文件，路径由配置决定。默认在 scream-code 数据目
 ---
 
 ## §6 检索 — Search [P2]
+
+> 别名：知识搜索 / 检索 / KnowledgeSearch
+> 对应代码：search.ts (packages/knowledge/src/)
 
 检索管线是 **7 步多跳知识图谱检索**（`search.ts: multiSearchWithTrace`），不是简单向量搜索。
 
@@ -183,6 +200,9 @@ query → 向量化(embedding)
 ---
 
 ## §7 AI 怎么用 — KnowledgeLookup MCP 工具 [P2]
+
+> 别名：知识查找 / 知识库查找 / KnowledgeLookup
+> 对应代码：KnowledgeLookupTool (mcp/scream-code-server/)
 
 ### 7.1 工具入口
 

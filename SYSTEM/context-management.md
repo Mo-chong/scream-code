@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/context, status/final]
+keywords: [上下文, context, 四层架构, compaction, 截断]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 上下文管理（Context Management）
 
+> **参见：** [`compaction.md`](compaction.md)（压缩深度技术参考） | [`memory-store.md`](memory-store.md)（四层架构中的 Memory 层） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合生命周期）
+>
 > 演化图：`ZHU/DECISIONS/INDEX.md` → **上下文管理子演化线①+②**（06-27~06-28 合并）
 > 最后更新：2026-06-29
 
@@ -62,6 +70,9 @@ FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compac
 ---
 
 ## 二、ContentArchive（纯内存保留缓冲区）
+
+> 别名：内容归档 / 内容缓冲区 / ContentArchive
+> 对应代码：ContentArchive (context/content-archive.ts)
 
 **文件**：`packages/agent-core/src/agent/context/content-archive.ts`
 
@@ -162,6 +173,9 @@ context/index.ts L241-245:
 
 ## 四、MicroCompaction（自动轻量压缩）
 
+> 别名：微压缩 / 自动压缩 / MicroCompaction
+> 对应代码：MicroCompaction (compaction/micro.ts)
+
 **文件**：`packages/agent-core/src/agent/compaction/micro.ts`
 
 ### 4.1 触发条件（3 道关卡）
@@ -204,6 +218,9 @@ this.agent.microCompaction.detect();
 ---
 
 ## 五、FullCompaction（全局压缩）
+
+> 别名：全局压缩 / 全量压缩 / FullCompaction
+> 对应代码：FullCompaction (compaction/full.ts)
 
 **文件**：`packages/agent-core/src/agent/compaction/full.ts`（587 行）
 
@@ -257,6 +274,9 @@ shouldCompact(usedSize: number): boolean {
 ---
 
 ## 六、ArchiveRecover MCP 工具
+
+> 别名：归档恢复 / 缓冲区恢复 / ArchiveRecover
+> 对应代码：ArchiveRecover (tools/builtin/context/archive-recover.ts)
 
 **文件**：`packages/agent-core/src/tools/builtin/context/archive-recover.ts`
 

@@ -1,16 +1,29 @@
+---
+tags: [type/reference, domain/index, status/final]
+keywords: [地图, map, 模块, 文件索引]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # SYSTEM/ 模块地图
 
+> **入口：** [`architecture-overview.md`](architecture-overview.md)（系统全景·首选阅读） | [`INDEX.md`](INDEX.md)（导航）
+>
+> **参见：** [`系统说明书维护SOP.md`](系统说明书维护SOP.md)（维护规范）
+>
 > SYSTEM/ 目录的文件结构、模块归属和文件职责。AI 用于快速定位新功能归属哪个模块。
 > 新增文档时请在此注册。
 
 ```
+├─ ☑ AI 全景入口（优先读）
+│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制/上下文/Guard/数据流/AI导航指南
+
 ├─ 接口手册
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
 │   ├─ turn-control.md            — 回合生命周期/收敛门/工具优先级
-│   ├─ injection-system.md        — 注入/残差调度/阈值衰减
+│   ├─ injection-system.md        — ☑ 注入系统：15个注入器/三路径统一/budget绕过/残差调度
 │   ├─ attention-management.md    — 注意力管理
 │   ├─ guard-engine.md            — Guard触发时机/反事实检测
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
@@ -49,8 +62,7 @@
 
 ├─ 专题/Phase文档
 │   ├─ Phase14-可执行优化.md       — afterStep分段/收敛条件数组化
-│   ├─ Phase15-行为偏差拦截通道.md   — BEB通道/数据驱动配置
-│   └─ architecture-overview.md   — 架构总览
+│   └─ Phase15-行为偏差拦截通道.md   — BEB通道/数据驱动配置
 
 ├─ 索引
 │   ├─ INDEX.md                   — SYSTEM/目录子索引(仅导航)

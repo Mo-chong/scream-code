@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/mcp, status/final]
+keywords: [MCP, 服务器, 集成, tool-use]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # MCP 服务器集成
 
+> **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度）
+>
 > Scream Code 通过 MCP 协议连接第三方代码智能/搜索/文档工具。
 > 所有 MCP 工具以 `mcp__<server>__<tool>` 命名，与内置工具无权重差别。
 

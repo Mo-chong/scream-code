@@ -1,6 +1,20 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
+updated: 2026-07-08
+---
+
+> 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
+
+| 规则 | 条件 → 动作 | 格式 |
+|------|-------------|------|
+| 上游合并 [P0] | 从原始仓库合并版本 → 顶部倒序插入 | `## v{大版本}.{小版本}.{补丁} — 合并上游 v...` |
+| 二开发日志 [P0] | 手动更新 / 二开新增功能 → `二开发日志` 节追加 | `### Phase{N} — 标题（YYYY-MM-DD）`，正向 |
+| Section 分类 [P1] | 按变更性质选子节 | `新功能` / `修复` / `变更` / `文档` / `框架源码引用` / `未实现` |
+| 路径标注 [P1] | 每个条目必须含文件路径或行号 | AI 可导航至具体文件 |
+| 时间戳 [P0] | 每个 `###` 必须有日期 | 禁止无日期条目 |
+| 禁止 [P0] | 混写两线 / 无路径 / 无日期 / 概括废话 / 新旧倒置 | 上游倒序、二开正向 |
+
 ---
 
 ## v0.9.2 — 合并上游 v0.9.2（2026-07-08）
@@ -20,6 +34,55 @@ tags: [type/changelog, status/final, domain/system]
 - `index.ts`: 互补合并
 - `embeddings.ts`: 取 HEAD + 加 `clearEmbeddingModelCache` 别名桥接（兼容上游 `knowledge-store.ts` 调用方）
 - `system.md`: 零改动（上游无变化）
+
+## v0.8.11 — 注入系统三路径统一（2026-07-08）
+
+### 新功能
+- **路径 B 清零**：`turn/injectors/{stuck,anti_confabulation,quality,intent}.ts` 4 个硬编码注入函数全部迁入 DynamicInjector 管线
+- **4 个新注入器**：`StuckInjector` / `AntiConfabulationInjector` / `QualityInjector` / `IntentInjector`（注册于 `injection/`）
+- **QualityInjector budget 绕过**：`getResidualConfig()→undefined` 跳过残差检查 + token 预算（等价于旧版 `escalateQuality` 直接 `appendSystemReminder`）
+- **管线扩展**：`InjectContext` 加 `stuckContext` / `confabulationResult` / `qualitySignals` / `intentPhase` 字段，供消费型注入器通过 `_lastInjectContext` 读取
+- **方案文档**：`ZHU/DECISIONS/方案-注入系统三路径统一设计.md`
+
+### 修复
+- `router.ts` token 预算检查忽略 `residualCfg === undefined` 的注入器（L253）
+- `turn/index.ts` 移除 `stuckInjectedAtStep` 属性，`runQualityDetection()` 返回 `QDetectionResult | null`
+
+### 架构迁移
+```
+路径 A (DynamicInjector) ← 15 个注入器（原 11 + 4 迁移）
+路径 B (硬编码) ← 已清零（4 文件删除）
+路径 C (Guard) ← 已迁入（不变）
+```
+
+### 二开影响
+低。4 个旧文件已删除，未暴露公共 API 变更。外部配置无影响。构建命令参照 SOP 使用 `bash scripts/build-dev.sh`。
+
+### 文件变动
+```
+4 新建（injection/stuck, anti_confabulation, quality, intent-injector）
+4 修改（injector.ts, router.ts, manager.ts, turn/index.ts）
+4 删除（turn/injectors/stuck, anti_confabulation, quality, intent）
+```
+
+---
+
+## v0.8.12 — 路径 B 残留清理 + 偏差链修复（2026-07-08）
+
+### 修复
+- **路径 B 残留引用清理**：`turn/index.ts` 中 4 行 import + 4 处旧函数调用（`injectAntiConfabulation`/`injectStuckInjector`/`escalateQuality`/`injectIntentGuidance`）+ `stuckInjectedAtStep` 属性全部删除
+- **行为变体偏差链无法解除**：`tryResolveDeviationChain()` 缺失第 3 个条件分支（`'行为变体'`），导致 `guard_feedback_rule_2/3` 触发后永远无法 `deviationChainResolved = true`
+- **时序接线**：`turn/index.ts` 新增 `_intentPhase/_confabResult/_qualitySignals/_stuckContext` 4 个 class field，`injection.inject(context)` 在 `handleBeforeStep` 中携带全部检测结果
+
+### 二开影响
+低。旧函数名已全部删除，新管线是 v0.8.11 已注册的注入器子类。外部调用无直接影响。
+
+### 文件变动
+```
+4 修改（turn/index.ts, injection-system.md, pitfalls.md, CHANGELOG.md）
+```
+
+---
 
 ## v0.8.10 — 合并上游 v0.8.10（2026-07-07）
 
@@ -250,6 +313,26 @@ tags: [type/changelog, status/final, domain/system]
 ---
 
 ## 二开发日志（Mo-chong fork）
+
+### Phase30 — SYSTEM 参见互联核查 + SOP 升级（2026-07-08）
+
+#### 文档维护
+- **SYSTEM/ 23 文件参见互联核查** — 按 T0→T4 层级逐文件正查（自身参见准确性）+ 反查（其他文件是否缺本文件引用）+ 功能迁移状态。6 处修改
+- **6 处参见修改：**
+  - `architecture-overview.md`：删除参见（架构枢纽不需外指）
+  - `API-REFERENCE.md`：删除参见（接口签名表独立维护）
+  - `context-management.md`：+turn-control
+  - `attention-management.md`：+context-management +guard-engine
+  - `prompt-assembly.md`：+turn-control（重排列序）
+  - `compaction.md`：旧"体系集成"→标准参见制式 +turn-control
+  - `memory-store.md`：+pitfalls
+- **系统说明书维护SOP** — 新增 YAML frontmatter 规范（type/domain/status 三类可选值）、参见验证流程（Grep 正文文件名确认，≤5 条，不写人类语）、读回检查清单 7 项、决策树增加参见维护规则、禁止假关联和 updated 日期遗漏
+- **文档**：`ZHU/DECISIONS/记录-SYSTEM参见互联核查与SOP优化.md` / `ZHU/DECISIONS/INDEX.md` 计数 112→118
+
+#### 框架源码引用
+- 无（纯文档维护）
+
+---
 
 ### Phase26 — 缓存感知架构与审查日志系统（2026-07-04）
 

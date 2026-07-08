@@ -8,6 +8,10 @@ import { TodoListReminderInjector } from './todo-list';
 import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
 import { WorkingSetInjector } from './working-set';
+import { StuckInjector } from './stuck';
+import { AntiConfabulationInjector } from './anti_confabulation';
+import { QualityInjector } from './quality';
+import { IntentInjector } from './intent-injector';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -26,6 +30,11 @@ export class InjectionManager {
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],
       ['user-prefs', new UserPrefsInjector(agent)],
+      // 路径 B 迁移：原 turn/injectors/{stuck,anti_confabulation,quality,intent}.ts
+      ['system_ref_stuck', new StuckInjector(agent)],
+      ['anti_confabulation', new AntiConfabulationInjector(agent)],
+      ['quality_escalate', new QualityInjector(agent)],
+      ['intent_guidance', new IntentInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);

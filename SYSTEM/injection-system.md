@@ -1,7 +1,18 @@
-<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
-# 注入系统 / Injection System
+---
+tags: [type/reference, domain/injection, status/final]
+keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
+updated: 2026-07-08
+---
 
-> 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统的完整规范。
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+# 注入系统 / Injection System [P0]
+
+> **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-management.md`](attention-management.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
+>
+> 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
+> 15 个 DynamicInjector（路径 A 原生 11 个 + 路径 B 迁移 4 个）。
+> 路径 B 已清零（Phase22，2026-07-08）。详见 ZHU/DECISIONS/方案-注入系统三路径统一设计.md。
+> 路径 C (Guard) 已迁入（GuardInjector），注册于 `guard-injector.ts`。
 
 ---
 
@@ -52,36 +63,6 @@ export interface VariantMeta {
 
 `InsertPosition` 决定系统提醒注入到消息列表的位置，利用 Transformer 注意力曲线的 U 形特性：
 
-<<<<<<< Updated upstream
-| 位置 | 注意力等级 | 优先级权重 | 说明 |
-|------|-----------|-----------|------|
-| `'AFTER_SYSTEM'` | HIGH | 1000 | 系统提示之后（primacy effect），用于 S/A 级约束 |
-| `'MID_CONTEXT'` | MEDIUM | 500 | 上下文中间位置 |
-| `'AFTER_TOOL_CALL'` | LOW | 0 | 工具调用之后，默认 |
-| `'CONTEXT_BOTTOM'` | NEAR_ZERO | -500 | 上下文底部，注意力最低（融合预留） |
-| `'ATTENTION_PEAK'` | DYNAMIC | 9999 | 注意力峰值动态位置（融合预留，最高注入优先级） |
-
-优先级通过 `getPositionPriorityBoost(pos: InsertPosition): number` 计算，dispatch 排序时使用。
-
-### POSITION_ATTENTION 旧版映射
-
-`position-strategy.ts:32-34` 保留旧版等级→位置映射兼容层：
-
-```typescript
-export const POSITION_ATTENTION: Record<string, InsertPosition> = {
-  S: InsertPosition.AFTER_SYSTEM, A: InsertPosition.AFTER_SYSTEM,
-  B: InsertPosition.MID_CONTEXT, C: InsertPosition.AFTER_TOOL_CALL, D: InsertPosition.AFTER_TOOL_CALL,
-};
-```
-
-| 等级 | 映射位置 | 权重 |
-|------|---------|------|
-| S | AFTER_SYSTEM | 1000 |
-| A | AFTER_SYSTEM | 1000 |
-| B | MID_CONTEXT | 500 |
-| C | AFTER_TOOL_CALL | 0 |
-| D | AFTER_TOOL_CALL | 0 |
-=======
 | 位置 | 注意力等级 | 说明 |
 |------|-----------|------|
 | `'head'` / `'near_head'` | HIGH | 消息列表前部，primacy effect，用于 S/A 级约束 |
@@ -89,9 +70,8 @@ export const POSITION_ATTENTION: Record<string, InsertPosition> = {
 | `'CONTEXT_BOTTOM'` | LOW | 上下文底部，注意力最低 |
 | `'ATTENTION_PEAK'` | DYNAMIC | 注意力峰值动态位置，由注意力路由决定 |
 
-> `'head'` / `'near_head'` / `'tail'` 是当前使用值（Step 3 将统一为枚举类型）；
+> `'head'` / `'near_head'` / `'tail'` 是当前使用值；
 > `'CONTEXT_BOTTOM'` / `'ATTENTION_PEAK'` 为融合计划新增预留值。
->>>>>>> Stashed changes
 
 ### 当前注册表（31 变体，见 variant-registry.ts:277-331）
 
@@ -118,6 +98,9 @@ export function getScore(variant: string, stepDelta: number): number {
 ---
 
 ## 3. 残差注意力系统 (Residual Attention System)
+
+> 别名：残差注意力 / 残差门控 / ResidualGate
+> 对应代码：TokenBudgetManager, ResidualScheduler
 
 残差注意力是其核心门控机制：每次注入后，同一变体的注意力残差随时间指数衰减。只有当残差值 **低于** threshold 时（R < T），代表该规则的记忆已足够淡化，才会允许再次注入。
 
@@ -148,7 +131,7 @@ VariantMeta.weight ← 基础权重
 |--------|------------|-------------|-------------------|-----------|
 | `system_trigger_*` | 3 | 0.15 | 0.95 | 系统触发 |
 | `deviation_chain_*` | 3 | 1.20 | 0.90 | 偏差链检测 |
-| `intent_*` | 6 | 0.50 | 0.50 | intent.ts |
+| `intent_*` | 6 | 0.50 | 0.50 | intent-injector.ts |
 | `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
 | `post_*` | 6 | 0.20 | 0.50 | 6 个注入器 |
 | `step_after_*` | 3 | 0.20 | 0.50 | 6 个注入器 |
@@ -163,6 +146,9 @@ VariantMeta.weight ← 基础权重
 ---
 
 ## 4. 注入管线 (Injection Pipeline)
+
+> 别名：注入管线 / InjectionRouter
+> 对应代码：InjectionManager (manager.ts), InjectionRouter (router.ts)
 
 融合后架构分为两层：**InjectionManager（高层 API）** → **InjectionRouter（调度内核）**。
 
@@ -226,18 +212,22 @@ export class InjectionRouter {
 
 ```
 InjectionRouter.dispatch(context)
-  ├─ 遍历所有注册 injectors（按注册顺序）
+  ├─ 遍历所有注册 injectors（按 priority 排序）
   │   ├─ 跳过 disabled 注入器
-  │   ├─ scheduler.shouldInject(id, context) → 残差过滤
+  │   ├─ getResidualConfig() 获取残差配置
+  │   ├─ residualCfg === undefined → 跳过残差检查 + 预算过滤（如 QualityInjector）
+  │   ├─ residualCfg !== undefined → scheduler.shouldInject(id, context) → 残差过滤
   │   ├─ getCacheGroup(id) → 分组缓存管理
-  │   ├─ injector.inject(context) → 实际生成注入内容
+  │   ├─ injector.inject(context) → 实际生成注入内容（存入 _lastInjectContext）
   │   ├─ scheduler.record(id, enabledVariants) → 调度记录
-  │   └─ tokenBudgetCheck() → 预算过滤
+  │   └─ tokenBudgetCheck(residualCfg) → 预算过滤（residualCfg===undefined 时跳过）
   ├─ 按位置优先级排序（getPositionPriorityBoost）
   └─ 返回排序后的 InjectResult[]
 ```
 
 **缓存诊断**: `dispatch()` 末尾保存本轮注入结果到 `_lastInjectResults`，通过 `getLastInjectResults(): InjectResult[]` 暴露。`turn/index.ts:afterStep` 读取后传入 `buildAuditEntry` 写入审计日志。
+
+**路径 B 迁移**: `turn/injectors/{stuck,anti_confabulation,quality,intent}.ts` 已删除。四个功能均包装为 DynamicInjector 子类注册于 `injection/` 目录。getResidualConfig() 返回 undefined 的注入器（QualityInjector）绕过预算检查。详见 `ZHU/DECISIONS/方案-注入系统三路径统一设计.md`。
 
 ### 4.2 InjectionManager 接口
 
@@ -317,9 +307,11 @@ TurnFlow.composeContextMessages()
   └─ 传递到 context()
 
 TurnFlow.handleAfterStep()  ← 本轮工具调用后
-  ├─ collectInjectorFacts()  ← 收集注入器状态（Phase22.2）
-  ├─ 更新 stuck 检测历史
-  ├─ router.recordInjection(variant, step) ← Step 6：统一注入监控
+  ├─ detectConfabulation()  ← 反事实检测（拦截仍在收敛门）
+  ├─ runQualityDetection() → qualityIssue  ← 质量偏差检测（返回 QDetectionResult | null）
+  ├─ injection.inject({stuckContext, confabulationResult, qualitySignals})  ← Step 6：统一注入管线
+  │    └─ 通过 _lastInjectContext 传递给 StuckInjector / AntiConfabulationInjector / QualityInjector
+  ├─ shouldContinueAfterStop()  ← 收敛门（含 confaBlocked 硬拦截）
   └─ 重置 step 级计数器
 ```
 
@@ -344,24 +336,31 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 
 ## 6. 注入器清单 (Injector Catalog)
 
+> 别名：注入器列表 / DynamicInjector 清单
+> 对应代码：DynamicInjector (injection/injector.ts) + 15 个子类
+
 ### 当前注入器
 
-| 文件 | 变体数 | 等级 | 触发条件 | 注入内容 |
-|------|-------|------|---------|---------|
-| `goal.ts` | 3 | C | 计划模式 step | 计划目标提醒 |
-| `memory-rules.ts` | 2 | C | 场景记忆匹配 | 记忆规则提示 |
-| `permission-mode.ts` | 4 | A/B | 权限模式切换 | 模式限制说明 |
-| `plan-mode.ts` | 5 | B | 计划模式行为 | 计划行为约束 |
-| `plugin-session-start.ts` | 2 | C | 插件会话启动 | 会话初始提醒 |
-| `todo-list.ts` | 3 | C | todo 列表变化 | todo 状态更新 |
-| `user-prefs.ts` | 1 | S | 每轮（路径 B） | 用户偏好 |
-| `wolfpack.ts` | 2 | C | WolfPack 调用 | WolfPack 行为说明 |
-| `working-set.ts` | 6 | B/C | working set 变化 | 文件关注提醒 |
-| `stuck.ts` | 1 | D | 同一文件连续编辑≥3步 | 文档导航提示 |
-| `guard-injector.ts` | 1 | A | history ≥ 3 条（融合新增） | 守卫反馈（`injectionVariant: 'guard-feedback'`） |
-| `error-audit-injector.ts` | 1 | B | 最近 5 条有失败记录（融合新增） | 文件操作审计错误摘要（`injectionVariant: 'error-audit'`） |
+| 文件 | 变体数 | 等级 | 触发条件 | 注入内容 | 迁移来源 |
+|------|-------|------|---------|---------|---------|
+| `goal.ts` | 3 | C | 计划模式 step | 计划目标提醒 | 路径 A 原生 |
+| `memory-rules.ts` | 2 | C | 场景记忆匹配 | 记忆规则提示 | 路径 A 原生 |
+| `permission-mode.ts` | 4 | A/B | 权限模式切换 | 模式限制说明 | 路径 A 原生 |
+| `plan-mode.ts` | 5 | B | 计划模式行为 | 计划行为约束 | 路径 A 原生 |
+| `plugin-session-start.ts` | 2 | C | 插件会话启动 | 会话初始提醒 | 路径 A 原生 |
+| `todo-list.ts` | 3 | C | todo 列表变化 | todo 状态更新 | 路径 A 原生 |
+| `user-prefs.ts` | 1 | S | 每轮 | 用户偏好 | 路径 A 原生 |
+| `wolfpack.ts` | 2 | C | WolfPack 调用 | WolfPack 行为说明 | 路径 A 原生 |
+| `working-set.ts` | 6 | B/C | working set 变化 | 文件关注提醒 | 路径 A 原生 |
+| `guard-injector.ts` | 1 | A | history ≥ 3 条 | 守卫反馈 | 路径 C 迁入 |
+| `error-audit-injector.ts` | 1 | B | 最近 5 条有失败记录 | 文件操作审计错误摘要 | 路径 A 原生 |
+| `stuck.ts` | 1 | D | 同一文件连续编辑≥3步 / 同工具报错≥2步 | 文档导航提示 | 路径 B 迁入 ✅ |
+| `anti_confabulation.ts` | 1 | C | ConfabulationDetector 得分 ≥ 2 | 反事实提醒 | 路径 B 迁入 ✅ |
+| `quality.ts` | 1 | —(绕过 budget) | QualityDetector 信号 | 语气升级 | 路径 B 迁入 ✅ |
+| `intent-injector.ts` | 1 | B | 意图检测命中 | 行为指导 (B/A 级) | 路径 B 迁入 ✅ |
 
-> **活跃总数**: 12 个注入器，约 31 变体。`quality.ts / confabulation.ts` 已弃用（功能迁移到 turn/index.ts 硬编码注入）。
+> **活跃总数**: 15 个注入器。`turn/injectors/` 中旧版硬编码文件（stuck/anti_confabulation/quality/intent）已删除。
+> 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数）全部迁入路径 A（DynamicInjector 管线）。
 
 ### DynamicInjector 基类
 
@@ -439,8 +438,6 @@ agent.injection.getRouter().enable('error-audit');
 | 注入器 | 变体 | 等级 | 作用 |
 |--------|------|------|------|
 | `injectors/facts.ts` | `injector_facts` | C/D | 将注入器状态暴露为结构化 flat facts 给 AI |
-| 未来：回环检测 | `loop_detector` | B | 检测 AI 陷入同一函数反复修改的循环 |
-| 未来：上下文水位 | `context_watermark` | B | 检测 context 接近上限时注入压缩建议 |
 
 ---
 

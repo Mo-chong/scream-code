@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/agent-hierarchy, status/final]
+keywords: [AGENTS, hierarchy, 层级, 规则叠加, L0, L1, L2]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # AGENTS.md Hierarchy Design [P0]
 
+> **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合控制）
+>
 > 框架: system.md 定义不可违抗的引擎行为 | AGENTS.md 提供领域规则 + 注意力引导 | 两者叠加，各司其职
 
 ---

@@ -1,3 +1,9 @@
+---
+tags: [type/reference, domain/pitfalls, status/final]
+keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 踩坑与经验记录 — Pitfalls & Lessons
 
@@ -44,15 +50,15 @@
 **解决**：三步验证法：
 
 ```bash
-# Step 1: 查 dist 产物
+## Step 1: 查 dist 产物
 grep "yongjiu" packages/memory/dist/index.mjs
 grep "yongjiu" apps/scream-code/dist/app-*.mjs
 
-# Step 2: 查 bundle hash
+## Step 2: 查 bundle hash
 ls -la apps/scream-code/dist/
 cat apps/scream-code/dist/main.mjs
 
-# Step 3: 运行测试
+## Step 3: 运行测试
 npx vitest run packages/memory/test/tier-yongjiu.test.ts
 ```
 
@@ -424,11 +430,46 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 **替代**：`stuck` 注入器走残差系统。检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步），受 budget/dedup/残差三重门控。
 
-### 两套 ResNet 关系
+### 路径 B 迁移路径 C 式包装的检测分离问题
 
-**记忆 ResNet**：天级幂衰减（store.ts:1281-1287 + scoring.ts:162-163）
-**注入调度 ResNet**：步级幂衰减（variant-registry.ts L319-345）
-公式均为 `R = W×D^Δs`，但衰减维度和时间尺度不同。
+**现象**：`sed -i` 批量移除 `override` 关键字时同时损坏了 4 个文件的缩进，`name/description/priority` 属性缩进多 4 个空格。编译通过但代码风格污染。
+
+**根因**：
+- `sed -i` 配合正则替换时无法区分"基类声明了 abstract override"和"基类没声明"的上下文差异
+- 批处理操作（替换 4 个文件 × 3 个属性 = 12 处）容易被 `sed` 的正则锚定问题切伤
+- `override` 关键字在子类中是否必要取决于基类：有 `abstract` 声明时需要，无则不需要
+
+**解决**：逐文件 Read 确认受损属性，Edit 回退缩进（4 文件 × 3 属性 = 12 处修正），然后 `tsc --noEmit` 验证。
+
+**教训**：涉及 `override` 关键字的批处理操作优先用 `Read + Edit` 逐文件确认，不用 `sed -i`。`Edit` 工具精准匹配不伤周围代码。
+
+### turn/index.ts CRLF 导致 Edit 无法命中
+
+**现象**：`Edit` 持续返回 "old_string not found"，但 Read 明确显示目标字符串存在。
+
+**根因**：turn/index.ts 是 CRLF 行尾文件。Read 自动将 CRLF 转写为 LF 显示，但 Edit 的 old_string 需要匹配 CRLF 文件的实际内容。连续多次 Edit 后文件在工具内部经历了 CRLF→LF→CRLF 转换，行号偏移。
+
+**解决**：用 `sed -i 's/精确字符串/替换字符串/'` 绕过 Edit 的 CRLF 解析层。替换后立即 `grep -c` 验证命中次数。
+
+**教训**：CRLF 文件的第一选择是 `Edit`（它处理 CRLF 映射），第二选择是 `sed -i` 简单字符串替换（不依赖行尾锚定）。Node `replace()` 在 CRLF 文件上最不可靠。
+
+### DynamicInjector 子类 override 关键字规则（2026-07-08）
+
+**现象**：新建 4 个 DynamicInjector 子类时先写了 `override get` 后改为裸 `get`，最终又加回 `override`。
+
+**根因**：基类 `injector.ts` 中 `name/description/priority/getResidualConfig/onContextClear/onContextCompacted/getInjection` 均声明为 `abstract`，子类必须加 `override`。`sed -i` 替换时不知道哪些属性是基类 abstract 的。
+
+**预防**：新建 DynamicInjector 子类时参考现有的 `goal.ts` 或 `guard-injector.ts` 拷贝 `override` 模式。所有 6 个可重写方法全部加 `override`。`injectionVariant` 字段也是 `readonly` 需要 `override readonly`。
+
+### 路径 B→A 迁移后旧调用未删除导致双轨并行（2026-07-08）
+
+**现象**：4 个 DynamicInjector 子类（stuck/anti_confabulation/quality/intent）已创建并注册到 InjectionManager，但 turn/index.ts 中 4 处旧函数调用未被删除。旧 `turn/injectors/*.ts` 文件被物理删除后，构建断裂。
+
+**根因**：中间状态——新 DynamicInjector 子类已完成（路径 A），旧路径 B 的 4 个 import + 4 个调用点未同步清理，4 个旧文件被删后 import 悬空。
+
+**解决**：删除 4 行 import + 4 处调用 + `stuckInjectedAtStep` 属性，改为 class field `_intentPhase/_confabResult/_qualitySignals/_stuckContext` 跨步骤传递检测结果，统一走 `injection.inject(context)` 管线。`tryResolveDeviationChain()` 新增行为变体偏差链解除分支。
+
+**教训**：路径迁移不能只做完新的就认为完事了。旧调用的删除必须和新注册在同一轮完成，否则中间态构建断裂。
 
 ---
 

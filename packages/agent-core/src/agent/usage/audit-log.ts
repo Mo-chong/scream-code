@@ -219,10 +219,9 @@ export function detectApiKeySwitch(
   const drop = prevMetrics.hitRatio - currMetrics.hitRatio;
   if (drop < 0.2) return false;
 
-  // 注入保护：有注入但缓存退化不够极端（效率≥5%）→ 判定为注入导致
-  // 若效率极低（<5%）即使有注入也判定为API切换
-  // 理由：实际数据验证——API切换效率0-5%；注入（含S级）效率50%+，完全可分
-  if (injectedCount > 0 && hitEfficiency >= 0.05) return false;
+  // 注入保护：有任何注入 → 不判定为API切换。注入会改prompt前缀，影响缓存命中率。
+  // 这是最高优先级规则——宁可漏判API切换，绝不误判注入导致的缓存降低。
+  if (injectedCount > 0) return false;
 
   return true;
 }

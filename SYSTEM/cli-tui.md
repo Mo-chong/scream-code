@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/tui, status/final]
+keywords: [CLI, TUI, 调试, debug, 日志查看]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # CLI/TUI 层交互
 
+> **参见：** [`turn-control.md`](turn-control.md)（回合控制主流程） | [`architecture-overview.md`](architecture-overview.md)（架构全景）
+>
 > 源码: `apps/scream-code/src/tui/`
 
 ---

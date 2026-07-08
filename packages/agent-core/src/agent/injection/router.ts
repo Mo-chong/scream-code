@@ -44,6 +44,36 @@ export function getCacheGroup(variant: string): CacheGroup {
 // ─── 类型 ───────────────────────────────────────────────────────────
 
 /**
+ * Stuck 检测上下文，由 TurnFlow 在 afterStep 中填充。
+ */
+export interface StuckInjectorContext {
+  /** 当前步各工具调用次数 */
+  readonly stepToolCounts: Record<string, number>;
+  /** 连续编辑未查代码次数 */
+  readonly editWithoutLookupCount: number;
+  /** 查询指定文件的编辑次数 */
+  readonly getFileEditCount: (file: string) => number;
+}
+
+/**
+ * 反事实检测结果，由 ConfabulationDetector 产生。
+ */
+export interface ConfabulationDetectionResult {
+  readonly confidence: number;
+  readonly details: string;
+  readonly evidence: string;
+}
+
+/**
+ * 质量偏差信号，由 QualityDetector 产生。
+ */
+export interface QualityDeviationSignal {
+  readonly signal: string;
+  readonly severity: 'C' | 'B' | 'A' | 'S';
+  readonly message: string;
+}
+
+/**
  * 注入上下文。dispatch() 的输入参数，描述当前回合状态。
  */
 export interface InjectContext {
@@ -61,6 +91,15 @@ export interface InjectContext {
    * undefined = 无预测数据，不启用缓存感知过滤。
    */
   readonly predictedHitRatio?: number;
+  // ── 以下字段用于路径 B 注入器迁移（由 TurnFlow 在 runtime 填充） ──
+  /** Stuck 检测上下文 */
+  readonly stuckContext?: StuckInjectorContext;
+  /** 反事实检测结果 */
+  readonly confabulationResult?: ConfabulationDetectionResult;
+  /** 质量偏差信号数组 */
+  readonly qualitySignals?: readonly QualityDeviationSignal[];
+  /** 意图检测结果 */
+  readonly intentPhase?: string;
 }
 
 /**
@@ -210,8 +249,8 @@ export class InjectionRouter {
         }
       }
 
-      // ⑥ Token 预算检查
-      if (!this.tokenBudgetCheck(injectionCount + 1)) {
+      // ⑥ Token 预算检查（residualCfg === undefined 表示不参与预算控制）
+      if (residualCfg !== undefined && !this.tokenBudgetCheck(injectionCount + 1)) {
         continue;
       }
 

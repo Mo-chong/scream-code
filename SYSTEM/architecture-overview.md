@@ -1,168 +1,238 @@
-<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
-# 整体架构
+---
+tags: [type/reference, domain/architecture, status/final]
+keywords: [架构, architecture, 全景, 子系统, 数据流]
+updated: 2026-07-08
+---
 
-> 0→4 层分层图。每 `##` 独立 knowledge chunk。Agent 类结构在本文件第 2 层。踩坑/版本历史在 `SYSTEM/pitfalls.md`。
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+# Scream Code 系统全景 [P0]
+
+> **AI 上手入口** — 首次接入本文档是整个 SYSTEM/ 的第一份阅读材料。读完即可理解全局架构、核心创新、子系统关系和数据流。
 
 ---
 
-## 第 0 层：Monorepo 包结构
+## §1 系统定义 [P0]
 
-| 包 | 位置 | 职责 |
+**Scream Code** 是一个 AI Agent 运行时框架，提供：
+
+- **通用 Agent 运行时** — 回合控制、工具执行、上下文管理、注入调度
+- **记忆系统** — SQLite + FTS5 + vec0 向量搜索、热冷升降、Dream 合并
+- **知识库** — 文档摄取、向量化、multiSearch
+- **LLM 适配层** — 统一 Anthropic/Ollama/OpenAI 接口
+- **CLI/TUI 入口** — `scream` 命令
+
+### 1.1 定位
+
+| 维度 | 说明 |
+|------|------|
+| 不是 | 聊天机器人框架、IDE 插件、工作流引擎 |
+| 是 | Agent 运行时框架、AI 交互协议实现、Prompt 工程平台 |
+| 目标用户 | AI Agent 开发者、Prompt 工程师 |
+| 核心创新 | 残差注意力门控注入系统、AGENTS.md 规则三层加载、收敛性回合控制 |
+
+### 1.2 入口点
+
+| 路径 | 说明 |
+|------|------|
+| `apps/scream-code/` | CLI 入口 `scream.cmd`，命令分发 + Agent 实例化 |
+| `packages/agent-core/` | 核心运行时（回合控制、注入、工具、上下文） |
+| `packages/memory/` | 记忆存储 |
+| `packages/knowledge/` | 知识库 |
+| `packages/ltod/` | LLM 提供商适配 |
+
+---
+
+## §2 五大核心创新 [P1]
+
+### 2.1 注入系统 (Injection System) — 核心创新
+
+**文件**: `packages/agent-core/src/agent/injection/*.ts` | **系统说明书**: `SYSTEM/injection-system.md`
+
+AI Agent 本质上是一个「注入运行时」：每步对话必须向 prompt 追加 system-reminder（注入），以控制 AI 行为。Scream Code 的注入系统提供了：
+
+- **Plugin 化 DynamicInjector** — 11 个注入器，每个文件负责一种行为控制
+- **残差注意力门控** — 公式 `R = W × D^Δs`，避免同一变体重注入、控制注入频率
+- **三层调度** — InjectionRouter → VariantScheduler（频率） → PositionStrategy（位置）
+- **三路径架构**（A/B/C，A 已受控，B/C 待迁移）
+
+详见 SYSTEM/injection-system.md。
+
+### 2.2 回合控制 (Turn Control)
+
+**文件**: `packages/agent-core/src/agent/turn/index.ts` (1737 行) | **系统说明书**: `SYSTEM/turn-control.md`
+
+Agent 每步执行的核心循环：
+
+```
+runOneTurn()
+  → perTurnSetup()
+  → applyUserPromptHook()
+  → 主循环 (while shouldContinue)
+      → generate()        ← AI 生成
+      → afterStep()       ← 检测 + 注入 + Guard
+      → shouldContinueAfterStop()  ← 收敛门
+```
+
+**收敛门** (convergence gate) 是核心设计：每次 AI 生成后检查是否需要继续/停止，而非固定轮数。
+
+### 2.3 上下文管理 (Context Management)
+
+**文件**: `packages/agent-core/src/agent/context/` | **系统说明书**: `SYSTEM/context-management.md`
+
+三层上下文管理：
+1. **ContentArchive** — LRU 2000 条 / 30min TTL，存完整的 tool result
+2. **MicroCompaction** — 轻量压缩，移除旧 tool result + 遮蔽 tool observations
+3. **FullCompaction** — LLM 总结压缩，75% headroom 触发，含 `_maxTries` 安全门控
+
+### 2.4 Guard 引擎 (Guard Engine)
+
+**文件**: `packages/agent-core/src/agent/turn/guard-engine.ts` | **系统说明书**: `SYSTEM/guard-engine.md`
+
+4 条 AI 行为 Guard 规则 + 反事实检测：
+
+| 规则 | 检测 | 修复提示 |
+|------|------|---------|
+| RecursionLock | 同工具循环调用 ≥3 次无其他工具 | 尝试不同方法 |
+| DetourCheck | 提示 error → bash → 报错 → 再 bash 的绕路模式 | 阅读文档/搜索代码 |
+| RunAwayStep | 连续 3+ 次工具失败且信任级高 | 停止 → 重新思考 |
+| ToolChain | 同一工具连续调用 ≥3 次且结果均失败 | 切换方法 |
+
+Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）。
+
+### 2.5 注意力管理 (Attention Management)
+
+**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-management.md`
+
+- **31 个变体**，分级 S/A/B/C/D（S 最高优先级）
+- **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
+- **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
+- **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
+
+---
+
+## §3 五层架构 [P0]
+
+```
+第 4 层: 外部系统
+  LLM (Anthropic/Ollama/OpenAI) | MCP 服务器 | SQLite | Python fastembed
+
+第 3 层: 内置工具
+  code/ (Read/Write/Edit/Glob/Grep/Bash/LSP) | memory/ | context/ | knowledge/
+
+第 2 层: Agent 类 (所有子系统的容器)
+  turn/index.ts | injection/ | detectors/ | guard-engine | compaction
+
+第 1 层: agent-core 包
+  agent/ | tools/ | permission/ | context/
+
+第 0 层: Monorepo 包
+  agent-core | memory | scream-code | knowledge | ltod
+```
+
+### 3.1 第 0 层 — Monorepo 包
+
+| 包 | 路径 | 职责 |
 |----|------|------|
 | `agent-core` | `packages/agent-core/` | 回合控制、注入、检测器、Guard、工具执行、上下文管理、拦截日志、压缩 |
 | `memory` | `packages/memory/` | 记忆存储（SQLite + FTS5 + vec0）、热冷升降、Dream 合并、评分 |
-| `scream-code`（入口） | `apps/scream-code/` | CLI + TUI、命令分发、Agent 实例化、MCP 客户端 |
+| `scream-code` (入口) | `apps/scream-code/` | CLI + TUI、命令分发、Agent 实例化、MCP 客户端 |
 | `knowledge` | `packages/knowledge/` | 知识库（SQLite + fastembed + LLM 事件抽取）、multiSearch、ingest |
 | `ltod` | `packages/ltod/` | LLM 提供商（Anthropic/Ollama/OpenAI）、max_tokens 天花板、请求构建 |
 
-**构建链：** `tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` → 修改任意 `@scream-*` 包必须两段构建 `pnpm build（agent-core/knowledge/memory）→ pnpm build（scream-code）`
+**构建链**: `tsdown.config.ts` 中 `deps.alwaysBundle: [/^@scream-./]` → 修改任意 `@scream-*` 包必须两段构建：
+```
+pnpm build (agent-core / knowledge / memory) → pnpm build (scream-code)
+```
 
----
-
-## 第 1 层：agent-core 包结构
+### 3.2 第 1 层 — agent-core 包结构
 
 ```
 packages/agent-core/src/
 ├── agent/
-│   ├── index.ts           ← Agent 类（所有子系统的容器，见第 2 层）
+│   ├── index.ts               ← Agent 类（所有子系统容器）
 │   ├── turn/
-│   │   ├── index.ts       ← 回合控制核心（runOneTurn → afterStep → shouldContinueAfterStop）
-│   │   ├── guard-engine.ts← 4 条 AI 行为 Guard 规则
+│   │   ├── index.ts           ← 回合控制核心（runOneTurn → afterStep → shouldContinueAfterStop）
+│   │   ├── guard-engine.ts    ← 4 条 AI 行为 Guard + 反事实检测
+│   │   ├── variant-registry.ts← VariantScheduler（残差公式 R=W×D^Δs）
 │   │   ├── truncation-tracker.ts ← 截断自动恢复 + 步级竞争保护
-│   │   └── variant-registry.ts   ← VariantScheduler（残差公式 R=W×D^Δs）
+│   │   └── injectors/         ← 传统注入器（stuck.ts 等）
 │   ├── context/
-│   │   ├── index.ts       ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
-│   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条/30min TTL）
-│   │   ├── masking.ts     ← maskToolObservations（遮蔽旧 tool result）
-│   │   └── stabilize.ts   ← stabilizePrefix（KV-cache 命中率提升）
+│   │   ├── index.ts           ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
+│   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条 / 30min TTL）
+│   │   ├── masking.ts         ← maskToolObservations（遮蔽旧 tool result）
+│   │   ├── stabilize.ts       ← stabilizePrefix（KV-cache 命中率提升）
+│   │   └── compaction/
+│   │       ├── micro.ts       ← MicroCompaction
+│   │       └── full.ts        ← FullCompaction（含 _maxTries 安全门控）
 │   ├── injection/
-│   │   ├── manager.ts           ← InjectionManager（DynamicInjector 注册表）
-│   │   ├── injector.ts          ← DynamicInjector 抽象基类
+│   │   ├── manager.ts         ← InjectionManager（DynamicInjector 注册表）
+│   │   ├── injector.ts        ← DynamicInjector 抽象基类
+│   │   ├── router.ts          ← InjectionRouter + InjectContext 类型
 │   │   ├── position-strategy.ts ← system-reminder 位置策略
-│   │   ├── user-prefs.ts        ← 用户偏好注入（路径 B）
-│   │   ├── goal.ts              ← 计划模式注入
-│   │   ├── memory-rules.ts      ← 场景记忆注入
-│   │   ├── permission-mode.ts   ← 权限模式注入
-│   │   ├── plan-mode.ts         ← 计划行为注入
-│   │   ├── plugin-session-start.ts ← 插件会话注入
-│   │   ├── todo-list.ts         ← Todo 列表注入
-│   │   ├── wolfpack.ts          ← WolfPack 行为注入
-│   │   └── working-set.ts       ← Working Set 注入
+│   │   ├── guard-injector.ts  ← GuardInjector（路径 C 迁移完成）
+│   │   └── 11 个注入器文件（goal/user-prefs/plan-mode/memory-rules/...）
 │   ├── detection/
-│   │   ├── scene-memory.ts     ← SceneMemoryDetector
-│   │   ├── code-ref.ts         ← CodeRefDetector
-│   │   ├── code-quality.ts     ← CodeQualityDetector
-│   │   ├── confabulation.ts    ← ConfabulationDetector
-│   │   └── quality.ts          ← QualityDetector（5 种信号）
+│   │   ├── scene-memory.ts    ← SceneMemoryDetector
+│   │   ├── code-ref.ts        ← CodeRefDetector
+│   │   ├── code-quality.ts    ← CodeQualityDetector
+│   │   ├── confabulation.ts   ← ConfabulationDetector
+│   │   └── quality.ts         ← QualityDetector（5 种信号）
 │   ├── interception/
-│   │   └── event-log.ts        ← 环形缓冲区 + 磁盘持久化
+│   │   └── event-log.ts       ← 环形缓冲区 + 磁盘持久化
 │   └── audit/
-│       └── file-action-audit.ts ← FAA（刷盘 / 熔断 / 查错注入）
-├── tools/
-│   └── builtin/
-│       ├── code/    ← Edit/Read/Write/Glob/Grep/Bash/LSP
-│       ├── memory/  ← MemoryLookup/MemoryWrite/MemoryEdit
-│       ├── context/ ← ArchiveRecoverTool
-│       └── knowledge/ ← KnowledgeLookupTool
-├── permission/        ← 权限管理
-└── context/
-    ├── types.ts       ← ContextMessage.protected
-    └── compaction/
-        ├── micro.ts   ← MicroCompaction
-        ├── full.ts    ← FullCompaction（含 _maxTries 安全门控）
-        └── ...
+│       └── file-action-audit.ts ← FAA（刷盘/熔断/查错注入）
+├── tools/builtin/
+│   ├── code/                  ← Edit/Read/Write/Glob/Grep/Bash/LSP
+│   ├── memory/                ← MemoryLookup/MemoryWrite/MemoryEdit
+│   ├── context/               ← ArchiveRecoverTool
+│   └── knowledge/             ← KnowledgeLookupTool
+├── permission/                ← 权限管理
+└── context/                   ← 上下文类型定义
 ```
 
----
-
-## 第 2 层：Agent 类组合
+### 3.3 第 2 层 — Agent 类组合
 
 **文件**: `packages/agent-core/src/agent/index.ts`
 
-### 组合属性
+Agent 是「容器」——不处理业务逻辑，业务在 `turn/index.ts` 中。
 
 | 属性 | 类型 | 可选 | 说明 |
-|------|------|------|------|
-| `modelProvider` | `LlmCaller` | 否 | LLM 调用接口 |
-| `tools` | `ToolCollection` | 否 | 注册的工具集合 |
-| `history` | `ContextMessage[]` | 否 | 完整对话历史 |
-| `convergenceGate` | object | 否 | 收敛检查 + 注入 + 停止 |
-| `injectionManager` | `InjectionManager` | 否 | 注入管线 |
-| `turnController` | 内置 | 否 | 回合控制器 |
-| `permission` | `PermissionManager` | 否 | 权限管理 |
-| `memoStore` | `MemoryMemoStore` | **是** | 记忆存储（sub agent 没有） |
-| `knowledgeStore` | `KnowledgeStore` | **是** | 知识库（sub agent 没有） |
-| `knowledgeAvailable` | boolean | **是** | 知识库可用性 |
-| `sceneMemoryDetector` | `SceneMemoryDetector` | 否 | 场景记忆检测 |
-| `codeRefDetector` | `CodeRefDetector` | 否 | 代码引用检测 |
-| `codeQualityDetector` | `CodeQualityDetector` | 否 | 代码质量检测 |
-| `confabulationDetector` | `ConfabulationDetector` | 否 | 反事实检测 |
-| `qualityDetector` | `QualityDetector` | 否 | 质量检测 |
-| `fileActionAudit` | `FileActionAudit` | **是** | FAA（sub agent 没有） |
-| `eventLog` | `InterceptionEventLog` | **是** | 拦截日志（sub agent 没有） |
+|------|------|:----:|------|
+| `modelProvider` | `LlmCaller` | | LLM 调用接口 |
+| `tools` | `ToolCollection` | | 注册的工具集合 |
+| `history` | `ContextMessage[]` | | 完整对话历史 |
+| `convergenceGate` | object | | 收敛检查 + 注入 + 停止 |
+| `injectionManager` | `InjectionManager` | | 注入管线 |
+| `turnController` | 内置 | | 回合控制器 |
+| `permission` | `PermissionManager` | | 权限管理 |
+| `memoStore` | `MemoryMemoStore` | ✅ | 记忆存储（sub agent 没有） |
+| `knowledgeStore` | `KnowledgeStore` | ✅ | 知识库（sub agent 没有） |
+| `sceneMemoryDetector` | `SceneMemoryDetector` | | 场景记忆检测 |
+| `codeRefDetector` | `CodeRefDetector` | | 代码引用检测 |
+| `codeQualityDetector` | `CodeQualityDetector` | | 代码质量检测 |
+| `confabulationDetector` | `ConfabulationDetector` | | 反事实检测 |
+| `qualityDetector` | `QualityDetector` | | 质量检测 |
+| `fileActionAudit` | `FileActionAudit` | ✅ | FAA（sub agent 没有） |
+| `eventLog` | `InterceptionEventLog` | ✅ | 拦截日志（sub agent 没有） |
 
-### 回合控制流
-
-```
-turnController.step(stepTool) →
-  convergenceGate.beforeStep() → injectors → LLM → executeTool →
-  afterStep() → [detectors run] → shouldContinueAfterStop() →
-    [stopped → return | continued → loop]
-```
-
-### afterStep 流程
-
-1. `afterStep(lastToolResult, stepToolSummary)`
-2. 更新 injector 步号
-3. 运行 injectors（按顺序：anti_confabulation → budget → quality → stuck）
-4. `injectStuckInjector()` — 检测 3 种 stuck 模式（同文件连续编辑≥3步/同工具连续报错≥2步）
-5. Guard 规则检测（guard-engine.ts）
-6. `resetInjectorStepState()`
-7. `shouldContinueAfterStop()` — 检查是否应该停止
-
-### FAA 收敛门
-
-```
-步末 → convergence_gate 检查器队列
-  └─ FAA checker: lastToolFailure?.isExploratory === false && !hasPassed
-       ├─ BLOCKER: verifyFailedThisStep === true  → "验证失败" + FAA audit
-       ├─ CRITICAL: lastBashExitCode ∈ {137, 124} → "OOM/超时" + FAA audit
-       └─ WARNING: 其他错误                       → "检查输出修复" + FAA audit
-```
-
-FAA 是步末收敛检查的一部分，不属于注入管线。在步内错误信息记录后执行三级分类，针对错误类型选注入模板。
-
-### 数据流（每步）
-
-```
-Edit/Write → filed 记 editFileThisStep
-Bash 报错 → 记 toolErrorThisStep
-步末 → injectors → Guard → detectors → shouldContinueAfterStop
-     → 未停止 → 下一回合
-```
-
----
-
-## 第 3 层：内置工具
+### 3.4 第 3 层 — 内置工具
 
 ```
 tools/builtin/
-├── collaboration/    ← SkillTool（skill 调用）
-├── memory/          ← MemoryLookup/MemoryWrite/MemoryEdit
-├── code/            ← Edit/Read/Write/Glob/Grep/Bash/LSP
-├── context/         ← ArchiveRecoverTool
-└── knowledge/       ← KnowledgeLookupTool
+├── code/        ← Edit / Read / Write / Glob / Grep / Bash / LSP
+├── memory/      ← MemoryLookup / MemoryWrite / MemoryEdit
+├── context/     ← ArchiveRecoverTool
+└── knowledge/   ← KnowledgeLookupTool
 ```
 
-**工具注册两步骤：** ① 代码中 `new ToolName()` 注册 ② `agent.yaml` 列出工具名。缺一不可。工具执行统一 3 阶段：`prepareToolExecution → execute → finalizeToolResult`。详见 `SYSTEM/API-REFERENCE.md §2`。
+**工具注册两步骤**：① 代码中 `new ToolName()` 注册 ② `agent.yaml` 列出工具名。缺一不可。
+工具执行 3 阶段：`prepareToolExecution → execute → finalizeToolResult`。
 
----
-
-## 第 4 层：外部系统
+### 3.5 第 4 层 — 外部系统
 
 | 外部系统 | 连接方式 | 说明 |
 |---------|---------|------|
-| LLM | `modelProvider` 接口 | Anthropic/Ollama/OpenAI，通过 `ltod` 包 |
+| LLM | `modelProvider` 接口 | Anthropic / Ollama / OpenAI，通过 `ltod` 包 |
 | MCP 服务器 | `mcp.json` 三层配置 | codegraph / anysearch / context7 |
 | SQLite 存储 | `better-sqlite3` / `node:sqlite` | 记忆库（FTS5+vec0）/ 知识库（FTS5） |
 | 文件系统 | `jian` 抽象层 | 文件读写 |
@@ -170,70 +240,223 @@ tools/builtin/
 
 ---
 
-## 架构原则
+## §4 端到端数据流 [P1]
 
-| 原则 | 说明 |
-|------|------|
-| **Agent 是容器** | Agent 类本身不处理业务，业务在 turn/index.ts |
-| **插件化 injector** | injectors/ 每个文件一个检测器，增减不影响其他 |
-| **残差注意力门控** | 所有注入通过 VariantMeta（W, D, threshold, minStepGap）控制频率 |
-| **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
-| **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删不影响其他层 |
+### 4.1 用户消息 → AI 回复
+
+```
+用户输入
+  → scream CLI 解析命令
+  → Agent 实例化（加载 agent.yaml + AGENTS.md）
+  → turn/index.ts runOneTurn()
+      → perTurnSetup()         重置状态 + 清空注入预算
+      → appendUserMessage()    追加用户消息到 context
+      → 意图注入 (Phase 4)
+      → applyUserPromptHook()  用户消息 hook
+      → 主循环:
+          → generate()         LLM 生成回复（含 tool_calls）
+          → executeTool()      执行工具调用
+          → afterStep()        检测 + 注入 + Guard
+              → injectors 运行（按顺序）
+              → Guard 检测（4 条规则）
+              → convergence gate（shouldContinueAfterStop）
+          → 收敛 → 下一轮 / 停止
+  → 返回最终回复
+```
+
+### 4.2 注入生命周期
+
+```
+turn/index.ts 注册 context
+  → InjectionManager.inject(ctx)
+    → InjectionRouter.dispatch(ctx)
+      → 各 DynamicInjector 检查 canInject()
+        → VariantScheduler 残差门控: R = W × D^Δs < T?
+          → 允许 → getContent() → record()
+            → PositionStrategy.format() → appendSystemReminder()
+          → 拒绝 → 跳过
+```
+
+### 4.3 内存管理
+
+```
+context 消息积累（appendUserMessage / tool_calls / tool_results / system-reminders）
+  → headroom < 40%? → MicroCompaction（轻量：移除旧 tool result + 遮蔽）
+    → 仍不足且 headroom < 25%? → FullCompaction（LLM 总结压缩，最多 _maxTries 次）
+      → injectionManager.onContextCompacted() 通知注入器适配
+```
+
+### 4.4 收敛门（每步末决定继续/停止）
+
+```
+afterStep()
+  → shouldContinueAfterStop()
+    → 6 种拦住理由:
+      1. 无内容生成
+      2. 有 Goal 但没更新 TodoList
+      3. 工具失败未修复
+      4. 验证失败未修复
+      5. 反事实阻断（confabulationBlocked）
+      6. 偏差链未修复
+      7. 验证假通过
+      8. 无 LSP 但改 3+ 文件（仅代码文件）
+    → 有拦截 → inject() → return { continue: true }
+    → 无拦截 → return { continue: false } → 回合结束
+```
 
 ---
 
-## 注入子系统架构图
+## §5 AGENTS.md 三层架构 [P1]
 
-```mermaid
-flowchart TD
-    subgraph "Paths"
-        A1["路径 A: DynamicInjector 体系<br/>11 注入器文件"]
-        A2["路径 B: 硬编码注入<br/>turn/index.ts 内联"]
-        A3["路径 C: 守卫引擎<br/>guard-engine.ts 偏差链"]
-    end
+**系统说明书**: `SYSTEM/prompt-assembly.md`
 
-    subgraph "调度"
-        B["VariantScheduler<br/>R = W × D^Δs<br/>31 变体 · S/A/B/C/D"]
-    end
+### 5.1 加载链
 
-    subgraph "位置"
-        C["PositionStrategy<br/>system-reminder 格式"]
-    end
-
-    subgraph "目标"
-        D["LtodLlm.systemPrompt<br/>固化缓存"]
-    end
-
-    A1 --> B
-    A2 -. "❌ 绕过调度" .-> C
-    A3 -. "❌ 绕过调度" .-> C
-    B --> C --> D
-
-    style A2 stroke:#f44,stroke-dasharray:5
-    style A3 stroke:#f44,stroke-dasharray:5
+```
+L0 全局:  ~/.scream-code/AGENTS.md        (1.9KB)  跨项目通用规则
+L1 项目集: ScreamCode/AGENTS.md            (4.5KB)  目录地图 + 决策门槛
+L2 项目:  ZHU/AGENTS.md                    (6.3KB)  决策规范 + 格式契约
 ```
 
-**红色虚线** = 当前绕过调度的注入路径（需迁移到 DynamicInjector）。详见 `workspace/注入系统融合计划.md`。
+### 5.2 加载规则
 
-### 注入生命周期
+1. 基于 `.git` 寻找 `projectRoot`
+2. 从 `projectRoot` 到 `cwd` 的目录链收集 AGENTS.md
+3. **32KB budget** 反向分配（靠近 cwd 的优先保留）
+4. L0 + L2 简单拼接不覆盖，冲突 AI 自行判断
 
-```mermaid
-sequenceDiagram
-    participant T as turn/index.ts
-    participant I as InjectionManager
-    participant V as VariantScheduler
-    participant P as PositionStrategy
-    participant L as LtodLlm
+### 5.3 system.md + AGENTS.md 分工
 
-    T->>I: register context
-    I->>V: canInject(variant, step)
-    V-->>I: R < T ? true / false
-    
-    alt canInject == true
-        I->>I: getContent(variant)
-        I->>V: record(variant, step)
-        V->>V: lastInjectionStep=step, T*=thresholdDecay
-        I->>P: format(content)
-        P->>L: append system-reminder
-    end
+| 文档 | 角色 | 谁写 |
+|------|------|------|
+| `system.md` | 框架规则（工具协议、格式契约） | 框架作者 |
+| `AGENTS.md` | 项目规则（架构、偏好、决策标准） | 项目团队 |
+| 不覆盖叠加 | 同级别规则无覆盖语义 | — |
+
+---
+
+## §6 注入系统详解 [P1]
+
+**详细文档**: `SYSTEM/injection-system.md`
+
+### 6.1 三路径架构
+
 ```
+路径 A — DynamicInjector 体系 ✅ 受控调度
+  └─ 11 个注入器文件，统一实现 DynamicInjector 抽象基类
+  └─ InjectionManager → InjectionRouter → VariantScheduler → PositionStrategy
+  └─ ≈ 29KB 总 token 量
+
+路径 B — 硬编码注入 ⚠️ 部分迁移中
+  └─ turn/index.ts 内联注入，未经过 dynamic pipeline
+  └─ 残留：planMode 行为 + 系统 agent.yaml 注入 + 3 种 stuck 检测
+
+路径 C — Guard 引擎 ✅ 已迁移
+  └─ 通过 GuardInjector 包装 checkGuard() 为 DynamicInjector
+  └─ 注册 variant: 'guard-feedback'
+```
+
+### 6.2 11 个 DynamicInjector
+
+| 注入器 | 文件 | 用途 |
+|--------|------|------|
+| `plugin-session-start` | `plugin-session-start.ts` | 插件会话初始化 |
+| `wolfpack` | `wolfpack.ts` | WolfPack 批处理模式行为 |
+| `plan-mode` | `plan-mode.ts` | 计划模式行为 |
+| `permission-mode` | `permission-mode.ts` | 权限模式提示 |
+| `todo-list` | `todo-list.ts` | Todo 列表提醒 |
+| `goal` | `goal.ts` | 计划目标注入 |
+| `working-set` | `working-set.ts` | Working Set 指示 |
+| `user-prefs` | `user-prefs.ts` | 用户偏好 |
+| `memory-rules` | `memory-rules.ts` | 场景记忆规则 |
+| `guard-feedback` | `guard-injector.ts` | Guard 反馈（路径 C 迁移） |
+| `budget` | (turn/injectors/budget.ts) | 注入预算控制 |
+
+### 6.3 残差注意力公式
+
+```
+R = W × D^Δs < T? → 允许注入
+
+W = 基础权重（变体重要性）
+D = 衰减因子（0.85-0.95）
+Δs = 距上次注入的步数差
+T = 动态阈值（每次注入后 T *= thresholdDecay）
+```
+
+每步注入上限：5 个（步级竞争保护）
+等级制：S(最高) / A / B / C / D(最低)
+
+---
+
+## §7 架构原则 [P2]
+
+| 原则 | 说明 |
+|------|------|
+| **Agent 是容器** | Agent 类组合子系统，业务逻辑在 turn/index.ts |
+| **插件化 injector** | injectors/ 每个文件一个检测器，增减不影响其他 |
+| **残差注意力门控** | 所有注入通过 VariantMeta 控制频率 |
+| **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
+| **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删 |
+| **收敛门而非固定轮数** | 每步末根据上下文质量决定继续/停止 |
+| **资源敏感的压缩** | headroom < 40% Micro、< 25% Full，动态触发 |
+
+---
+
+## §8 AI 导航指南 [P2]
+
+AI 首次接入 System 时按此顺序阅读：
+
+```
+第一步 → 本文（architecture-overview.md）— 全景理解
+第二步 → SYSTEM/injection-system.md — 核心创新：注入系统
+第三步 → SYSTEM/turn-control.md — 回合控制
+第四步 → SYSTEM/context-management.md — 上下文管理
+第五步 → SYSTEM/guard-engine.md — AI 行为 Guard
+第六步 → SYSTEM/attention-management.md — 注意力管理
+第七步 → SYSTEM/prompt-assembly.md — Prompt 组装
+第八步 → SYSTEM/agents-hierarchy.md — Agent 层级
+```
+
+每个文件开头的 `> 说明` 段落概括了核心机制，适合快速扫描。
+
+---
+
+## §9 快速参考 [P2]
+
+### 9.1 关键文件
+
+| 目的 | 文件 | 位置 |
+|------|------|------|
+| 系统说明书索引 | INDEX.md | `SYSTEM/` |
+| 模块地图 | MAP.md | `SYSTEM/` |
+| 踩坑记录 | pitfalls.md | `SYSTEM/` |
+| 维护 SOP | 系统说明书维护SOP.md | `SYSTEM/` |
+| 术语表 | GLOSSARY.md | 各项目根 |
+| 项目规则入口 | AGENTS.md | 各项目根 |
+
+### 9.2 关键路径
+
+| 路径 | 用途 |
+|------|------|
+| `packages/agent-core/src/agent/turn/index.ts` | 回合控制核心 |
+| `packages/agent-core/src/agent/turn/guard-engine.ts` | Guard 引擎 |
+| `packages/agent-core/src/agent/turn/variant-registry.ts` | 注意力调度 |
+| `packages/agent-core/src/agent/injection/` | 注入系统 |
+| `packages/agent-core/src/agent/context/` | 上下文管理 |
+| `packages/agent-core/src/agent/context/compaction/` | 压缩 |
+| `packages/agent-core/src/agent/detection/` | 检测器 |
+| `packages/memory/` | 记忆系统 |
+| `packages/knowledge/` | 知识库 |
+
+### 9.3 关键命令
+
+```bash
+pnpm build                                          # 构建 monorepo
+pnpm build (agent-core/knowledge/memory) → pnpm build (scream-code)  # 两段构建
+scream                                              # CLI 入口
+scream resume <session-id>                          # 恢复会话
+```
+
+---
+
+> 本文维护于 `SYSTEM/architecture-overview.md`。如有大范围架构变更，同步更新本文 §2-§4。

@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/memory, status/final]
+keywords: [记忆, memory, SQLite, vec0, FTS5, 检索]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 记忆系统 — Memory Store
 
+> **参见：** [`dream.md`](dream.md)（Dream 整理 — 消费记忆数据进行合并去重） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`pitfalls.md`](pitfalls.md)（记忆系统踩坑实录）
+>
 > SQLite + FTS5 + vec0 向量三重检索 + 热冷升降(ResNet 衰减)。tags 存 JSON 不在 FTS5 索引中。踩坑/调试/版本历史在 `SYSTEM/pitfalls.md`。
 
 ---
@@ -79,6 +87,9 @@ writeMemory → promote(upsert) → calculateRecallCount → recordRecall
 ---
 
 ## 三、搜索流程
+
+> 别名：搜索 / 检索流程 / MemorySearch
+> 对应代码：search.ts (packages/memory/src/)
 
 ### 三层递进（search.ts）
 ```
@@ -193,6 +204,9 @@ decayFactor = W × D^Δd
 
 ## 七、Dream 交互
 
+> 别名：记忆整理 / 整理流程 / Dream
+> 对应代码：DreamTracker (packages/memory/src/dream.ts), Consolidator (packages/memory/src/consolidator.ts)
+
 ### 清理时机
 | 触发方式 | 调用链 |
 |---------|--------|
@@ -230,6 +244,9 @@ MemoryEditTool.edit(id, updates) → writeMemory(upsert) →
 
 ## 九、关键接口
 
+> 别名：MemoryQuery / 记忆查询 / 搜索接口
+> 对应代码：MemoryQuery (packages/memory/src/)
+
 | 接口 | 入口位置 | 参数 | 说明 |
 |------|---------|------|------|
 | `search()` | store.ts | query, scope, limit, minScore | 三层递进搜索 |
@@ -248,6 +265,9 @@ MemoryEditTool.edit(id, updates) → writeMemory(upsert) →
 ---
 
 ## 十、MemoryEdit 工具
+
+> 别名：记忆编辑 / 记忆更新 / 修改记忆
+> 对应代码：MemoryEditTool (tool/index.ts)
 
 ### 注册
 - 代码注册：`tool/index.ts:634` → `new MemoryEditTool()`

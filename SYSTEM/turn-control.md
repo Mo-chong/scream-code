@@ -1,11 +1,22 @@
+---
+tags: [type/reference, domain/turn, status/final]
+keywords: [回合, turn, TurnController, afterStep, runOneTurn]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 回合控制系统 — TurnController
 
+> **参见：** [`injection-system.md`](injection-system.md)（注入管线） | [`guard-engine.md`](guard-engine.md)（行为矫正） | [`interception.md`](interception.md)（拦截日志） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`API-REFERENCE.md`](API-REFERENCE.md)（API 签名）
+>
 > 源码: `packages/agent-core/src/agent/turn/index.ts` (1737 行)
 
 ---
 
 ## 生命周期
+
+> 别名：TurnController / 回合控制器
+> 对应代码：TurnController (turn/index.ts)
 
 ```
 runOneTurn()

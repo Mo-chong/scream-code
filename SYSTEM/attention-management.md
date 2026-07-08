@@ -1,8 +1,12 @@
+---
+tags: [type/reference, domain/attention, status/final]
+keywords: [注意力, attention, 残差, residual, 权重, 门控]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 
----
-tags: [type/reference, domain/system, status/final]
----
+> **参见：** [`injection-system.md`](injection-system.md)（注入调度权威） | [`context-management.md`](context-management.md)（上下文管理·互补模块） | [`guard-engine.md`](guard-engine.md)（偏差链守卫） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`turn-control.md`](turn-control.md)（回合调度）
 
 # 注意力管理
 
@@ -14,6 +18,9 @@ tags: [type/reference, domain/system, status/final]
 ---
 
 ## 注意力管控架构图
+
+> 别名：注意力管控 / 注意力系统 / AttentionControl
+> 对应代码：AttentionController (turn/attention-control.ts)
 
 ```
 回合开始
@@ -95,6 +102,8 @@ tags: [type/reference, domain/system, status/final]
 ---
 
 ## 核心机制详述
+
+> 别名：注意力机制 / 残差注意力调度 / ResNet 残差
 
 ### 1. ResNet 残差注意力调度（Phase 9）
 

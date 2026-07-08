@@ -1,7 +1,16 @@
+---
+tags: [type/reference, domain/compaction, status/final]
+keywords: [压缩, compaction, 前缀稳定, 批次门控, 裁切]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 上下文压缩系统 — Compaction
 
-> 源码: `packages/agent-core/src/agent/compaction/`（8 个文件）
+> **体系集成**：本文件是 Compaction 子系统的**深度技术参考**，包含三层优化（前缀稳定/Observation Masking/批次门控）、双阶段压缩（Micro/Full）、记忆提取等实现细节。
+> 
+> **参见：** [`context-management.md`](context-management.md)（上下文管理主说明书） | [`turn-control.md`](turn-control.md)（回合触发时机）
+> 对应源码: `packages/agent-core/src/agent/compaction/`（8 个文件）
 > 核心: `full.ts` (~630 行), `micro.ts` (~280 行), `strategy.ts`, `render-messages.ts`
 > **v0.7 fork 新增**: 前缀稳定化 `prefix-stabilizer.ts` + Observation Masking `mask-tool-observations.ts`
 > **v0.7 fork 新增**: MicroCompaction 批次门控（BATCH_SIZE=8 减少 cutoff 跳动）
@@ -18,6 +27,8 @@ AI 回合多了 -> 上下文窗口满了 -> 旧的无关信息占位置 -> 注�
 ---
 
 ## 三层优化
+
+> 别名：前缀稳定 / ObservationMasking / 批次门控 / 压缩优化
 
 v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销**（基于 KV-cache 深研 + TokenPilot 论文，总代码量 ~38 行）：
 
@@ -89,6 +100,9 @@ v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销*
 ---
 
 ## 两层压缩
+
+> 别名：双阶段压缩 / MicroCompaction / FullCompaction
+> 对应代码：MicroCompaction (compaction/micro.ts), FullCompaction (compaction/full.ts)
 
 | 层级 | 文件 | 触发条件 | 做了什么 |
 |------|------|----------|---------|

@@ -1,6 +1,14 @@
+---
+tags: [type/reference, domain/memory, status/final]
+keywords: [Dream, 记忆整理, consolidat, 合并, 去重]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # Dream 记忆整理系统
 
+> **参见：** [`memory-store.md`](memory-store.md)（记忆存储层 — Dream 直接操作的对象）
+>
 > 源码: `packages/memory/src/dream.ts` (169 行) — DreamTracker（计时器+建议）
 > 源码: `packages/memory/src/consolidator.ts` (458 行) — 实际整理逻辑
 > 工具: `packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts`

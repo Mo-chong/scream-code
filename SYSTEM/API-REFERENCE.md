@@ -1,7 +1,15 @@
+---
+tags: [type/reference, domain/api, status/final]
+keywords: [API, 接口, 参考, 签名, 域]
+updated: 2026-07-08
+---
+
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # API Reference
 
-> AI 接口参考。10 域，每 `##` 独立 knowledge chunk。版本历史/踩坑在 `SYSTEM/pitfalls.md`，设计文档在对应 `SYSTEM/*.md`。**维护规范：10 域编号固定，新增接口归入对应域；域内的 `###` 列表化（不超过 20 行/子段），签名用 TypeScript 类型块，参数用表格；禁止加入踩坑/版本历史/说明性文字。**
+> AI 接口参考。10 域，每 `##` 独立 knowledge chunk。
+> 
+> **维护规范：** 10 域编号固定，新增接口归入对应域；域内的 `###` 列表化（不超过 20 行/子段），签名用 TypeScript 类型块，参数用表格；禁止加入踩坑/版本历史/说明性文字。
 
 ---
 

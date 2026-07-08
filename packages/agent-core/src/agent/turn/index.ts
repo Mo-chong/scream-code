@@ -29,16 +29,12 @@ import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { compressStep, buildContextSnapshot, extractLastAssistantText } from './signature';
 import { detectConfabulation } from './detectors/confabulation';
-import { injectAntiConfabulation } from './injectors/anti_confabulation';
-import { injectStuckInjector } from './injectors/stuck';
 
 import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, getScore, type WeightLevel } from './variant-registry';
 import { TurnEventLog } from './event-log';
 import { EventSnapshotBuffer } from './event-snapshot';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
-import { escalateQuality } from './injectors/quality';
 import { detectIntent } from './detectors/intent';
-import { injectIntentGuidance } from './injectors/intent';
 import { InjectBudget } from './injectors/budget';
 import { checkGuard, type StepToolSummary } from './guard-engine';
 import { TruncationTracker } from './truncation-tracker';
@@ -48,7 +44,8 @@ import { detectCodeRefQuality } from './detectors/code-ref';
 import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
 import { AttentionPositionStrategy, InsertPosition } from '../injection/position-strategy';
 import { ContentHashCache } from './content-cache';
-import { AuditLogWriter, computeCacheMetrics, buildAuditEntry } from '../usage/audit-log';
+import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
+import type { CacheMetrics } from '../usage/audit-log';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -207,7 +204,10 @@ export class TurnFlow {
 
   // ── Phase 21: Stuck injection state ───────────────────────────
   /** 上次注入 system_ref_stuck 的 step (-1 = 从未注入) */
-  private stuckInjectedAtStep = -1;
+  private _intentPhase: string | null = null;
+  private _confabResult: any = null;
+  private _qualitySignals: any = null;
+  private _stuckContext: any = null;
   /** 本轮 Edit 的文件路径（用于 stuck 检测） */
   private editFileThisStep: string | undefined;
   /** 本轮工具报错（用于 stuck 检测） */
@@ -224,6 +224,7 @@ export class TurnFlow {
   private _lastUsage: import('@scream-code/ltod').TokenUsage | null = null;
   private _lastModel: string = '';
   private _prevModel: string = '';
+  private _lastCacheMetrics: CacheMetrics | null = null;
 
   // ── Event snapshot persistence (Phase 10+) ─────────────────────
   private eventBuffer!: EventSnapshotBuffer;
@@ -578,14 +579,9 @@ export class TurnFlow {
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     this.agent.context.appendUserMessage(input, origin);
 
-    // ── Phase 4: 回合意图注入 ─────────────────────────────
+    // ── Phase 4: 回合意图检测 ─────────────────────────────
     if (origin.kind === 'user') {
-      const intentDetection = detectIntent(input);
-      if (intentDetection) {
-        injectIntentGuidance(intentDetection, (text, meta) => {
-          this.inject(text, meta);
-        });
-      }
+      this._intentPhase = detectIntent(input);
     }
 
     // ── Phase 11: 回合开局规则记忆注入 ────────────────────
@@ -819,6 +815,10 @@ export class TurnFlow {
               await this.agent.injection.inject({
                 currentStep: this.currentStep,
                 messageCount: this.agent.context?.history?.length ?? 0,
+                intentPhase: this._intentPhase,
+                confabulationResult: this._confabResult,
+                qualitySignals: this._qualitySignals,
+                stuckContext: this._stuckContext,
               });
               deduper.beginStep();
               return;
@@ -1688,7 +1688,7 @@ export class TurnFlow {
     const sig = compressStep(this.stepToolCounts, extractLastAssistantText(this.agent.context.history));
     const snap = buildContextSnapshot(this.stepToolCounts, this.currentStep);
     const confaResult = detectConfabulation(sig, snap);
-    injectAntiConfabulation(confaResult, this.stepInjectedVariants, (text, meta) => this.inject(text, meta));
+    this._confabResult = confaResult;
     if (confaResult.confidence >= 3) {
       this.confabulationBlocked = true;
       this.eventLog.record({
@@ -1713,16 +1713,7 @@ export class TurnFlow {
 
     // Step 5: 检测器序列（scene, guard, behavior rules, stuck）
     this.detectSceneMemoryIssue();
-    this.stuckInjectedAtStep = injectStuckInjector(
-      (msg, meta) => this.inject(msg, { kind: 'injection', ...meta }),
-      this.currentStep,
-      this.stuckInjectedAtStep,
-      this.stepInjectedVariants,
-      this.editFileThisStep,
-      this.toolErrorThisStep,
-      this.editFileHistory,
-      this.errorHistory,
-    );
+    this._stuckContext = { currentStep: this.currentStep, editFileThisStep: this.editFileThisStep, toolErrorThisStep: this.toolErrorThisStep };
     await this.runGuardDetection();
     await this.injectBehaviorRulesAfterStep();
 
@@ -1760,8 +1751,10 @@ export class TurnFlow {
       const vRegNames = this.variantRegistry.getStepVariants(this.currentStep);
       const injectedNames = [...new Set([...routerNames, ...vRegNames])];
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
-const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedNames, modelChanged);
+      const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedNames.length);
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedNames, modelChanged, apiKeySwitched);
       this.auditLogger.write(entry);
+      this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态
       if (compacted) this.contentHashCache.reset();
       // Reset so next turn starts fresh
@@ -1891,7 +1884,7 @@ const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffe
     if (qualityIssue) {
       // 升级前的 level（旧值）
       const currentLevel = this.variantRegistry.get(qualityIssue.targetVariant)?.level;
-      escalateQuality(qualityIssue, this.stepInjectedVariants, (text, meta) => this.inject(text, meta));
+      this._qualitySignals = qualityIssue;
       this.variantRegistry.updateLevel(qualityIssue.targetVariant, qualityIssue.suggestedLevel, this.currentStep);
 
       // 🆕 Phase15: S→S 追踪 — 升级前已是 S 级 = S→S 升级
@@ -1916,6 +1909,12 @@ const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffe
       if (this.codeQualityViolationsThisTurn === 0) {
         this.deviationChainResolved = true;
       }
+    }
+    // Phase 15: 行为变体偏差链 — 当前回合有验证工具调用则修正
+    if (this.deviationChainReason.includes('行为变体')) {
+      const lastText = extractLastAssistantText(this.agent.context.history);
+      const sig = compressStep(this.stepToolCounts, lastText);
+      if (sig.hasVerificationTools) this.deviationChainResolved = true;
     }
   }
 
