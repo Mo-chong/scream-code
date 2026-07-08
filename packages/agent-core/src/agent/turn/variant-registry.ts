@@ -73,6 +73,17 @@ export class VariantRegistry {
   }
 
   /**
+   * 获取在本回合指定步数内被触发的变体名称列表。用于缓存审计诊断。
+   */
+  getStepVariants(step: number): string[] {
+    const result: string[] = [];
+    for (const r of this.records.values()) {
+      if (r.stepInjected === step) result.push(r.variant);
+    }
+    return result;
+  }
+
+  /**
    * 获取已过期的变体（注入超过 N 步仍未观察到行为）。
    */
   /** 获取该变体累计触发次数（Phase22.2 facts 用） */
