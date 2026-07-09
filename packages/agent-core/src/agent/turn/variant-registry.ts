@@ -339,6 +339,9 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // ── Phase 24: 截断数据强制恢复 ────────────────────────────────
   truncation_recover_guard:  { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 1 },
+
+  // ── Phase 26: 错误审计（FAA）──────────────────────────────────
+  'error-audit':              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 3 },
 };
 
 /**

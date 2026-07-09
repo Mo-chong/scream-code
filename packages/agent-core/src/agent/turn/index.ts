@@ -2072,21 +2072,15 @@ export class TurnFlow {
           const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
           const hasPassed = latestVerification?.passed === true;
           if (this.lastToolFailure?.isExploratory === false && !hasPassed) {
-            const faaEntries = this.agent.fileActionAudit?.getRecentEntries(5);
-            const faaSnippet = faaEntries && faaEntries.length > 0
-              ? `\n\nRecent file audit entries (most recent first):\n${faaEntries.map(e =>
-                  `  ${e.action} — ${e.resultPreview}  (${e.success ? 'OK' : 'FAIL'}, ${e.durationMs}ms)`
-                ).join('\n')}`
-              : '';
             // 三级分类：BLOCKER（验证失败）/ CRITICAL（OOM/超时）/ WARNING（其他）
             if (this.verifyFailedThisStep) {
-              return `Step verification failed (${this.lastToolFailure.toolName})。不要跳过验证，修复根因后继续。${faaSnippet}`;
+              return `Step verification failed (${this.lastToolFailure.toolName})。不要跳过验证，修复根因后继续。`;
             }
             const criticalExit = this.lastBashExitCode;
             if (criticalExit === 137 || criticalExit === 124) {
-              return `工具 ${this.lastToolFailure.toolName} 异常退出 (exit ${criticalExit})。可能资源耗尽或超时，检查状态后重试。${faaSnippet}`;
+              return `工具 ${this.lastToolFailure.toolName} 异常退出 (exit ${criticalExit})。可能资源耗尽或超时，检查状态后重试。`;
             }
-            return `工具 ${this.lastToolFailure.toolName} 报告错误。检查最近的输出修复它。${faaSnippet}`;
+            return `工具 ${this.lastToolFailure.toolName} 报告错误。检查最近的输出修复它。`;
           }
           return null;
         },

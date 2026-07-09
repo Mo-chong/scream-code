@@ -12,6 +12,7 @@ import { StuckInjector } from './stuck';
 import { AntiConfabulationInjector } from './anti_confabulation';
 import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
+import { ErrorAuditInjector } from './error-audit-injector';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -35,6 +36,7 @@ export class InjectionManager {
       ['anti_confabulation', new AntiConfabulationInjector(agent)],
       ['quality_escalate', new QualityInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
+      ['error-audit', new ErrorAuditInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);
