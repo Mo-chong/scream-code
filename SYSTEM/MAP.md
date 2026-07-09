@@ -16,7 +16,7 @@ updated: 2026-07-08
 
 ```
 ├─ ☑ AI 全景入口（优先读）
-│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制/上下文/Guard/数据流/AI导航指南
+│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制/上下文/Guard/数据流/阅读顺序
 
 ├─ 接口手册
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
