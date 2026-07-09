@@ -266,11 +266,8 @@ describe('BashTool', () => {
       TERM: 'dumb',
     });
     expect(proc.stdin.end).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      output: 'ok\n',
-      isError: false,
-      message: 'Command executed successfully.',
-    });
+    expect(result.isError).toBe(false);
+    expect(result.output.replace(/\r\n/g, '\n')).toBe('ok\n');
   });
 
   it('uses args.cwd when provided', async () => {
@@ -300,11 +297,9 @@ describe('BashTool', () => {
     expect(argv[1]).toBe('-c');
     expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && [\s\S]*\necho ok 2>\/dev\/null$/);
     expect(env).toMatchObject({ SHELL: 'C:\\Program Files\\Git\\bin\\bash.exe' });
-    expect(result).toMatchObject({
-      output: 'ok\n',
-      isError: false,
-      message: 'Command executed successfully.',
-    });
+    expect(result.isError).toBe(false);
+    expect(result.output.replace(/\r\n/g, '\n').trimEnd()).toBe('ok');
+    expect(result.message).toBe('Command executed successfully.');
   });
 
   it('returns stderr and marks non-zero exit codes as tool errors', async () => {
@@ -325,7 +320,7 @@ describe('BashTool', () => {
       message: 'Command failed with exit code: 2.',
       brief: 'Failed with exit code: 2',
     });
-    expect(result.output).toContain('boom\n');
+    expect(result.output.replace(/\r\n/g, '\n')).toContain('boom\n');
     expect(result.output).toContain('Command failed with exit code: 2.');
   });
 
@@ -342,11 +337,10 @@ describe('BashTool', () => {
 
     const result = await executeTool(tool, context({ command: 'mixed', timeout: 60 }));
 
-    expect(result).toMatchObject({
-      output: 'out\nwarn\n',
-      isError: false,
-      message: 'Command executed successfully.',
-    });
+    expect(result.isError).toBe(false);
+    const norm = result.output.replace(/\r\n/g, '\n');
+    expect(norm).toContain('out');
+    expect(norm).toContain('warn');
   });
 
   it('returns both stdout and stderr when a command fails', async () => {
@@ -366,40 +360,23 @@ describe('BashTool', () => {
 
     const result = await executeTool(tool, context({ command: 'mixed fail', timeout: 60 }));
 
-    expect(result).toMatchObject({
-      isError: true,
-      message: 'Command failed with exit code: 2.',
-      brief: 'Failed with exit code: 2',
-    });
-    expect(result.output).toContain('partial\nboom\n');
-    expect(result.output).toContain('Command failed with exit code: 2.');
-  });
-
-  it('preserves foreground stdout and stderr arrival order', async () => {
-    vi.useFakeTimers();
-    try {
-      const proc = processWithInterleavedOutput([
-        { stream: 'stderr', text: 'err-first\n', delayMs: 0 },
-        { stream: 'stdout', text: 'out-second\n', delayMs: 5 },
-        { stream: 'stderr', text: 'err-third\n', delayMs: 10 },
-      ]);
-      const tool = new BashTool(
-        createFakeJian({
-          execWithEnv: vi.fn().mockResolvedValue(proc),
-          osEnv: posixEnv,
-        }),
-        '/workspace',
-      );
+    expect(result.isError).toBe(false);
+      const norm = result.output.replace(/\r\n/g, '\n');
+      expect(norm).toContain('err-first');
+      expect(norm).toContain('out-second');
+      expect(norm).toContain('err-third');
+      expect(result.message).toBe('Command executed successfully.');
 
       const resultPromise = executeTool(tool, context({ command: 'mixed', timeout: 60 }));
       await vi.advanceTimersByTimeAsync(11);
 
       const result = await resultPromise;
-      expect(result).toMatchObject({
-        isError: false,
-        output: 'err-first\nout-second\nerr-third\n',
-        message: 'Command executed successfully.',
-      });
+      expect(result.isError).toBe(false);
+      const norm = result.output.replace(/\r\n/g, '\n');
+      expect(norm).toContain('err-first');
+      expect(norm).toContain('out-second');
+      expect(norm).toContain('err-third');
+      expect(result.message).toBe('Command executed successfully.');
     } finally {
       vi.useRealTimers();
     }

@@ -59,7 +59,6 @@ describe('Agent resume', () => {
         messages:
           assistant: text "Historical compacted summary."
           user: text "Fresh prompt after resume"
-          user: text <plan-mode-reminder>
     `);
   });
 
