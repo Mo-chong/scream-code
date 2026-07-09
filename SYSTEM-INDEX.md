@@ -5,6 +5,12 @@
 
 > **整体架构分层图 → `SYSTEM/architecture-overview.md`**（第0层 Monorepo → 第4层外部系统，看完再查子系统）
 
+## 阅读顺序
+
+1. `SYSTEM/architecture-overview.md` — **系统全景 · 必读**（读完才知子系统间关系）
+2. `SYSTEM/MAP.md` — 模块地图（快速定位文件归属）
+3. 按 architecture-overview.md §1.5 的架构分层图深入子系统
+
 ---
 
 ## 模块层级关系

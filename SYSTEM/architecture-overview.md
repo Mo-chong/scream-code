@@ -42,6 +42,59 @@ updated: 2026-07-08
 
 ---
 
+## §1.5 架构分层总览
+
+SYSTEM/ 的 23 个文件按职责分为 5 层：
+
+```
+L0 入口层
+  SYSTEM-INDEX · MAP · 系统说明书维护SOP
+  └─ 导航入口
+
+L1 核心执行层 —— 同一执行引擎的 4 个视图
+  turn-control.md
+  └─ 回合调度：runOneTurn → afterStep → convergenceGate
+     ├── attention-management.md — 注意力决策（残差→预算→位置→检测）
+     ├── injection-system.md — 内容执行（15 injector + router + manager）
+     └── context-management.md — 数据管理（存档·审计·截断恢复）
+
+L2 支撑层 —— 被 L1 调用的功能模块
+  guard-engine · prompt-assembly · compaction · cli-tui · interception(事件日志)
+  └─ 不直接驱动回合
+
+L3 存储层 —— 被 L1/L2 读写
+  memory-store · dream · knowledge
+
+L4 独立层 —— 不参与执行，独立参考
+  API-REFERENCE · agents-hierarchy · mcp-server · pitfalls · CHANGELOG
+  知识库维护 · 合并上游仓库SOP
+```
+
+文档 ↔ 代码映射（部分）：
+
+| SYSTEM 文档 | 代码目录 |
+|:-----------|---------|
+| turn-control.md | `turn/` (+`detectors/` +`injectors/`) |
+| attention-management.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
+| injection-system.md | `injection/` (15 injector + router + manager) |
+| context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
+| guard-engine.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
+
+阅读顺序（AI 首次接入按此顺序）：
+
+```
+① 本文（architecture-overview.md）—— 全景理解
+② SYSTEM/injection-system.md —— 核心创新：注入系统
+③ SYSTEM/turn-control.md —— 回合调度
+④ SYSTEM/context-management.md —— 上下文管理
+⑤ SYSTEM/guard-engine.md —— AI 行为 Guard
+⑥ SYSTEM/attention-management.md —— 注意力决策
+⑦ SYSTEM/prompt-assembly.md —— Prompt 组装
+⑧ SYSTEM/agents-hierarchy.md —— Agent 层级
+```
+
+---
+
 ## §2 五大核心创新 [P1]
 
 ### 2.1 注入系统 (Injection System) — 核心创新
@@ -402,28 +455,9 @@ T = 动态阈值（每次注入后 T *= thresholdDecay）
 
 ---
 
-## §8 AI 导航指南 [P2]
+## §8 快速参考 [P2]
 
-AI 首次接入 System 时按此顺序阅读：
-
-```
-第一步 → 本文（architecture-overview.md）— 全景理解
-第二步 → SYSTEM/injection-system.md — 核心创新：注入系统
-第三步 → SYSTEM/turn-control.md — 回合控制
-第四步 → SYSTEM/context-management.md — 上下文管理
-第五步 → SYSTEM/guard-engine.md — AI 行为 Guard
-第六步 → SYSTEM/attention-management.md — 注意力管理
-第七步 → SYSTEM/prompt-assembly.md — Prompt 组装
-第八步 → SYSTEM/agents-hierarchy.md — Agent 层级
-```
-
-每个文件开头的 `> 说明` 段落概括了核心机制，适合快速扫描。
-
----
-
-## §9 快速参考 [P2]
-
-### 9.1 关键文件
+### 8.1 关键文件
 
 | 目的 | 文件 | 位置 |
 |------|------|------|
@@ -434,7 +468,7 @@ AI 首次接入 System 时按此顺序阅读：
 | 术语表 | GLOSSARY.md | 各项目根 |
 | 项目规则入口 | AGENTS.md | 各项目根 |
 
-### 9.2 关键路径
+### 8.2 关键路径
 
 | 路径 | 用途 |
 |------|------|
@@ -448,7 +482,7 @@ AI 首次接入 System 时按此顺序阅读：
 | `packages/memory/` | 记忆系统 |
 | `packages/knowledge/` | 知识库 |
 
-### 9.3 关键命令
+### 8.3 关键命令
 
 ```bash
 pnpm build                                          # 构建 monorepo
