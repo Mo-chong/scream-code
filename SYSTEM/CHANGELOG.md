@@ -1,7 +1,7 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
-updated: 2026-07-08
+updated: 2026-07-09
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -431,3 +431,62 @@ updated: 2026-07-08
 
 #### 文档
 - `SYSTEM/CHANGELOG.md` — Phase29 条目
+
+### Phase30: SYSTEM 参见互联核查 + 维护SOP升级 [2026-07-08]
+
+#### 修复
+- SYSTEM 全目录 23 文件参见互联核查：逐文件 Read 头部参见 → Grep 验证正文提及 → 反查全目录引用，6处假关联/缺失关联修复
+- `SYSTEM/architecture-overview.md` — 删除假参见
+- `SYSTEM/API-REFERENCE.md` — 删除假参见
+- `SYSTEM/attention-management.md` — 补 context-management + guard-engine 互参见
+- `SYSTEM/context-management.md` — 补 attention-management + guard-engine 互参见
+- `SYSTEM/compaction.md` — 补 turn-control 参见
+- `SYSTEM/memory-store.md` — 删假参见，补 turn-control + knowledge 互参见
+
+#### 变更
+- `SYSTEM/系统说明书维护SOP.md` — YAML frontmatter 规范 + 参见验证流程 + 强制规则 4 条
+- `SYSTEM/CHANGELOG.md` — 标头规则双轨制（上游倒序/二开正向/路径标注/时间戳强制）
+
+#### 新功能
+- `SYSTEM-INDEX.md` — 顶部加 3 行阅读顺序
+- `SYSTEM/architecture-overview.md` — §1.5 架构分层总览 + 旧§8合并入§1.5 + §9→§8重编号
+- `SYSTEM/MAP.md` — "AI导航指南"→"阅读顺序"引用同步
+
+#### 文档
+- `DECISIONS/记录-SYSTEM参见互联核查与SOP优化.md`
+- `DECISIONS/方案-SYSTEM目录架构重构-三层互联计划.md`（v1→v2→v3→终版）
+
+### Phase31: 知识搜索 L4 结构化注入 + 注入系统审计 [2026-07-08]
+
+#### 新功能
+- `packages/knowledge/src/types.ts` + `store.ts` — KnowledgeSearchResult 追加 `sourcePath`（2行代码，值来源 `knowledge_sources.file_path`）
+- `SYSTEM/knowledge.md` — §6.3 追加 `sourcePath` 行
+
+#### 文档
+- `DECISIONS/分析-注入系统全面审计-变体评估与优化方向.md` — 全量源码审计（初版→勘误版：文件数29→18、行数~2500→~1670、DynamicInjector 15→14）
+
+### Phase32: 注入系统 FAA 修复 + 全量记录升级 [2026-07-09]
+
+#### 修复
+- **FAA 双路径并行**（🔴 P0）：`turn/index.ts` L2075 inline path 删除 + `manager.ts` 注册 ErrorAuditInjector + `variant-registry.ts` 加 `error-audit` VARIANT_META → 构建 EXIT 0
+- **guard-injector 孤儿类**：标记 DEPRECATED（100 行 DynamicInjector 定义但 0 引用，`buildToolSummaryFromHistory()` 数据精度低于实时实例变量，不应注册）
+
+#### 变更
+- **FAA 全量工具记录**：旧 Edit/Write 独占 → `finalizeToolResult` hook 内全工具覆盖（Bash/Read/Grep/LSP）
+- **resultPreview 真实内容**：从 `"D:\\path"`（文件名）→ 截取工具输出前 500 字
+- **durationMs 真实计时**：`_toolStartTimers` Map → `authorizeToolExecution` 记起始时间 → `finalizeToolResult` 计算差值
+
+#### 文档
+- `workspace/验收-FAA双路径清理分析报告.md`
+- `workspace/验收-注入系统全面审计执行总结.md`（8 方向全链路）
+- `DECISIONS/分析-注入系统全面审计-变体评估与优化方向.md` 勘误版落地
+
+#### 框架源码引用
+- `packages/agent-core/src/agent/turn/index.ts` L103 — `_toolStartTimers` 私有字段
+- `packages/agent-core/src/agent/turn/index.ts` L1123 — `authorizeToolExecution` 加 timer set
+- `packages/agent-core/src/agent/turn/index.ts` L1136-1151 — `finalizeToolResult` FAA push
+- `packages/agent-core/src/agent/turn/index.ts` L2080-2090 — FAA inline 删除
+- `packages/agent-core/src/agent/injection/manager.ts` L39 — ErrorAuditInjector 注册
+- `packages/agent-core/src/agent/turn/variant-registry.ts` L344 — `error-audit` VARIANT_META
+- `packages/agent-core/src/agent/injection/guard-injector.ts` — DEPRECATED 标记
+- `packages/knowledge/src/types.ts` L82-83 + `store.ts` L660 — `sourcePath`

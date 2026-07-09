@@ -1,7 +1,15 @@
 /**
  * GuardInjector — 将 guard-engine.ts 的 checkGuard() 包装为 DynamicInjector。
  *
- * 通过注入系统统一调度，取代 turn/index.ts 中的直接 checkGuard 调用。
+ * ⚠️ DEPRECATED — 不使用。原因：
+ *   1. buildToolSummaryFromHistory() 从历史消息反推工具使用，不如 turn/index.ts
+ *      的实例变量（this.hasKnowledgeToolsThisStep 等）准确。
+ *   2. getInjection() 不含 memoStore 行为规则富化逻辑（在 turn/index.ts runGuardDetection() 中）。
+ *   3. 若注册将导致双路径并行，且 injector 路径数据精度更低。
+ *
+ * 守卫逻辑的统一执行点保持为 turn/index.ts L1956 runGuardDetection()。
+ * 本文件保留供参考——如需修复 buildToolSummaryFromHistory 精度后可启用。
+ *
  * 注册 variant: 'guard-feedback'
  */
 

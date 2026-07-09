@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/pitfalls, status/final]
 keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
-updated: 2026-07-08
+updated: 2026-07-09
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -704,3 +704,31 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 **解决**：在 `embeddings.ts` 中添加 `export const clearEmbeddingModelCache = cleanFastembedCache` 别名桥接。不重写函数体，不改调用方，零风险。
 
 **教训**：commit 前必须检查每个 ours 文件是否是最新版引用链的末端。找出"自动合并的文件会调用但 ours 文件没导出"的函数，做别名桥接或 wrapper。
+
+### FAA 双路径残存——新代码上线前删旧调用
+
+**现象**：`error-audit-injector.ts` 已创建并注册到 manager.ts，但旧 `turn/index.ts` 的 inline FAA 注入未删除 → `getRecentEntries(5)` 被两个入口调用 → 同一审计内容注入两次。
+
+**根本原因**：只做了"加法"（新 injector），没做"减法"（旧 inline 路径）。新代码上线时，旧路径的逻辑进入"僵尸状态"——还能跑，但已经不该跑了。
+
+**解决**：`grep -rn "getRecentEntries" packages/ --include="*.ts"` 找到旧消费方，手动删除。重构或添加新调用者时，在原路径文件中搜所有引用点逐一处理。
+
+### DynamicInjector 孤儿类——定义但未注册
+
+**现象**：`guard-injector.ts` 定义了完整的 DynamicInjector 接口实现（100 行），但 `manager.ts` 中无 `new GuardInjector()` 注册，`LSP.references` 显示 0 引用。
+
+**解决**：用 `LSP.references` 查新 injector 的引用数。0 = 或从未被调用，或已废弃。不要凭"定义看上去完整"就以为它在运行。
+
+### 审计报告幻觉数据——写方案前先读源码
+
+**现象**：注入系统审计报告初版声称 "29 文件、15 DynamicInjector、~2500行"——实际代码是 18 文件、14 DynamicInjector、~1670行。8 个优化方向中 3 个基于不存在的文件。
+
+**解决**：任何涉及代码行数/文件数的 claim 必须在 `find + wc -l` 之后才能写入。不能凭 Read 过几个文件就估算全目录。<`find` > <`wc -l` > <`ls`> <`grep -rn` > <`LSP.references`> 五步链缺一不可。
+
+### resultPreview / durationMs 字段名实不符——检查生产数据
+
+**现象**：`FAA` 日志的 `resultPreview` 字段名暗示"内容摘要"但实际存的是路径名（`edit:D:\\path`）；`durationMs` 全部为 0 而非真实耗时。
+
+**原因**：字段名来源于设计规范，但 `push()` 调用者传入了错误数据。设计规范只约束"应该传什么"，不约束"实际传了什么"。
+
+**解决**：引入新字段或修改消费逻辑后必须检查一次生产数据（`tail ~/.scream-code/audit/2026-07-09.jsonl`），确认字段值与字段名匹配。文档和代码描述都不等于运行时数据。
