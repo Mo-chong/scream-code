@@ -28,7 +28,9 @@ updated: 2026-07-08
 | 8 | **ObservationMasking** tool result 遮蔽（每轮/FullCompaction前） | `utils/mask-tool-observations.ts` | ✅ **已实现** |
 | 9 | **Headroom-lite** 保留 40% 上下文窗口 | — | ⏸️ **搁置**（非必要） |
 | 10 | **CacheStats** 管线计数器 | — | ⏸️ **搁置** |
-| 11 | **FileActionAudit↔ContentArchive 融合** | — | 🗑️ **已废弃**（TURN buffering 替代） |
+| 11 | **Predictor** 上下文增长预测器 | `compaction/predictor.ts` | ✅ **已实现** |
+| 12 | **缓存审计系统** 全链路缓存诊断 | `agent/usage/audit-log.ts` | ✅ **已实现（Phase29）** |
+| 13 | **FileActionAudit↔ContentArchive 融合** | — | 🗑️ **已废弃**（TURN buffering 替代） |
 
 ---
 
@@ -88,7 +90,45 @@ FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compac
 | `FORCED_THRESHOLD` (L57) | `0.1` | priority < 0.1 强制优先淘汰 |
 | `ACCESS_BOOST_FACTOR` (L58) | `0.5` | 访问新鲜度因子 |
 
-### 2.2 核心方法
+### 2.2 Point A 存档（每步写入存档）
+
+**文件**：`packages/agent-core/src/agent/context/index.ts` L356-380
+
+与 MicroCompaction 截断时的 Point B 存档不同，Point A 在 **每步** tool result 写入 `context.history` 时即时存档：
+
+```typescript
+// context/index.ts L369
+this.contentArchive?.archive('tool:' + msg.toolCallId, textContent, {
+  source: 'toolResult',
+});
+```
+
+**存档时机**：
+- Point A：`context/index.ts` — 每步 tool result 写入 history 后即时 archive（key: `tool:${callId}`）
+- Point B：`micro.ts` — MicroCompaction 截断前 archive（key: `micro:${callId}`）
+
+**两者互补**：Point A 保证每步数据都有备份，Point B 保证截断数据不丢失。
+
+### 2.3 tool result 预处理流水线
+
+**文件**：`packages/agent-core/src/agent/context/index.ts` L27-45
+
+tool result 写入 history 前经过 3 道处理：
+
+| 步骤 | 处理 | 参数 | 说明 |
+|------|------|------|------|
+| 1 | `collapseDuplicateLines(text, 3)` | 连续重复≥3行→合并为 `[previous line repeated N times]` | 去重 |
+| 2 | `truncateToolOutput(text, maxTokens=8000)` | 纯文本/ContentPart 两种模式，保尾截断 | 长度控制 |
+| 3 | `MAX_TOOL_RESULT_TOKENS=8000` | 超限 → `truncateToolOutput()` | 总量保护 |
+
+```typescript
+// context/index.ts L29
+const MAX_TOOL_RESULT_TOKENS = 8000;
+```
+
+处理完的完整原始内容 → ContentArchive Point A 存档，截断后的精炼版本 → context.history。
+
+### 2.4 核心方法
 
 **`archive(key, content, options?)`** (L94-128) — 写入
 - key 建议格式：`"{source}:{toolCallId}"`
@@ -178,7 +218,29 @@ context/index.ts L241-245:
 
 **文件**：`packages/agent-core/src/agent/compaction/micro.ts`
 
-### 4.1 触发条件（3 道关卡）
+### 4.1 DEFAULT_CONFIG 完整参数表
+
+**文件**：`packages/agent-core/src/agent/compaction/micro.ts` L30-38
+
+| 参数 | 默认值 | 含义 |
+|------|--------|------|
+| `keepRecentMessages` | 20 | 最后 20 条消息永不截断 |
+| `keepRecentTokens` | 40,000 | 尾部窗口 token 预算，超了往前推 cutoff |
+| `pruneMinReclaimTokens` | 20,000 | 最少回收 20k tokens 才推进 cutoff（防微调） |
+| `minContentTokens` | 100 | tool result < 100 tokens 不截断（小结果保留） |
+| `minContextUsageRatio` | 0.5 | 上下文用到 50% 才触发 |
+| `truncatedMarker` | `[Old tool result content cleared]` | 截断占位符 |
+| `uselessMarker` | `[Uneventful result elided]` | 无用输出标记（Phase20 Bash降噪） |
+
+### 4.2 触发条件（3 道关卡）
+
+**BATCH_SIZE 注释原文**（L122-123）：
+```typescript
+/** Minimum steps between detect() evaluations to reduce cache-break churn. */
+const BATCH_SIZE = flags.asNumber('micro.batchSize');
+```
+
+逐行分析：
 
 ```typescript
 // micro.ts L120-123
@@ -191,6 +253,7 @@ if (!force && this.stepsSinceLastDetect < BATCH_SIZE) return;
 | ① 检查频率 | BATCH_SIZE | 8（每8轮检查一次） | 防止 cutoff 线频繁变化破坏 KV-cache |
 | ② 容量门槛 | minContextUsageRatio | 0.5（上下文用到50%才触发） | 容量不够时不做无谓截断 |
 | ③ 保护圈 | keepRecentMessages | 20（保留最近20条消息） | 保护最近对话内容不被截断 |
+| ④ 收益保障 | pruneMinReclaimTokens | 20,000（至少回收20k tokens） | 收益不够时不推进 cutoff 线 |
 
 - `BATCH_SIZE = flags.asNumber('micro.batchSize')` (L83)
 - 环境变量 `SCREAM_CODE_MICRO_BATCH_SIZE` 可覆盖
@@ -329,10 +392,74 @@ ArchiveRecoverInput {
 | `context.append_message` | 拼接系统消息到上下文 | message |
 | `context.append_loop_event` | 流式输出切片 | event |
 | `context.undo` | 回退上下文 | — |
+| `cache_metric.record` | 缓存审计指标 | hitRatio, totalInput, totalOutput, injectedCount, apiKeySwitched |
+| `api_key_switch.detected` | API key 切换检测 | prevRatio, currRatio, drop, modelChanged |
 
 ---
 
 ## 八、完整数据流
+
+```
+用户消息
+  │
+  ├─→ context/index.ts: 拼接消息到上下文
+  │     ├─ collapseDuplicateLines() 去重
+  │     ├─ MAX_TOOL_RESULT_TOKENS(8000) 长度截断
+  │     ├─ Point A: archive('tool:' + callId) → ContentArchive (每步)
+  │     └─ 写入 context.history
+  │
+  ├─→ prefix-stabilizer.ts: stabilizePrefix() (每步)
+  │     └─ 系统提示前缀固化 → 提高 KV-cache 前缀命中率
+  │
+  ├─→ micro.ts: detect()
+  │     ├─ stepsSinceLastDetect < BATCH_SIZE → 跳过
+  │     └─ ≥ BATCH_SIZE + usage > 50% + reclaim > 20k → compact()
+  │           ├─ findSupersededPaths() 找出重叠 Read
+  │           ├─ Point B: archive('micro:' + callId) 截断前存档
+  │           ├─ 替换旧 tool.result 为 truncatedMarker
+  │           └─ Supersede 旧 Read
+  │
+  ├─→ maskToolObservations(messages, 3) (每步, buildMessages 后)
+  │     └─ 旧 tool result → 占位符 (API 调用前最终压缩)
+  │
+  ├─→ Predictor: 预测上下文增长趋势 (每步)
+  │     └─ 提前预警 FullCompaction 触发
+  │
+  ├─→ strategy.ts: shouldCompact()
+  │     ├─ triggerRatio(0.75) → FullCompaction
+  │     └─ reservedContext(50000) → FullCompaction
+  │
+  ├─→ full.ts: compact()
+  │     ├─ LLM 总结上下文
+  │     ├─ extractAndStoreMemos → 写记忆库
+  │     ├─ 清上下文
+  │     └─ micro.reset() 重置 cutoff
+  │
+  ├─→ content-archive.ts: archive/recover
+  │     ├─ Point A: 每步 tool result 写入后存档
+  │     ├─ Point B: Micro 截断前存档
+  │     ├─ 模型通过 ArchiveRecover 召回
+  │     ├─ TTL 30min → prune() — 基于创建时间
+  │     └─ recover() 升权 + 刷新 lastAccessedAt
+  │
+  ├─→ audit-log.ts: 缓存审计 (每步)
+  │     ├─ hitRatio / totalInput / totalOutput
+  │     ├─ injected / modelChanged / apiKeySwitched
+  │     └─ 写入 cache-audit-YYYY-MM-DD.ndjson
+  │
+  └─→ records: 所有事件写 wire.jsonl
+```
+
+**关键时间维度**：
+
+| 机制 | 触发频次 | 说明 |
+|------|----------|------|
+| maskToolObservations | **每步** | API 调用前无条件遮蔽 |
+| Point A 存档 | **每步** | tool result 写入 history 后即时存档 |
+| MicroCompaction detect | **每 BATCH_SIZE=8 步** | 8 步才检查一次 |
+| Predictor | **每步** | 持续预测上下文增长 |
+| ContentArchive TTL | **被动**（recover 时检查） | 基于创建时间，不主动轮询 |
+| FullCompaction | **容量 > 75%** | 全局压缩 |
 
 ```
 用户消息
@@ -387,6 +514,8 @@ ArchiveRecoverInput {
 | `packages/agent-core/src/flags/registry.ts` | Flag 定义（content-archive / micro.batchSize） |
 | `packages/agent-core/src/agent/records/types.ts` | 日志事件类型定义 |
 | `packages/agent-core/src/agent/records/persistence.ts` | wire.jsonl 持久化 |
+| `packages/agent-core/src/agent/compaction/predictor.ts` | Predictor 上下文增长预测器 |
+| `packages/agent-core/src/agent/usage/audit-log.ts` | 缓存审计系统（Phase29） |
 | `packages/agent-core/src/agent/audit/file-action-audit.ts` | FileActionAudit 审计日志（独立模块） |
 | **决策文档（演化图见 INDEX.md）** | |
 | `ZHU/DECISIONS/INDEX.md` | **← 上下文管理完整演化图（子线①+②→合并）** |
@@ -416,13 +545,23 @@ loop/turn-step.ts
 agent/context/index.ts
   ├─ stabilizePrefix(msgs)             ← prefix-stabilizer.ts (L241-245)
   ├─ microCompaction.detect()          ← micro.ts
-  ├─ contentArchive?.archive()         ← content-archive.ts
+  ├─ Point A: archive('tool:'+callId) → content-archive.ts (L369)
   │    └─ flags: content-archive flag gate
-  └─ contentArchive?.recover()         → archive-recover.ts (通过 MCP)
+  ├─ contentArchive?.archive()         → content-archive.ts
+  ├─ contentArchive?.recover()         → archive-recover.ts (通过 MCP)
+  ├─ collapseDuplicateLines(text, 3)  ← context/index.ts (预处理)
+  ├─ truncateToolOutput(text, 8000)   ← context/index.ts (长度截断)
+  └─ Predictor.record()               ← compaction/predictor.ts
 
 agent/compaction/micro.ts
-  ├─ archive() 截断前存档 (Point B)    → content-archive.ts
-  ├─ detect() gate                     → flags: micro.batchSize
+  ├─ Point B: archive('micro:'+callId) → content-archive.ts (L223)
+  ├─ compact(messages)                 → context/index.ts (L235)
+  │    ├─ findSupersededPaths()
+  │    ├─ minContentTokens=100 小结果保留
+  │    ├─ pruneMinReclaimTokens=20000 收益保护
+  │    ├─ keepRecentTokens=40000 尾部窗口
+  │    └─ uselessMarker Phase20 Bash降噪
+  ├─ detect() gate                     → flags: micro.batchSize (L123)
   └─ reset() Full 完调                 → full.ts
 
 agent/tool/index.ts
@@ -435,9 +574,15 @@ agent/compaction/full.ts
   ├─ extractAndStoreMemos(summary)      → 写记忆库
   ├─ triggerPostCompactHook()           → 后置钩子
   ├─ micro.reset()                     → micro.ts
-  └─ strategy.shouldCompact()          → strategy.ts
+  ├─ strategy.shouldCompact()          → strategy.ts
+  └─ Predictor.predict()               → compaction/predictor.ts (预估剩余容量)
 
 独立运行（不在上下文管理体系内）：
+agent/usage/audit-log.ts
+  ├─ detectApiKeySwitch()              → 审计日志 (L47-71)
+  ├─ prevRatio>0.7, drop≥0.25, inputRatio≤3, injected>0→false
+  └─ cache-audit-YYYY-MM-DD.ndjson 轮转日志
+
 agent/audit/file-action-audit.ts
   └─ FileActionAudit extends FlushBuffer → 独立审计日志
        ├─ getRecentEntries(n) → 环状缓冲区（最近50条），供 AI 查错

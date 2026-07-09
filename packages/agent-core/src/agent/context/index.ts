@@ -7,6 +7,7 @@ import type { CompactionResult } from '../compaction';
 import { assertWireFormat, project } from './projector';
 import { stabilizePrefix } from './prefix-stabilizer';
 import { flags } from '../../flags';
+import { statSync } from 'node:fs';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -369,10 +370,30 @@ export class ContextMemory {
         // Point A: 存档原始工具输出（截断/压缩前保留完整内容）
         // gated by content-archive flag (default: true)
         if (flags.enabled('content-archive')) {
+          // 查找对应的 tool.call 以获取工具名称和参数（用于文件版本追踪）
+          let filePath: string | undefined;
+          let fileMtime: number | undefined;
+          let fileSize: number | undefined;
+          for (const [, step] of this.openSteps) {
+            const tc = step.toolCalls.find(c => c.id === event.toolCallId);
+            if (tc) {
+              const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+              const pathArg: string | undefined = args?.path;
+              if (pathArg && (tc.name === 'Read' || tc.name === 'Edit' || tc.name === 'Write')) {
+                try {
+                  const st = statSync(pathArg);
+                  filePath = pathArg;
+                  fileMtime = st.mtimeMs;
+                  fileSize = st.size;
+                } catch { /* stat 失败—跳过文件信息 */ }
+              }
+              break;
+            }
+          }
           this.agent.contentArchive?.archive(
             `tool:${event.toolCallId}`,
             event.result.output,
-            { source: 'toolResult' },
+            { source: 'toolResult', filePath, fileMtime, fileSize },
           );
         }
         const message = createToolMessage(event.toolCallId, toolResultOutputForModel(event.result));

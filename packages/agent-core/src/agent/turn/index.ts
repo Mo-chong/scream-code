@@ -583,7 +583,7 @@ export class TurnFlow {
 
     // ── Phase 4: 回合意图检测 ─────────────────────────────
     if (origin.kind === 'user') {
-      this._intentPhase = detectIntent(input);
+      this._intentPhase = detectIntent(input)?.variant ?? null;
     }
 
     // ── Phase 11: 回合开局规则记忆注入 ────────────────────
@@ -817,7 +817,7 @@ export class TurnFlow {
               await this.agent.injection.inject({
                 currentStep: this.currentStep,
                 messageCount: this.agent.context?.history?.length ?? 0,
-                intentPhase: this._intentPhase,
+                intentPhase: this._intentPhase ?? undefined,
                 confabulationResult: this._confabResult,
                 qualitySignals: this._qualitySignals,
                 stuckContext: this._stuckContext,
@@ -1481,6 +1481,7 @@ export class TurnFlow {
     if (toolName === 'Edit' || toolName === 'Write') {
       const path = (args as { path?: string }).path;
       if (path !== undefined) workingSet.touch(path, turnId);
+      if (path !== undefined) this.agent.contentArchive?.invalidateByPath(path);
     }
   }
 

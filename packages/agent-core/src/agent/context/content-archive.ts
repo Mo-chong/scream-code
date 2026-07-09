@@ -14,6 +14,7 @@
  */
 
 import type { ContentPart } from '@scream-code/ltod';
+import { statSync } from 'node:fs';
 
 // ─── 类型导出 ────────────────────────────────────────
 export interface ContentArchiveEntry {
@@ -29,6 +30,12 @@ export interface ContentArchiveEntry {
   protected: boolean;
   /** 最近访问时间（ms），recover() 时刷新 */
   lastAccessedAt: number;
+  /** 关联的文件路径（仅 tool result 存档有值） */
+  filePath?: string;
+  /** 文件修改时间（ms），用于检测文件变更 */
+  fileMtime?: number;
+  /** 文件大小（bytes） */
+  fileSize?: number;
 }
 
 export interface ContentArchiveConfig {
@@ -107,7 +114,7 @@ export class ContentArchive {
   archive(
     key: string,
     content: string | ContentPart[],
-    options?: { source?: string; priority?: number; protected?: boolean },
+    options?: { source?: string; priority?: number; protected?: boolean; filePath?: string; fileMtime?: number; fileSize?: number },
   ): ArchiveResult {
     const now = Date.now();
     let evictedCount = 0;
@@ -135,6 +142,9 @@ export class ContentArchive {
       priority: options?.priority ?? PRIORITY_NEW,
       protected: options?.protected ?? false,
       lastAccessedAt: now,
+      filePath: options?.filePath,
+      fileMtime: options?.fileMtime,
+      fileSize: options?.fileSize,
     });
 
     // 同步写入全局共享存储（跨 agent 实例可见）
@@ -145,6 +155,9 @@ export class ContentArchive {
       priority: options?.priority ?? PRIORITY_NEW,
       protected: options?.protected ?? false,
       lastAccessedAt: now,
+      filePath: options?.filePath,
+      fileMtime: options?.fileMtime,
+      fileSize: options?.fileSize,
     });
 
     return { key, success: true, evictedCount };
@@ -161,10 +174,25 @@ export class ContentArchive {
     const entry = this.store.get(key);
     if (entry !== undefined) {
       const now = Date.now();
-      if (now - entry.timestamp > this.ttlMs) {
+      if (now - entry.lastAccessedAt > this.ttlMs) {
         this.store.delete(key);
         ContentArchive.sharedStore.delete(key);
         return undefined;
+      }
+      // 校验关联文件是否已修改（覆盖外部编辑器修改）
+      if ((entry as any).filePath) {
+        try {
+          const st = statSync((entry as any).filePath);
+          if (st.mtimeMs !== (entry as any).fileMtime) {
+            this.store.delete(key);
+            ContentArchive.sharedStore.delete(key);
+            return undefined;
+          }
+        } catch {
+          this.store.delete(key);
+          ContentArchive.sharedStore.delete(key);
+          return undefined;
+        }
       }
       entry.priority = Math.min(PRIORITY_MAX, entry.priority + PRIORITY_BOOST);
       entry.lastAccessedAt = now;
@@ -176,9 +204,22 @@ export class ContentArchive {
     if (shared === undefined) return undefined;
 
     const now = Date.now();
-    if (now - shared.timestamp > this.ttlMs) {
+    if (now - shared.lastAccessedAt > this.ttlMs) {
       ContentArchive.sharedStore.delete(key);
       return undefined;
+    }
+    // 校验关联文件是否已修改（共享存储路径）
+    if ((shared as any).filePath) {
+      try {
+        const st = statSync((shared as any).filePath);
+        if (st.mtimeMs !== (shared as any).fileMtime) {
+          ContentArchive.sharedStore.delete(key);
+          return undefined;
+        }
+      } catch {
+        ContentArchive.sharedStore.delete(key);
+        return undefined;
+      }
     }
     // 从共享存储"借"回本地（soft copy-on-access）
     const lifted: ContentArchiveEntry = {
@@ -223,6 +264,7 @@ export class ContentArchive {
    */
   clear(): void {
     this.store.clear();
+    ContentArchive.sharedStore.clear();
   }
 
   // ─── 内部方法 ────────────────────────────────────
@@ -234,8 +276,9 @@ export class ContentArchive {
   private pruneInternal(now: number): number {
     let removed = 0;
     for (const [key, entry] of this.store) {
-      if (now - entry.timestamp > this.ttlMs) {
+      if (now - entry.lastAccessedAt > this.ttlMs) {
         this.store.delete(key);
+        ContentArchive.sharedStore.delete(key);
         removed++;
       }
     }
@@ -261,7 +304,7 @@ export class ContentArchive {
     for (const [key, entry] of this.store) {
       if (entry.protected) continue;
 
-      const ageMs = now - entry.timestamp;
+      const ageMs = now - entry.lastAccessedAt;
       const ageFactor = Math.min(1, ageMs / this.ttlMs);
       const decay = Math.exp(-ageMs / this.ttlMs);
       const accessBoost = 1 - ageFactor * ACCESS_BOOST_FACTOR;
@@ -286,5 +329,52 @@ export class ContentArchive {
 
     this.store.delete(target.key);
     return true;
+  }
+
+  /**
+   * 文件被修改后清除所有关联该路径的缓存条目。
+   * 由 Edit/Write 工具在写完文件后调用。
+   *
+   * @returns 删除了多少条
+   */
+  invalidateByPath(filePath: string): number {
+    let count = 0;
+    for (const [key, entry] of this.store) {
+      if ((entry as any).filePath === filePath) {
+        this.store.delete(key);
+        ContentArchive.sharedStore.delete(key);
+        count++;
+      }
+    }
+    if (count > 0) {
+      console.log(`[ContentArchive] invalidated ${count} cache entries: ${filePath}`);
+    }
+    return count;
+  }
+
+  /**
+   * 获取缓存统计信息（用于调试和监控）。
+   */
+  getStats(): { localSize: number; sharedSize: number } {
+    return {
+      localSize: this.store.size,
+      sharedSize: ContentArchive.sharedStore.size,
+    };
+  }
+
+  /**
+   * 丢弃所有过期间缓存条目（强制清理）。
+   */
+  pruneAll(): number {
+    const now = Date.now();
+    let removed = 0;
+    for (const [key, entry] of this.store) {
+      if (now - entry.lastAccessedAt > this.ttlMs) {
+        this.store.delete(key);
+        ContentArchive.sharedStore.delete(key);
+        removed++;
+      }
+    }
+    return removed;
   }
 }
