@@ -1,5 +1,0 @@
-# cache-audit — 缓存命中审计
-# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过
-# 查: grep '"injected":\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次
-# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched
-# started: 2026-07-08T11:16:40.857Z

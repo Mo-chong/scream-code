@@ -18,5 +18,7 @@ session_default_output.zip
 .env
 .env.local
 .env.*.local
+workspace/
+*.ndjson
 apps/scream-code/README.md
 local_cache/
