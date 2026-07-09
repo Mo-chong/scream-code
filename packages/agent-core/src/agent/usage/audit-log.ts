@@ -194,30 +194,18 @@ export function detectApiKeySwitch(
   if (compacted) return false;
   if (!prevMetrics) return false;
 
-  // 前一步必须有可观的缓存
-  if (prevMetrics.hitRatio < 0.3) return false;
+  // 前一步必须有可观的缓存（≥70%才有意义判断"失去了缓存"）
+  if (prevMetrics.hitRatio < 0.7) return false;
 
   // 输入量可比（排除上下文暴涨稀释缓存）
   const inputRatio = Math.max(currMetrics.totalInput, prevMetrics.totalInput) /
     Math.min(currMetrics.totalInput, prevMetrics.totalInput);
   if (inputRatio > 3) return false;
 
-  // 核心：期望命中 vs 实际命中
-  // 如果缓存行为没变，当前步应有的命中数 = 前一步命中率 × 当前步总输入
-  const expectedHitTokens = prevMetrics.hitRatio * currMetrics.totalInput;
-  const actualHitTokens = currMetrics.hitTokens;
-
-  // 避免 0/0 和实际 > 期望的正常情况
-  if (expectedHitTokens <= 0) return false;
-  if (actualHitTokens >= expectedHitTokens) return false;
-
-  // 实际命中不到期望的 30% → 缓存严重退化
-  const hitEfficiency = actualHitTokens / expectedHitTokens;
-  if (hitEfficiency >= 0.3) return false;
-
-  // 降幅 >= 20pp 确认是大幅退化
+  // 降幅：前一步命中率 - 当前步命中率
+  // API切换实测降幅 25-65pp（公共前缀缓存跨key残存），正常波动 <5pp
   const drop = prevMetrics.hitRatio - currMetrics.hitRatio;
-  if (drop < 0.2) return false;
+  if (drop < 0.25) return false;
 
   // 注入保护：有任何注入 → 不判定为API切换。注入会改prompt前缀，影响缓存命中率。
   // 这是最高优先级规则——宁可漏判API切换，绝不误判注入导致的缓存降低。

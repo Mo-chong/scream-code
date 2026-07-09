@@ -314,6 +314,13 @@ updated: 2026-07-08
 
 ## 二开发日志（Mo-chong fork）
 
+### Phase31 — L4 结构化注入：KnowledgeSearchResult 追加 sourcePath（2026-07-08）
+
+#### 新功能
+- `KnowledgeSearchResult` 接口追加 `sourcePath` 字段（值来自 `knowledge_sources.file_path`），AI 直接获得来源文件路径 | 2 行代码，构建通过 ✅
+
+---
+
 ### Phase30 — SYSTEM 参见互联核查 + SOP 升级（2026-07-08）
 
 #### 文档维护

@@ -121,6 +121,8 @@ export interface KnowledgeSearchResult {
   score: number;
   eventId: string | null;
   eventTitle: string | null;
+  /** Absolute file path of the source document (from knowledge_sources.file_path). */
+  sourcePath: string;
 }
 
 export interface KnowledgeSearchOptions {

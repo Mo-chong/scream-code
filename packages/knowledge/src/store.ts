@@ -899,6 +899,7 @@ export class KnowledgeStore {
       score,
       eventId,
       eventTitle,
+      sourcePath: String(sourceRow['file_path'] ?? ''),
     };
   }
 }

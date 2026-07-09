@@ -190,12 +190,20 @@ query → 向量化(embedding)
 
 ### 6.3 返回结果
 
-| 字段 | 说明 |
-|------|------|
-| chunks | 匹配的内容片段 + 关联的 source/doc 路径 |
-| score | 相关性评分 |
-| event entity | 关联的事件/实体链条 |
-| trace | 检索链路追踪（每步耗时，方便下一轮修正查询） |
+`KnowledgeSearchResult` 字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `chunkId` | string | 匹配的 chunk 唯一 ID |
+| `documentId` | string | 所属文档 ID |
+| `sourceId` | string | 来源 ID |
+| `sourceName` | string | 来源名称（文件/网页标题） |
+| `sourcePath` | string | 来源文件绝对路径（来自 `knowledge_sources.file_path`） |
+| `heading` | string|null | chunk 的标题/小节名 |
+| `content` | string | chunk 内容文本 |
+| `score` | number | 相关性评分（cosine 相似度） |
+| `eventId` | string|null | 关联的事件 ID |
+| `eventTitle` | string|null | 关联事件标题 |
 
 ---
 
