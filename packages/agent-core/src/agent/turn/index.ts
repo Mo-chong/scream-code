@@ -99,6 +99,8 @@ export class TurnFlow {
   private currentTurnId = -1;
   private activeTurn: 'resuming' | ActiveTurn | null = null;
   private readonly currentStepByTurn = new Map<number, number>();
+  /** keyed by toolCallId, set on authorize → read on finalize for FAA durationMs */
+  private readonly _toolStartTimers = new Map<string, number>();
   private currentStep = 0;
   private todoSeenThisTurn = false;
   private convergenceInjections = 0;
@@ -1118,6 +1120,7 @@ export class TurnFlow {
               return undefined;
             },
             authorizeToolExecution: async (ctx) => {
+              this._toolStartTimers.set(ctx.toolCall.id, Date.now());
               return this.agent.permission.beforeToolCall(ctx);
             },
             finalizeToolResult: async (ctx) => {
@@ -1141,8 +1144,11 @@ export class TurnFlow {
                 timestamp: Date.now(),
                 resultPreview: preview,
                 success: !isError,
-                durationMs: 0,
+                durationMs: this._toolStartTimers.has(ctx.toolCall.id)
+                  ? Date.now() - this._toolStartTimers.get(ctx.toolCall.id)!
+                  : 0,
               });
+              this._toolStartTimers.delete(ctx.toolCall.id);
 
               // Record in session memory for post-compaction context injection
               this.agent.sessionMemory.recordToolExecution(
