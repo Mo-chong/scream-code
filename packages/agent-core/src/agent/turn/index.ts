@@ -1132,6 +1132,18 @@ export class TurnFlow {
               );
               const { isError, output } = finalResult;
 
+              // FAA: 记录所有工具操作（全部工具类型、成功+失败、结果预览前500字符）
+              const raw = typeof output === 'string' ? output : String(output ?? '');
+              const preview = raw.length > 500 ? raw.substring(0, 500) + '…' : raw;
+              this.agent.fileActionAudit?.push({
+                toolCallId: ctx.toolCall.id,
+                action: `${ctx.toolCall.name}`,
+                timestamp: Date.now(),
+                resultPreview: preview,
+                success: !isError,
+                durationMs: 0,
+              });
+
               // Record in session memory for post-compaction context injection
               this.agent.sessionMemory.recordToolExecution(
                 ctx.toolCall.name,
@@ -1298,20 +1310,6 @@ export class TurnFlow {
                   this.hasWriteToolsThisStep = true;
                   const writePath = (ctx.args as { path?: string }).path ?? '';
                   if (writePath) this.recentlyModifiedPathsThisTurn.add(writePath);
-                }
-
-                // 🆕 FileActionAudit: 记录成功的文件操作
-                if ((ctx.toolCall.name === 'Edit' || ctx.toolCall.name === 'Write') && ctx.toolCall.id) {
-                  const filePath = (ctx.args as { path?: string }).path ?? '';
-                  const actionType = ctx.toolCall.name === 'Edit' ? 'edit' : 'write';
-                  this.agent.fileActionAudit.push({
-                    toolCallId: ctx.toolCall.id,
-                    action: `${actionType}:${filePath}`,
-                    timestamp: Date.now(),
-                    resultPreview: filePath,
-                    success: true,
-                    durationMs: 0,
-                  });
                 }
 
                 // 🆕 Phase24.2: 截断数据注册 — 工具输出被截断时登记（含长度信息）
