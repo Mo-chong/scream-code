@@ -224,6 +224,7 @@ export function buildAuditEntry(
   injectedVariants: string[] = [],
   modelChanged = false,
   apiKeySwitched = false,
+  archiveStats?: { hits: number; misses: number },
 ): AuditLogEntry {
   const alerts: string[] = [];
   for (const rule of ALERT_RULES) {
@@ -254,5 +255,7 @@ export function buildAuditEntry(
     alerts,
     injected: injectedVariants,
     apiKeySwitched,
+    archiveHit: archiveStats?.hits ?? 0,
+    archiveMiss: archiveStats?.misses ?? 0,
   };
 }

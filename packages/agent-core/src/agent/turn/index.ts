@@ -46,6 +46,7 @@ import { AttentionPositionStrategy, InsertPosition } from '../injection/position
 import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
 import type { CacheMetrics } from '../usage/audit-log';
+import { extractSummaryEvents, mergeSummaries } from '../compaction/summary';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -1735,7 +1736,10 @@ export class TurnFlow {
     this.turnTruncation.clearStepRecovered(this.currentStep);
     this.turnTruncation.prune(this.currentStep);
 
-    // Step 6: 正反馈 + CodeRef
+    // 🆕 Step 7: 增量摘要提取与注入（每 30 步）
+    this.updatePersistentSummary();
+
+    // Step 8: 正反馈 + CodeRef
     this.injectPositiveFeedbackThisTurn();
     this.detectCodeRefIssue();
 
@@ -1757,7 +1761,8 @@ export class TurnFlow {
       const injectedNames = [...new Set([...routerNames, ...vRegNames])];
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedNames.length);
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedNames, modelChanged, apiKeySwitched);
+      const archiveStats = this.agent.contentArchive?.getStats();
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedNames, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 });
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态
@@ -2027,6 +2032,33 @@ export class TurnFlow {
       this.positiveFeedbackGivenThisTurn = true;
       this.inject('【行为确认】本轮验证流程完整且代码质量合规。继续。', { kind: 'injection', variant: 'feedback_positive' });
     }
+  }
+
+  /** 🆕 增量摘要提取与注入（每 30 步） */
+  private updatePersistentSummary(): void {
+    if (this.currentStep % 30 !== 0) return;
+
+    const SUMMARY_KEY = 'summary';
+    const existingSummary = this.agent.contentArchive?.recover(SUMMARY_KEY) as string | undefined;
+    const existingText = typeof existingSummary === 'string' ? existingSummary : '';
+
+    const history = this.agent.context.history;
+    const recentAssistantTexts: string[] = [];
+    for (let i = history.length - 1; i >= 0 && recentAssistantTexts.length < 30; i--) {
+      const msg = history[i];
+      if (msg.role === 'assistant') {
+        const text = typeof msg.content === 'string' ? msg.content : '';
+        if (text) recentAssistantTexts.unshift(text);
+      }
+    }
+
+    const newEvents = extractSummaryEvents(recentAssistantTexts, Math.max(0, this.currentStep - 30));
+    const compiled = mergeSummaries(existingText, newEvents, 6);
+    const summaryText = compiled ? "[summary]\n" + compiled : "";
+    if (!summaryText) return;
+
+    this.inject(summaryText, { kind: 'system_trigger', name: 'summary' });
+    this.agent.contentArchive?.archive(SUMMARY_KEY, summaryText, { source: 'summary' });
   }
 
   /** CodeRefDetector — 检测代码块是否缺路径/行号 */

@@ -81,6 +81,12 @@ const ACCESS_BOOST_FACTOR = 0.5;  // 访问新鲜度因子
  * 线程安全：当前场景是单线程事件循环，无需锁。
  */
 export class ContentArchive {
+  /** \u547d\u4e2d/\u672a\u547d\u4e2d\u8ba1\u6570\u5668 */
+  private hits = 0;
+  private misses = 0;
+  /** 命中/未命中计数器 */
+  private hits = 0;
+  private misses = 0;
   /**
    * 全局共享存储（跨 agent 实例）。
    *
@@ -179,6 +185,7 @@ export class ContentArchive {
     // 查本地 store
     const entry = this.store.get(key);
     if (entry !== undefined) {
+      this.hits++;
       const now = Date.now();
       if (now - entry.timestamp > this.hardTtlMs || now - entry.lastAccessedAt > this.ttlMs) {
         this.store.delete(key);
@@ -355,10 +362,12 @@ export class ContentArchive {
   /**
    * 获取缓存统计信息（用于调试和监控）。
    */
-  getStats(): { localSize: number; sharedSize: number } {
+  getStats(): { localSize: number; sharedSize: number; hits: number; misses: number } {
     return {
       localSize: this.store.size,
       sharedSize: ContentArchive.sharedStore.size,
+      hits: this.hits,
+      misses: this.misses,
     };
   }
 

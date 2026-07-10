@@ -74,7 +74,16 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // Observation masking: replace old tool results with a placeholder
   // to reduce attention overhead. Operates post-compaction on projected
   // messages — does not affect context.history.
-  messages = maskToolObservations(messages);
+  // Build tool name map from assistant tool_calls for enriched masking.
+  const toolNameMap = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        if (tc.id && tc.name) toolNameMap.set(tc.id, tc.name);
+      }
+    }
+  }
+  messages = maskToolObservations(messages, undefined, toolNameMap);
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();

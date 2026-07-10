@@ -49,7 +49,14 @@ export const FLAG_DEFINITIONS = [
     numDefault: 14400000,
     surface: 'internal',
   },
+  {
+    id: 'mask.keepLastN',
+    env: 'SCREAM_CODE_MASK_KEEP_LAST_N',
+    default: true,
+    numDefault: 3,
+    surface: 'internal',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
-/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit | micro.batchSize | contentArchive.ttlMs */
+/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit | micro.batchSize | contentArchive.ttlMs | mask.keepLastN */
 export type FlagId = (typeof FLAG_DEFINITIONS)[number]['id'];
