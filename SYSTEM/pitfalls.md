@@ -639,6 +639,38 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 ---
 
+### toolCalls 缺失导致 TypeError: undefined is not iterable（2026-07-10）
+
+**现象**：停一段时间后首次发消息 → 增量摘要触发 → `collectToolCallIds()` 抛 `TypeError: undefined is not iterable` → 摘要失败 → 下一轮触发摘要时因已注入过而不重复注入 → 上下文累积不再压缩。
+
+**触发链路**：
+```
+turn/index.ts beforeStep
+  → summary.summarizeWithLLM()
+    → 构造 Message 时缺 toolCalls 字段（隐式 undefined）
+    → ltod-llm.chat() → provider.generate()
+      → normalizeToolCallIdsForProvider()
+        → collectToolCallIds() 中 for (const toolCall of message.toolCalls)
+          → undefined[Symbol.iterator] → TypeError
+```
+
+**根因**（两层）：
+1. **上游源头** — `summary.ts:56-57` 构造 `Message` 时只传了 `role` + `content`，没传 `toolCalls: []`。用了 `as Message[]` 强行跳过类型检查，TypeScript 不报错。这是"类型断言掩盖缺失字段"的典型案例。
+2. **下游无防御** — `tool-call-id.ts:34,35,68` 的 `for (const toolCall of message.toolCalls)` 和 `.length` 直接访问未定义字段，没加 `?? []` 保底。
+
+**为什么不是每次请求都崩？** 增量摘要只在 `lastTurnStepCount ≥ 8` 时触发。会话前 8 步以内不触发摘要，不会进 `summarizeWithLLM()`。所以短会话正常，长会话或断连后重连才崩。
+
+**修复**（两层）：
+1. **上游根治** — `summary.ts:56-57` 加 `toolCalls: []`。构造 `Message` 时所有数组字段必须显式初始化为 `[]`，禁止依赖隐式 `undefined`。
+2. **下游加固** — `tool-call-id.ts:34,35,68` 三处改 `message.toolCalls` → `(message.toolCalls ?? [])`。即使再有其他调用方漏传，不会崩。
+
+**教训**：
+1. `as SomeType[]` 是红牌——类型断言等于告诉 TypeScript "不用你检查了"，后续所有类型安全全部失效。**禁止用 `as` 跳过类型检查。** 要么补全字段，要么用 `satisfies` 约束而非 `as` 强转。
+2. 对 `message.toolCalls` 这种可选数组字段，访问其 `length` 或 `for...of` 前必须加 `?? []` 防御。这是 TypeScript 项目的通用防御模式，不是特定 bug 的补丁。
+3. 异常触发时机（"停一段时间后首次消息"）和 bug 触发条件（"超 8 步触发摘要"）不直观。调试时**难以复现的崩往往在特定条件路径上**，查日志确认触发条件比瞎猜更快。
+
+---
+
 ## 调试教训
 
 ### bundle 环境 PATH 极简，外部命令找不到

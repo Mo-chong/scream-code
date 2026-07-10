@@ -314,10 +314,10 @@ updated: 2026-07-11
 
 ## 二开发日志（Mo-chong fork）
 
-### Phase33 — Context Facts 尾部聚合 + 内容哈希埋点（2026-07-10）
+### Phase33 — Context Facts 尾部聚合 + 内容哈希埋点 + toolCalls TypeError 修（2026-07-10）
 
 #### 新功能
-- **Context Facts 尾部聚合 (Phase B')**: 7 个注入器（error-audit/working-set/goal/todo-list/wolfpack/plugin-session-start/guard-injector）接入 `recordFact()` 接口，在 `manager.inject()` 尾部统一格式化为 `[Context Facts]` 结构化块注入。AI 在尾巴 U 形第二高点一眼扫完所有注入器关键状态，无需扫描 3-8 块碎片 | 源码证据：git diff +107/-1 | 测试验证：24/24 vitest 通过 | 缓存影响：零（`appendSystemReminder` 尾部追加）
+- **Context Facts 尾部聚合 (Phase B')**: 7 个注入器（error-audit/working-set/goal/todo-list/wolfpack/plugin-session-start/guard-injector）接入 `recordFact()` 接口，在 `manager.inject()` 尾部统一格式化为 `[Context Facts]` 结构化块注入。AI 在尾巴 U 形第二高点一眼扫完所有注入器关键状态，无需扫描 3-8 块碎片 | git diff 11文件 107行 | vitest 24/24 | 缓存影响零
 - **内容哈希测量埋点 (Phase M)**: `DynamicInjector` 基类新增 `_lastContentHash` + `getLastContentHash()` 访问器，`InjectResult` 新增 `contentHash?: string` 字段
 
 #### 接口变更
@@ -327,12 +327,15 @@ updated: 2026-07-11
 - `InjectResult` 新增 `contentHash?: string`
 
 #### Bug 修复
-- **`_lastContentHash` 脏数据**: 不注入时残留旧值 → 加 `else { null }`
-- **`flushContextFacts` 异常安全**: dispatch 抛异常时 Map 泄漏 → `try { dispatch } finally { flush }`
-- **`recordFact` mock 兼容**: 7 个注入器使用 `?.()` 可选链
+- **`_lastContentHash` 脏数据**: 不注入轮次 `_lastContentHash` 残留旧值 → 加 `else { null }` 清空
+- **`flushContextFacts` 异常安全**: dispatch 抛异常时 `_contextFacts` Map 泄漏 → `try { dispatch } finally { flush }`
+- **`recordFact` mock 兼容**: 7 个注入器使用 `?.()` 可选链，test mock 环境不崩溃
+- **toolCalls 缺失 TypeError**: 增量摘要构造 Message 时缺 `toolCalls` 字段（隐式 undefined）→ 下游 `for...of undefined` 崩。两层修复：上游 `summary.ts:56-57` 加 `toolCalls: []`，下游 `tool-call-id.ts:34,35,68` 三处加 `?? []` 防御 | 详见 `SYSTEM/pitfalls.md`
 
 #### 文档
 - `SYSTEM/injection-system.md`: 新增 §Context Facts 尾部聚合节，融合计划 + Phase B'/M 行
+- `SYSTEM/API-REFERENCE.md`: 新增 `recordFact/flushContextFacts/getLastContentHash` 签名 + InjectionEvent.contentHash
+- `SYSTEM/pitfalls.md`: 新增 "toolCalls 缺失导致 TypeError" 设计误区条目
 - `ZHU/DECISIONS/ADR-7-注入位置优化与尾部聚合策略.md`: 废弃原 Phase 1，修正为 Phase B' + Phase M
 - `ZHU/workspace/研-ADR7验证与重设计分析.md`: 补全 2718 条日志实证
 
@@ -340,6 +343,9 @@ updated: 2026-07-11
 - Phase 1 原计划是假前提：源码证明 B 级注入器实际已在尾部（`appendSystemReminder`），先查源码再写计划
 - ADR 必须带源码验证，否则方向可能全错
 - 审计日志 2718 条确认缓存已 98.13%，"优化缓存"方向错的
+- `as SomeType[]` 是红牌：类型断言跳过类型检查，后续所有安全失效。禁止 `as` 强转，改显式补字段或用 `satisfies`
+- 对可选数组字段（如 `message.toolCalls`），`for...of` 或 `.length` 前必须加 `?? []` 防御——TypeScript 通用防御模式
+- 异常触发时机不直观的 bug（"停一段时间后首次消息崩"），查日志确认触发条件比瞎猜更快
 
 ---
 

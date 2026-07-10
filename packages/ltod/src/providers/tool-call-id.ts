@@ -31,8 +31,8 @@ export function normalizeToolCallIdsForProvider(
     let messageChanged = false;
     let toolCalls = message.toolCalls;
 
-    if (message.toolCalls.length > 0) {
-      toolCalls = message.toolCalls.map((toolCall) => {
+    if ((message.toolCalls ?? []).length > 0) {
+      toolCalls = (message.toolCalls ?? []).map((toolCall) => {
         const mappedId = mappedIds.get(toolCall.id);
         if (mappedId === undefined || mappedId === toolCall.id) return toolCall;
         messageChanged = true;
@@ -65,7 +65,7 @@ function collectToolCallIds(messages: Message[]): string[] {
   };
 
   for (const message of messages) {
-    for (const toolCall of message.toolCalls) {
+    for (const toolCall of message.toolCalls ?? []) {
       append(toolCall.id);
     }
     if (message.toolCallId !== undefined) {

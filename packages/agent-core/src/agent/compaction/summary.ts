@@ -53,8 +53,8 @@ export async function summarizeWithLLM(
 
   await llm.chat({
     messages: [
-      { role: 'system' as const, content: [{ type: 'text' as const, text: SUMMARY_SYSTEM_PROMPT }] },
-      { role: 'user' as const, content: [{ type: 'text' as const, text: userContent }] },
+      { role: 'system' as const, content: [{ type: 'text' as const, text: SUMMARY_SYSTEM_PROMPT }], toolCalls: [] },
+      { role: 'user' as const, content: [{ type: 'text' as const, text: userContent }], toolCalls: [] },
     ] as Message[],
     tools: [],
     signal: new AbortController().signal,
