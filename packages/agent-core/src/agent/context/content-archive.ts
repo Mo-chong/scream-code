@@ -6,7 +6,7 @@
  *
  * 设计要点：
  * - 纯内存，零外部依赖（LRU + TTL 双老化 + 权重淘汰）
- * - 单条生命周期 max 30 分钟（秒级可配）
+ * - 单条生命周期 max 4 小时（以 lastAccessedAt 为判据，持续 recover 续命）
  * - 全局上限 2000 条目（加权淘汰，priority < 0.1 强制优先）
  * - 每个 entry 用调用方前缀 + toolCallId 做 key，互不干扰
  * - protected 仅防加权淘汰，不防 TTL 过期
@@ -39,7 +39,7 @@ export interface ContentArchiveEntry {
 }
 
 export interface ContentArchiveConfig {
-  /** 单条存活时间（ms），默认 1_800_000（30 分钟） */
+  /** 单条存活时间（ms），默认 14_400_000（4 小时，判据用 lastAccessedAt） */
   readonly ttlMs?: number;
   /** 全局条目上限，默认 2000 */
   readonly maxEntries?: number;
@@ -54,7 +54,7 @@ export interface ArchiveResult {
 }
 
 // ─── 默认值 ──────────────────────────────────────────
-const DEFAULT_TTL_MS = 1_800_000; // 30 分钟
+const DEFAULT_TTL_MS = 14_400_000; // 4 小时（判据用 lastAccessedAt，持续 recover 的条目不丢）
 const DEFAULT_MAX_ENTRIES = 2000;
 
 // 权重常量
@@ -180,10 +180,10 @@ export class ContentArchive {
         return undefined;
       }
       // 校验关联文件是否已修改（覆盖外部编辑器修改）
-      if ((entry as any).filePath) {
+      if (entry.filePath) {
         try {
-          const st = statSync((entry as any).filePath);
-          if (st.mtimeMs !== (entry as any).fileMtime) {
+          const st = statSync(entry.filePath);
+          if (st.mtimeMs !== entry.fileMtime) {
             this.store.delete(key);
             ContentArchive.sharedStore.delete(key);
             return undefined;
@@ -209,10 +209,10 @@ export class ContentArchive {
       return undefined;
     }
     // 校验关联文件是否已修改（共享存储路径）
-    if ((shared as any).filePath) {
+    if (shared.filePath) {
       try {
-        const st = statSync((shared as any).filePath);
-        if (st.mtimeMs !== (shared as any).fileMtime) {
+        const st = statSync(shared.filePath);
+        if (st.mtimeMs !== shared.fileMtime) {
           ContentArchive.sharedStore.delete(key);
           return undefined;
         }
@@ -340,7 +340,7 @@ export class ContentArchive {
   invalidateByPath(filePath: string): number {
     let count = 0;
     for (const [key, entry] of this.store) {
-      if ((entry as any).filePath === filePath) {
+      if (entry.filePath === filePath) {
         this.store.delete(key);
         ContentArchive.sharedStore.delete(key);
         count++;
