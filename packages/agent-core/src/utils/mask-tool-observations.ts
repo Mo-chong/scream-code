@@ -4,9 +4,9 @@ import { flags } from '../flags';
 function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
   const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
   if (toolName) {
-    return `[Observation masked (${toolName}) — tool may be re-invoked if needed]`;
+    return `[已遮蔽·${toolName}·已存档·ArchiveRecover可恢复]`;
   }
-  return '[Old tool output: obscured — tool may be re-invoked if needed]';
+  return '[已遮蔽·已存档·ArchiveRecover可恢复]';
 }
 
 /**
