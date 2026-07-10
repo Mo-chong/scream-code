@@ -330,7 +330,8 @@ updated: 2026-07-11
 - **`_lastContentHash` 脏数据**: 不注入轮次 `_lastContentHash` 残留旧值 → 加 `else { null }` 清空
 - **`flushContextFacts` 异常安全**: dispatch 抛异常时 `_contextFacts` Map 泄漏 → `try { dispatch } finally { flush }`
 - **`recordFact` mock 兼容**: 7 个注入器使用 `?.()` 可选链，test mock 环境不崩溃
-- **toolCalls 缺失 TypeError**: 增量摘要构造 Message 时缺 `toolCalls` 字段（隐式 undefined）→ 下游 `for...of undefined` 崩。两层修复：上游 `summary.ts:56-57` 加 `toolCalls: []`，下游 `tool-call-id.ts:34,35,68` 三处加 `?? []` 防御 | 详见 `SYSTEM/pitfalls.md`
+- **toolCalls 缺失 TypeError**: 增量摘要构造 Message 时缺 `toolCalls` 字段（隐式 undefined）→ 下游 `for...of undefined` 崩。两层修复：上游 `summary.ts` 加 `toolCalls: []`，下游 `tool-call-id.ts` 三处加 `?? []` 防御 | 详见 `SYSTEM/pitfalls.md`
+- **`_summaryTriggered` 从未赋值 true**: 审计日志 `summaryTriggered` 字段声明了、日志写了，但成功生成摘要后没设 `true`，2718 条记录全是 false。修复：`turn/index.ts:2075` 加 `this._summaryTriggered = true` | 详见 `SYSTEM/pitfalls.md`
 
 #### 文档
 - `SYSTEM/injection-system.md`: 新增 §Context Facts 尾部聚合节，融合计划 + Phase B'/M 行

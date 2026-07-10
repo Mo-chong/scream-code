@@ -46,9 +46,9 @@ function renderMessageToText(message: Message, index: number): string {
     lines.push(...message.content.map(renderContentPartToText));
   }
 
-  if (message.toolCalls.length > 0) {
+  if ((message.toolCalls ?? []).length > 0) {
     lines.push('tool calls:');
-    for (const toolCall of message.toolCalls) {
+    for (const toolCall of message.toolCalls ?? []) {
       lines.push(renderToolCallToText(toolCall));
     }
   }

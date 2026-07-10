@@ -16,7 +16,7 @@ export function createFileOps(): FileOperations {
 
 export function extractFileOpsFromMessage(message: Message, ops: FileOperations): void {
   if (message.role !== 'assistant') return;
-  for (const call of message.toolCalls) {
+  for (const call of message.toolCalls ?? []) {
     if (call.type !== 'function' || call.arguments === null) continue;
     let args: Record<string, unknown>;
     try {

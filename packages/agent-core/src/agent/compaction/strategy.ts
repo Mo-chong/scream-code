@@ -217,7 +217,7 @@ function canSplitAfter(messages: readonly Message[], index: number): boolean {
   const m = messages[index];
   if (m === undefined) return false;
   if (m.role === 'user') return false;
-  if (m.role === 'assistant' && m.toolCalls.length > 0) return false;
+  if (m.role === 'assistant' && (m.toolCalls ?? []).length > 0) return false;
   if (messages[index + 1]?.role === 'tool') return false;
   return true;
 }

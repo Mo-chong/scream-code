@@ -82,8 +82,8 @@ function findSupersededPaths(
     const msg = messages[i];
     if (msg === undefined) continue;
 
-    if (msg.role === 'assistant' && msg.toolCalls.length > 0) {
-      for (const tc of msg.toolCalls) {
+    if (msg.role === 'assistant' && (msg.toolCalls ?? []).length > 0) {
+      for (const tc of msg.toolCalls ?? []) {
         if (
           tc.name === 'Read' &&
           tc.id !== undefined &&

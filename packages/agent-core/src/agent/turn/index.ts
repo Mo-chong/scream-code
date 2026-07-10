@@ -2072,6 +2072,7 @@ export class TurnFlow {
     summarizeWithLLM(this.agent.llm, existingText, recentAssistantTexts, Math.max(0, this.currentStep - 30))
       .then((textContent: string) => {
         if (!textContent) return;
+        this._summaryTriggered = true;
         const formattedText = "[summary]\n" + textContent;
         this.inject(formattedText, { kind: 'system_trigger', name: 'summary' });
         this.agent.contentArchive?.archive("summary", formattedText, { source: 'summary' });
