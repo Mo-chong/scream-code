@@ -164,8 +164,8 @@ export class LtodLLM implements LLM {
     const response: LLMChatResponse = {
       toolCalls:
         this.obfuscator && this.obfuscator.hasSecrets()
-          ? deobfuscateToolCalls(this.obfuscator, result.message.toolCalls)
-          : [...result.message.toolCalls],
+          ? deobfuscateToolCalls(this.obfuscator, result.message.toolCalls ?? [])
+          : [...result.message.toolCalls ?? []],
       providerFinishReason: result.finishReason ?? undefined,
       rawFinishReason: result.rawFinishReason ?? undefined,
       usage: result.usage ?? emptyUsage(),

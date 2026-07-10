@@ -614,20 +614,35 @@ interface CacheMetrics {
   missTokens: number  // 缓存未命中 token 总数
 }
 
+interface InjectionEvent {
+  variant: string           // 注入变体名（stuck / guard-feedback 等）
+  success: boolean          // 是否成功注入
+  level?: string            // S/A/B/C/D 注意力等级（仅 success=true）
+  position?: string         // H(头部) / M(中部) / T(尾部)
+  reason?: string           // 失败原因: residual/dedup/quota/error（仅 success=false）
+  tokenEstimate?: number    // 注入内容预估 token 数
+}
+
 interface AuditLogEntry {
   sessionId: string        // 对话会话 ID
   turn: number             // 轮次
   model: string            // 模型标识
+  modelChanged: boolean    // 本轮是否切换了模型
   ts: string               // ISO 时间戳
   totalInput: number       // 总输入 tokens
   cacheHit: number         // 缓存命中 tokens
   cacheMiss: number        // 缓存未命中 tokens
-  hitRatio: number         // 缓存命中率
+  hitRatio: number         // 缓存命中率（目标 >0.97）
   compacted: boolean       // 是否刚 compaction
   compactedTokens: number  // compaction 压缩掉的 tokens
   alerts: string[]         // 告警列表
-  injected: string[]       // 本轮注入成功的变体名列表（空=无注入）
+  injected: InjectionEvent[]  // 注入事件详情（空=本轮无注入）
   apiKeySwitched: boolean  // 启发式检测：model不变+无注入+缓存率骤降→疑似API key切到不同后端
+  archiveHit: number       // ContentArchive 命中计数（Phase33）
+  archiveMiss: number      // ContentArchive 未命中计数（Phase33）
+  turnStepCount: number    // 上轮用户消息步数（评估摘要阈值）
+  pendingRecoverKeys: number  // 自动恢复失败的截断 key 数
+  summaryTriggered: boolean   // 本轮是否触发了增量 LLM 摘要
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics
@@ -649,9 +664,13 @@ function buildAuditEntry(
   metrics: CacheMetrics,
   compacted: boolean,
   compactedTokens: number,
-  injectedVariants?: string[],
+  injectedEvents?: InjectionEvent[],  // 注入事件详情数组（旧版为 string[] 变体名列表）
   modelChanged?: boolean,
-  apiKeySwitched?: boolean
+  apiKeySwitched?: boolean,
+  archiveStats?: { hits: number; misses: number },
+  turnStepCount?: number,              // 上轮用户消息步数
+  pendingRecoverKeys?: number,         // 自动恢复失败截断 key 数
+  summaryTriggered?: boolean,          // 本轮是否触发摘要
 ): AuditLogEntry
 
 function detectApiKeySwitch(

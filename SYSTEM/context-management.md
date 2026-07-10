@@ -401,7 +401,7 @@ ArchiveRecoverInput {
 | `context.append_message` | 拼接系统消息到上下文 | message |
 | `context.append_loop_event` | 流式输出切片 | event |
 | `context.undo` | 回退上下文 | — |
-| `cache_metric.record` | 缓存审计指标 | hitRatio, totalInput, totalOutput, injectedCount, apiKeySwitched |
+| `cache_metric.record` | 缓存审计指标 | hitRatio, totalInput, totalOutput, injected[].{variant,success,position}, apiKeySwitched |
 | `api_key_switch.detected` | API key 切换检测 | prevRatio, currRatio, drop, modelChanged |
 
 ---
@@ -458,7 +458,7 @@ ArchiveRecoverInput {
   │
   ├─→ audit-log.ts: 缓存审计 (每步)
   │     ├─ hitRatio / totalInput / totalOutput
-  │     ├─ injected / modelChanged / apiKeySwitched
+  │     ├─ injected[].{variant,success,position} / modelChanged / apiKeySwitched
   │     ├─ turnStepCount / pendingRecoverKeys / summaryTriggered
   │     └─ 写入 cache-audit-YYYY-MM-DD.ndjson
   │

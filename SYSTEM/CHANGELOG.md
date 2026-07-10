@@ -541,6 +541,13 @@ updated: 2026-07-11
 - **ContextManager 新增 API**（`context/index.ts`）：
   - `removeSystemRemindersByPrefix(prefix)`：删除含 prefix 的 system-reminder 消息（protected 跳过）
   - 被 `updatePersistentSummary` 在注入新摘要前调用，防尾部死消息沉积
+- **ltod-llm.ts `toolCalls` undefined 修复**（`agent/turn/ltod-llm.ts`）：
+  - `summarizeWithLLM` 传 `tools: []`，LLM 从不返回工具调用，`toolCalls` 为 `undefined`
+  - `[...result.message.toolCalls]` → `[...result.message.toolCalls ?? []]`（加 `?? []` 保底）
+  - 同步修复 `deobfuscateToolCalls` 同路径
+- **审计日志文件头升级**（`agent/usage/audit-log.ts`）：
+  - 新建日志文件时写入 AI 可读层级架构（7 层分层）、全部 18 个字段速查、7 条 jq/grep 查询示例
+  - 旧版文件头仅含简短用途说明和 2 条查询示例
 
 #### 修复
 - **BATCH_SIZE 回归常量 8**（`micro.ts`）：删 `computeBatchSize()` 动态函数，恢复 `const BATCH_SIZE`。审计日志确认 Micro Compaction 在你场景 < 1% 影响（上下文占用达不到 50% 触发条件），动态步数是方向错误。（**经验教训**：未查数据就设计优化，白干）

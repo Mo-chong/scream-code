@@ -182,7 +182,8 @@ export class TurnFlow {
   private lastUserInputText = '';
 
   // ── Phase 14: 正反馈每回合一次 ─────────────────────────────────
-  private positiveFeedbackGivenThisTurn = false;  private _summaryTriggered = false;
+  private positiveFeedbackGivenThisTurn = false;
+  private _summaryTriggered = false;
 
   // ── Phase 24: 截断数据强制恢复 ─────────────────────────────────
   readonly turnTruncation = new TruncationTracker({ maxConsecutiveBlocks: 3 });
@@ -1778,7 +1779,7 @@ export class TurnFlow {
       ];
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedEvents.length);
-      const archiveStats = this.agent.contentArchive?.getStats();
+      const archiveStats = this.agent.contentArchive?.getStats();
       const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
