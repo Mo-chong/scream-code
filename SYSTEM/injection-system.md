@@ -476,6 +476,38 @@ agent.injection.getRouter().enable('error-audit');
 
 **为什么不在本系统内**：摘要是"上轮决策链的即时快照"，不是"根据残差衰减决定是否注入的变体"。残差系统是为重复提醒设计的（衰减→再提醒），摘要只需要"在下一轮开始前看一眼上轮做了什么"，语义不同。
 
+### 截断数据自动恢复（TruncationTracker，Phase24.2）
+
+**不在本系统内。** 走独立管线，不经过 Injector/Router。
+
+定义于 `turn/index.ts` 的 `turnTruncation`（`TruncationTracker` 实例），截断数据显示恢复（`turn/index.ts:1094-1126`）。
+
+**触发时机**：每一步工具调用前（`beforeToolExecution`）：
+
+```
+TurnFlow.turnTruncation.hasUnrecovered() && currentStep > 1
+  → contentArchive.recover(key) 自动取回
+  → 取回内容（>200 token 截断预览）注入到 context
+  → 变体：truncation_recover_guard
+```
+
+**数据流**：
+- Micro Compaction 砍工具输出前 → `contentArchive.archive(key, content)` 存档
+- `TruncationTracker` 记录 pending keys
+- 下一步自动恢复 → `recover(key)` 取回 → 注入 context
+- 自动恢复失败（数据不存在/TTL 过期）→ `turn/index.ts:1734-1741` afterStep 注入手动提醒：
+  ```
+  "有截断数据在 ContentArchive 中但自动恢复未找到对应内容，建议使用 archive_recover 手动获取。Pending keys: [...]"
+  ```
+- 退路：`archive-recover` 工具（`src/tools/builtin/context/archive-recover.ts`），AI 手动调（审计日志显示从未被调过——自动恢复已兜底）
+
+**跟注入系统的关系**：
+- 变体 `truncation_recover_guard` 注册于 `variant-registry.ts`（34 个之一）
+- 但**不经过本管线**——不走 `shouldInjectByResidual()`、不受残差控制
+- Position：`AFTER_TOOL_CALL`（尾部）
+
+**为什么不在本系统内**：这是"系统级数据持久性保障"——自动恢复或失败后提醒，跟"根据残差衰减决定是否注入的变体"语义不同。AI 不需要参与判断，系统自动执行或兜底提醒。
+
 ### 预留注入器（Phase22 规划）
 
 | 注入器 | 变体 | 等级 | 作用 | 状态 |

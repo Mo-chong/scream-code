@@ -1,7 +1,7 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
-updated: 2026-07-09
+updated: 2026-07-11
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -511,7 +511,7 @@ updated: 2026-07-09
 #### 未实现
 - evictOne 加权淘汰的 `lastAccessedAt` 同步虽然 TTL 判据已改，但 sharedStore 不直接参与加权淘汰（由 local store 负责，sharedStore 是超集）
 
-### Phase33 续章：maskToolObservations 增强 + 增量 LLM 摘要 + 缓存命中率上报 + BATCH_SIZE 纠正 [2026-07-10]
+### Phase33 续章：mask 增强 + 增量摘要 + BATCH_SIZE 纠正 + GuardInjector 迁移 + 审计升级 + ContextManager API [2026-07-10→07-11]
 
 #### 新功能
 - **maskToolObservations 增强**（`mask-tool-observations.ts`）：
@@ -520,16 +520,27 @@ updated: 2026-07-09
   - **短输出保护**：< 100 字符的工具结果跳过遮蔽，小确认不浪费
   - `turn-step.ts:79-86` 每步从 assistant 消息提取 `toolCallId→toolName` 映射传给 masking
 - **增量 LLM 摘要**（`compaction/summary.ts` 新文件 + `turn/index.ts`）：
-  - 每 30 步调 `this.agent.llm.chat()` 生成结构化摘要（emoji + step# + 操作）
-  - 输出格式：`📖 step 5: readFile user.ts | ✏️ step 12: edit server.ts port 3000→4000`
-  - 通过 `kind: 'system_trigger'` 注入尾部（不经过 S/A/B/C/D 分级，不影响缓存）
-  - 增量合并——新摘要与旧摘要合并，保留最近 6 条事件
-  - 同步写入 ContentArchive key=`summary`，跨会话持久化
-  - 日成本 ~$1.16（338 步/天 ÷ 30 × $0.105/次），占 API 账单 0.13%
+  - 最初：每 30 步调 LLM 生成结构化摘要，通过 `kind: 'system_trigger'` 注入尾部
+  - Phase33 修正：改为每轮结束、上轮 ≥8 步时 → beforeStep 注入（不干扰工具调用）
+  - `lastTurnStepCount` 字段替代 `totalSteps` 固定步数硬切
+  - 每次注入前 `removeSystemRemindersByPrefix('[summary]')` 清理旧摘要防尾部沉积
+  - `_summaryTriggered` 标记写入审计日志，可追溯触发次数
+  - 增量合并——新摘要与旧摘要合并，保留最近 6 条事件，同步写入 ContentArchive key=`summary`
+  - 日成本：实际 ~$0.0004/次 × 48 次/天 = ~$0.02/天（3756 步/天真实数据）
+- **审计日志升级**（`audit-log.ts` + `turn/index.ts`）：
+  - `AuditLogEntry` 接口新增 `turnStepCount` / `pendingRecoverKeys` / `summaryTriggered` 三个字段
+  - 每次步级写入都带上这些参数
 - **缓存命中率上报**（`content-archive.ts` + `audit-log.ts`）：
   - ContentArchive 新增 `hits`/`misses` 计数器
   - `getStats()` 返回 `{ hits, misses }`
-  - `buildAuditEntry()` 新增 `archiveHit`/`archiveMiss` 字段（`turn/index.ts:1764` 传参）
+  - `buildAuditEntry()` 新增 `archiveHit`/`archiveMiss` 字段
+- **GuardInjector 迁移**（`guard-injector.ts`）：
+  - 废弃空壳（38 行）→ **第 14 个注册注入器**（setGuardData/clearGuardData/lastFeedback）
+  - 注册 `'guard-feedback'` 到 manager.ts，走统一残差/配额/去重管线
+  - 位置：AFTER_TOOL_CALL（尾部），等级 C
+- **ContextManager 新增 API**（`context/index.ts`）：
+  - `removeSystemRemindersByPrefix(prefix)`：删除含 prefix 的 system-reminder 消息（protected 跳过）
+  - 被 `updatePersistentSummary` 在注入新摘要前调用，防尾部死消息沉积
 
 #### 修复
 - **BATCH_SIZE 回归常量 8**（`micro.ts`）：删 `computeBatchSize()` 动态函数，恢复 `const BATCH_SIZE`。审计日志确认 Micro Compaction 在你场景 < 1% 影响（上下文占用达不到 50% 触发条件），动态步数是方向错误。（**经验教训**：未查数据就设计优化，白干）

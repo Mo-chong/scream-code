@@ -36,6 +36,12 @@ export interface AuditLogEntry {
   /** ContentArchive 缓存命中/未命中计数 */
   archiveHit: number;
   archiveMiss: number;
+  /** 上轮用户消息步数（用于评估摘要触发阈值） */
+  turnStepCount: number;
+  /** 自动恢复失败的截断数据 key 数 */
+  pendingRecoverKeys: number;
+  /** 本轮是否触发了增量 LLM 摘要 */
+  summaryTriggered: boolean;
 }
 
 export interface AuditLoggerConfig {
@@ -228,6 +234,9 @@ export function buildAuditEntry(
   modelChanged = false,
   apiKeySwitched = false,
   archiveStats?: { hits: number; misses: number },
+  turnStepCount = 0,
+  pendingRecoverKeys = 0,
+  summaryTriggered = false,
 ): AuditLogEntry {
   const alerts: string[] = [];
   for (const rule of ALERT_RULES) {
@@ -260,5 +269,8 @@ export function buildAuditEntry(
     apiKeySwitched,
     archiveHit: archiveStats?.hits ?? 0,
     archiveMiss: archiveStats?.misses ?? 0,
+    turnStepCount,
+    pendingRecoverKeys,
+    summaryTriggered,
   };
 }

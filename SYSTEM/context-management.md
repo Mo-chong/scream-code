@@ -459,6 +459,7 @@ ArchiveRecoverInput {
   ├─→ audit-log.ts: 缓存审计 (每步)
   │     ├─ hitRatio / totalInput / totalOutput
   │     ├─ injected / modelChanged / apiKeySwitched
+  │     ├─ turnStepCount / pendingRecoverKeys / summaryTriggered
   │     └─ 写入 cache-audit-YYYY-MM-DD.ndjson
   │
   └─→ records: 所有事件写 wire.jsonl
