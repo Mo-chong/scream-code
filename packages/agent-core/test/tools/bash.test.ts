@@ -267,7 +267,7 @@ describe('BashTool', () => {
     });
     expect(proc.stdin.end).toHaveBeenCalledTimes(1);
     expect(result.isError).toBe(false);
-    expect(result.output.replace(/\r\n/g, '\n')).toBe('ok\n');
+    expect(String(result.output).replace(/\r\n/g, '\n')).toBe('ok\n');
   });
 
   it('uses args.cwd when provided', async () => {
@@ -298,7 +298,7 @@ describe('BashTool', () => {
     expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && [\s\S]*\necho ok 2>\/dev\/null$/);
     expect(env).toMatchObject({ SHELL: 'C:\\Program Files\\Git\\bin\\bash.exe' });
     expect(result.isError).toBe(false);
-    expect(result.output.replace(/\r\n/g, '\n').trimEnd()).toBe('ok');
+    expect(String(result.output).replace(/\r\n/g, '\n').trimEnd()).toBe('ok');
     expect(result.message).toBe('Command executed successfully.');
   });
 
@@ -320,7 +320,7 @@ describe('BashTool', () => {
       message: 'Command failed with exit code: 2.',
       brief: 'Failed with exit code: 2',
     });
-    expect(result.output.replace(/\r\n/g, '\n')).toContain('boom\n');
+    expect(String(result.output).replace(/\r\n/g, '\n')).toContain('boom\n');
     expect(result.output).toContain('Command failed with exit code: 2.');
   });
 
@@ -338,7 +338,7 @@ describe('BashTool', () => {
     const result = await executeTool(tool, context({ command: 'mixed', timeout: 60 }));
 
     expect(result.isError).toBe(false);
-    const norm = result.output.replace(/\r\n/g, '\n');
+    const norm = String(result.output).replace(/\r\n/g, '\n');
     expect(norm).toContain('out');
     expect(norm).toContain('warn');
   });
@@ -361,18 +361,19 @@ describe('BashTool', () => {
     const result = await executeTool(tool, context({ command: 'mixed fail', timeout: 60 }));
 
     expect(result.isError).toBe(false);
-      const norm = result.output.replace(/\r\n/g, '\n');
+      const norm = String(result.output).replace(/\r\n/g, '\n');
       expect(norm).toContain('err-first');
       expect(norm).toContain('out-second');
       expect(norm).toContain('err-third');
       expect(result.message).toBe('Command executed successfully.');
 
+	      try {
       const resultPromise = executeTool(tool, context({ command: 'mixed', timeout: 60 }));
       await vi.advanceTimersByTimeAsync(11);
 
       const result = await resultPromise;
       expect(result.isError).toBe(false);
-      const norm = result.output.replace(/\r\n/g, '\n');
+      const norm = String(result.output).replace(/\r\n/g, '\n');
       expect(norm).toContain('err-first');
       expect(norm).toContain('out-second');
       expect(norm).toContain('err-third');
@@ -827,7 +828,6 @@ describe('BashTool', () => {
     expect(description).toContain('run_in_background=true');
     expect(description).toContain('automatically notified');
   });
-});
 
 describe('BashTool prompt / runtime consistency', () => {
   it('reports unavailable background using only tools the prompt documents', async () => {
@@ -1086,4 +1086,4 @@ describe('BashTool command-not-found hint', () => {
     expect(result.output).toContain('command binary was not found');
     expect(result.output).not.toContain('Ensure pnpm is installed');
   });
-});
+});});

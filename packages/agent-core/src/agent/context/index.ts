@@ -95,6 +95,25 @@ export class ContextMemory {
     });
   }
 
+  /**
+   * Remove all system-reminder messages whose text content contains a given prefix.
+   * Skips protected messages. Used by updatePersistentSummary to prevent
+   * tail decay from old [summary] messages.
+   */
+  removeSystemRemindersByPrefix(prefix: string): void {
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const msg = this._history[i]!;
+      if (msg.protected) continue;
+      const content = msg.content;
+      const text = typeof content === 'string'
+        ? content
+        : (Array.isArray(content) ? (content as any[]).find((p: any) => p.type === 'text')?.text ?? '' : '');
+      if (text.includes(prefix)) {
+        this._history.splice(i, 1);
+      }
+    }
+  }
+
   appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
     this.appendMessage({

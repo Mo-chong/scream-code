@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/index, status/final]
 keywords: [地图, map, 模块, 文件索引]
-updated: 2026-07-08
+updated: 2026-07-11
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -23,7 +23,7 @@ updated: 2026-07-08
 
 ├─ 执行架构
 │   ├─ turn-control.md            — 回合生命周期/收敛门/工具优先级
-│   ├─ injection-system.md        — ☑ 注入系统：15个注入器/三路径统一/budget绕过/残差调度
+│   ├─ injection-system.md        — ☑ 注入系统：14个注入器/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
 │   ├─ attention-management.md    — 注意力管理
 │   ├─ guard-engine.md            — Guard触发时机/反事实检测
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路

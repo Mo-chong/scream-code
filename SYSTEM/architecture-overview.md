@@ -55,7 +55,7 @@ L1 核心执行层 —— 同一执行引擎的 4 个视图
   turn-control.md
   └─ 回合调度：runOneTurn → afterStep → convergenceGate
      ├── attention-management.md — 注意力决策（残差→预算→位置→检测）
-     ├── injection-system.md — 内容执行（15 injector + router + manager）
+     ├── injection-system.md — 内容执行（14 injector + router + manager）
      └── context-management.md — 数据管理（存档·审计·截断恢复）
 
 L2 支撑层 —— 被 L1 调用的功能模块
@@ -74,9 +74,9 @@ L4 独立层 —— 不参与执行，独立参考
 
 | SYSTEM 文档 | 代码目录 |
 |:-----------|---------|
-| turn-control.md | `turn/` (+`detectors/` +`injectors/`) |
+| turn-control.md | `turn/` (+`detectors/` +`injection/`) |
 | attention-management.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
-| injection-system.md | `injection/` (15 injector + router + manager) |
+| injection-system.md | `injection/` (14 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
 | guard-engine.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
 
@@ -156,7 +156,7 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 
 **文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-management.md`
 
-- **31 个变体**，分级 S/A/B/C/D（S 最高优先级）
+- **34 个变体**，分级 S/A/B/C/D（S 最高优先级）
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
 - **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
 - **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
@@ -204,7 +204,8 @@ packages/agent-core/src/
 ├── agent/
 │   ├── index.ts               ← Agent 类（所有子系统容器）
 │   ├── turn/
-│   │   ├── index.ts           ← 回合控制核心（runOneTurn → afterStep → shouldContinueAfterStop）
+│   │   ├── index.ts           ← 回合控制核心（runOneTurn → beforeStep → afterStep → shouldContinueAfterStop）
+│   │   ├── variation-tracker.ts← 变体状态机
 │   │   ├── guard-engine.ts    ← 4 条 AI 行为 Guard + 反事实检测
 │   │   ├── variant-registry.ts← VariantScheduler（残差公式 R=W×D^Δs）
 │   │   ├── truncation-tracker.ts ← 截断自动恢复 + 步级竞争保护
@@ -216,13 +217,14 @@ packages/agent-core/src/
 │   │   ├── stabilize.ts       ← stabilizePrefix（KV-cache 命中率提升）
 │   │   └── compaction/
 │   │       ├── micro.ts       ← MicroCompaction
+│   │       ├── summary.ts     ← 增量 LLM 摘要（上轮 ≥ 8 步时触发）
 │   │       └── full.ts        ← FullCompaction（含 _maxTries 安全门控）
 │   ├── injection/
 │   │   ├── manager.ts         ← InjectionManager（DynamicInjector 注册表）
 │   │   ├── injector.ts        ← DynamicInjector 抽象基类
 │   │   ├── router.ts          ← InjectionRouter + InjectContext 类型
 │   │   ├── position-strategy.ts ← system-reminder 位置策略
-│   │   ├── guard-injector.ts  ← GuardInjector（路径 C 迁移完成）
+│   │   ├── guard-injector.ts  ← GuardInjector（✅ 注册，统一管线完成）
 │   │   └── 11 个注入器文件（goal/user-prefs/plan-mode/memory-rules/...）
 │   ├── detection/
 │   │   ├── scene-memory.ts    ← SceneMemoryDetector
@@ -304,7 +306,9 @@ tools/builtin/
   → turn/index.ts runOneTurn()
       → perTurnSetup()         重置状态 + 清空注入预算
       → appendUserMessage()    追加用户消息到 context
+      → 增量 LLM 摘要注入（上轮 ≥ 8 步时 → appendSystemReminder → 尾部）
       → 意图注入 (Phase 4)
+
       → applyUserPromptHook()  用户消息 hook
       → 主循环:
           → generate()         LLM 生成回复（含 tool_calls）
@@ -388,56 +392,56 @@ L2 项目:  ZHU/AGENTS.md                    (6.3KB)  决策规范 + 格式契�
 
 ---
 
-## §6 注入系统详解 [P1]
+## §6 注入系统（已统一） [P1]
 
-**详细文档**: `SYSTEM/injection-system.md`
+**详细文档**: `SYSTEM/injection-system.md` | **源码**: `packages/agent-core/src/agent/injection/` (14 注册)
 
-### 6.1 三路径架构
+### 6.1 架构总览
 
 ```
-路径 A — DynamicInjector 体系 ✅ 受控调度
-  └─ 11 个注入器文件，统一实现 DynamicInjector 抽象基类
-  └─ InjectionManager → InjectionRouter → VariantScheduler → PositionStrategy
-  └─ ≈ 29KB 总 token 量
-
-路径 B — 硬编码注入 ⚠️ 部分迁移中
-  └─ turn/index.ts 内联注入，未经过 dynamic pipeline
-  └─ 残留：planMode 行为 + 系统 agent.yaml 注入 + 3 种 stuck 检测
-
-路径 C — Guard 引擎 ✅ 已迁移
-  └─ 通过 GuardInjector 包装 checkGuard() 为 DynamicInjector
-  └─ 注册 variant: 'guard-feedback'
+Layer 4: 14 个具体注入器 (injection/*.ts)        ← 注入内容生成
+Layer 3: TurnFlow 集成 (turn/index.ts inject())   ← 注入前预处理
+Layer 2: 编排层 (router.ts + manager.ts)          ← 路由/调度/预算
+Layer 1: 抽象基类 DynamicInjector (injector.ts)   ← 接口契约
+Layer 0: 位置策略 InsertPosition (position-strategy.ts) ← 注入锚点
+Cross:   VariantScheduler (variant-registry.ts)   ← 34 变体残差调度
 ```
 
-### 6.2 11 个 DynamicInjector
+### 6.2 14 个注册注入器
 
-| 注入器 | 文件 | 用途 |
-|--------|------|------|
-| `plugin-session-start` | `plugin-session-start.ts` | 插件会话初始化 |
-| `wolfpack` | `wolfpack.ts` | WolfPack 批处理模式行为 |
-| `plan-mode` | `plan-mode.ts` | 计划模式行为 |
-| `permission-mode` | `permission-mode.ts` | 权限模式提示 |
-| `todo-list` | `todo-list.ts` | Todo 列表提醒 |
-| `goal` | `goal.ts` | 计划目标注入 |
-| `working-set` | `working-set.ts` | Working Set 指示 |
-| `user-prefs` | `user-prefs.ts` | 用户偏好 |
-| `memory-rules` | `memory-rules.ts` | 场景记忆规则 |
-| `guard-feedback` | `guard-injector.ts` | Guard 反馈（路径 C 迁移） |
-| `budget` | (turn/injectors/budget.ts) | 注入预算控制 |
+| 文件 | 变体 | 登记 | 触发 |
+|------|------|------|------|
+| `user-prefs.ts` | `user_prefs` | S | 每轮 |
+| `intent-injector.ts` | `intent_guidance` | A/B | 意图检测命中 |
+| `plan-mode.ts` | `plan_mode` | B | 计划模式 step |
+| `permission-mode.ts` | `permission_mode` | A/B | 权限模式切换 |
+| `working-set.ts` | `working_set` | B/C | working set 变化 |
+| `error-audit-injector.ts` | `error-audit` | B | 最近 5 条有失败 |
+| `goal.ts` | `goal` | C | 计划模式 step |
+| `todo-list.ts` | `todo_list` | C | todo 列表变化 |
+| `wolfpack.ts` | `wolfpack` | C | WolfPack 调用 |
+| `plugin-session-start.ts` | `plugin_session_start` | C | 插件会话启动 |
+| `anti_confabulation.ts` | `system_ref_anti_confabulation` | C | ConfabulationDetector ≥2 |
+| `quality.ts` | `quality_escalate` | —(跳过预算) | QualityDetector 信号 |
+| `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2 |
+| `guard-injector.ts` | `guard-feedback` | C | checkGuard Rule 2/3/4 观察 |
+
+> 迁移历程：`guard-injector.ts` 原为废弃空壳，Phase33 迁移完成——实现 setGuardData/getInjection、注册、走统一管线。
 
 ### 6.3 残差注意力公式
 
 ```
 R = W × D^Δs < T? → 允许注入
 
-W = 基础权重（变体重要性）
-D = 衰减因子（0.85-0.95）
+W = 基础权重（变体重要性 0.15-1.20）
+D = 衰减因子（0.50-0.95）
 Δs = 距上次注入的步数差
 T = 动态阈值（每次注入后 T *= thresholdDecay）
 ```
 
 每步注入上限：5 个（步级竞争保护）
 等级制：S(最高) / A / B / C / D(最低)
+位置映射：S/A → AFTER_SYSTEM (head)，B → MID_CONTEXT，C/D → AFTER_TOOL_CALL (tail)
 
 ---
 
@@ -446,7 +450,7 @@ T = 动态阈值（每次注入后 T *= thresholdDecay）
 | 原则 | 说明 |
 |------|------|
 | **Agent 是容器** | Agent 类组合子系统，业务逻辑在 turn/index.ts |
-| **插件化 injector** | injectors/ 每个文件一个检测器，增减不影响其他 |
+| **插件化 injector** | `injection/` 每个文件一个检测器，增减不影响其他 |
 | **残差注意力门控** | 所有注入通过 VariantMeta 控制频率 |
 | **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
 | **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删 |

@@ -789,7 +789,7 @@ describe('resolveSkillRoots extra dirs', () => {
 
     const extras = roots.filter((r) => r.source === 'extra');
     expect(extras).toHaveLength(1);
-    expect(extras[0]?.path).toBe((await realpath(real)).replace(/\/g, "/"));
+    expect(extras[0]?.path).toBe((await realpath(real)).replace(/\\/g, "/"));
   });
 
   it('collapses entries differing only by trailing slash', async () => {
@@ -837,7 +837,7 @@ describe('resolveSkillRoots extra dirs', () => {
 
     const extras = roots.filter((r) => r.source === 'extra');
     expect(extras).toHaveLength(1);
-    expect(extras[0]?.path).toBe((await realpath(real)).replace(/\/g, "/"));
+    expect(extras[0]?.path).toBe((await realpath(real)).replace(/\\/g, "/"));
     expect(extras[0]?.path).not.toBe(link);
   });
 

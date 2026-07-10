@@ -183,24 +183,30 @@ class InjectionManager {
 }
 ```
 
-### 3.2 10 个注入器
+### 3.2 14 个注入器（全部注册，统一管线）
 <!-- ref: injectors -->
 
-| 注入器 | 源文件 | 变体数 | 触发条件 |
-|--------|--------|--------|---------|
-| GoalInjector | `agent/injection/goal.ts` | 3 | 计划模式 |
-| MemoryRulesInjector | `agent/injection/memory-rules.ts` | 2 | 场景记忆匹配 |
-| PermissionModeInjector | `agent/injection/permission-mode.ts` | 4 | 权限模式切换 |
-| PlanModeInjector | `agent/injection/plan-mode.ts` | 5 | 计划模式行为 |
-| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 2 | 插件会话启动 |
-| TodoListInjector | `agent/injection/todo-list.ts` | 3 | Todo 列表变化 |
-| UserPrefsInjector | `agent/injection/user-prefs.ts` | 1 | 每轮（路径 B） |
-| WolfPackInjector | `agent/injection/wolfpack.ts` | 2 | WolfPack 调用 |
-| WorkingSetInjector | `agent/injection/working-set.ts` | 6 | Working Set 变化 |
-| StuckInjector | `agent/injection/stuck.ts` | 1 | 同文件编辑≥3步 |
+| 注入器 | 源文件 | 变体数 | 位置 | 触发条件 | 注册 |
+|--------|--------|--------|------|---------|------|
+| UserPrefsInjector | `agent/injection/user-prefs.ts` | 1 | AFTER_SYSTEM | 每轮 | ✅ |
+| IntentGuidanceInjector | `agent/injection/intent-injector.ts` | 1 | AFTER_SYSTEM | 意图检测命中 | ✅ |
+| PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ |
+| PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ |
+| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ |
+| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | 最近 5 条有失败 | ✅ |
+| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ |
+| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ |
+| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ |
+| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ |
+| AntiConfabulationInjector | `agent/injection/anti_confabulation.ts` | 1 | AFTER_TOOL_CALL | ConfabulationDetector ≥2 | ✅ |
+| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ |
+| StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步 | ✅ |
+| GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察 | ✅ |
 
-> **已弃用**: QualityInjector (`quality.ts`), ConfabulationInjector (`confabulation.ts`) — 功能迁移到 turn/index.ts 硬编码注入，计划下一步迁回 DynamicInjector。
-> **完整变体列表见** §10 All Registered Variants。
+> 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
+> `MemoryRulesInjector` 不存在（早期概念文件）。
+> GuardInjector 迁移历程：Phase22 创建空壳（废弃未注册）→ Phase33 完成迁移（setGuardData/getInjection，注册 `'guard-feedback'`，走统一管线）。
+> **完整变体列表见** `variant-registry.ts:288-345`。
 
 ### 3.3 VariantScheduler（残差调度，取代旧 QUOTA_TABLE）
 <!-- ref: VariantScheduler -->
@@ -248,6 +254,11 @@ export interface SystemReminderRecord {
 // agent/context/index.ts
 appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): SystemReminderRecord
   // isProtected 默认 undefined → 不设置字段
+
+removeSystemRemindersByPrefix(prefix: string): void
+  // 遍历 history，删除所有 system-reminder 消息中内容包含 prefix 的（protected 消息跳过）
+  // 保留最近一条匹配消息不删（防尾部死消息沉积）
+  // 由 updatePersistentSummary 在注入新摘要前调用
 
 protectHighLevelReminders(highOrigins: Set<string>): void
   // 遍历 history，匹配 highOrigins 的消息设置 protected: true
@@ -816,7 +827,32 @@ class GrowthPredictor {
 	  // 文本 → token 计数
 	```
 
-	### 7.11 knowledge-web / knowledge-store（v0.8.4 upstream）
+	### 7.11 增量 LLM 摘要（compaction/summary.ts）
+	<!-- ref: summary -->
+
+	**文件**: `agent/compaction/summary.ts`
+
+	```typescript
+	summarizeWithLLM(
+	  llm: LLM,
+	  existingSummary: string,
+	  recentAssistantTexts: string[],
+	  stepOffset: number,
+	): Promise<string>
+	  // 调 LLM 做增量摘要
+	  // existingSummary：旧摘要（合并用）
+	  // recentAssistantTexts：最近 ~6K token 的 assistant 回复
+	  // stepOffset：当前步数（用于生成 step 号）
+	  // 返回格式：emoji bullet list，最多 6 条
+	```
+
+	**触发位置**: `turn/index.ts:updatePersistentSummary()`
+	- beforeStep 中调用，上轮 ≥ 8 步时触发
+	- 走 `system_trigger` → `appendSystemReminder` → 尾部（不破坏缓存前缀）
+	- 注入前 `context.removeSystemRemindersByPrefix('[summary]')` 清理旧摘要
+	- 成本：~$0.0004/次，~$0.02/天（3756 步/天真实数据）
+
+	### 7.12 knowledge-web / knowledge-store（v0.8.4 upstream）
 	<!-- ref: knowledge-web -->
 
 	**文件**: `apps/scream-code/src/tui/commands/knowledge-web.ts`（新建）
@@ -1090,14 +1126,26 @@ class KnowledgeLookupTool implements StepTool
 
 ## 10. All Registered Variants
 
-| 键 | 类型 | 说明 | 所属注入器 | 文件 |
-|----|------|------|-----------|------|
-| code_quality | variant | 质量检测注入 | QualityInjector | variant-registry.ts |
-| confabulation | variant | 反事实纠正注入 | ConfabulationInjector | variant-registry.ts |
-| memory_rule | variant | 记忆规则注入 | MemoryRulesInjector | variant-registry.ts |
-| memory_goal | variant | 计划目标注入 | MemoryGoalInjector | variant-registry.ts |
-| stuck | variant | 偏差纠正注入 | StuckInjector | variant-registry.ts |
-| memory_consult | system_trigger | 收敛门记忆查询 | — | turn/index.ts |
-| convergence_gate | system_trigger | 收敛门注入 | — | turn/index.ts |
-| memory_archive | system_trigger | 记忆归档 | — | turn/index.ts |
-| test | variant | 测试用例 | — | variant-registry.ts |
+参考源文件：`variant-registry.ts:288-345`。34 个变体（VARIANT_META 注册）。
+
+| 键 | 类型 | 参数说明 | 源文件 |
+|----|------|---------|--------|
+| system_trigger | variant | weight:1.0, decay:0.99, thr:0.1 | variant-registry.ts |
+| deviation_chain_intercept | variant | weight:1.0, decay:0.99, thr:0.1 | variant-registry.ts |
+| intent_fix_bug | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
+| intent_refactor | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
+| intent_add_feature | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
+| intent_review | variant | weight:0.8, decay:0.90, thr:0.3 | variant-registry.ts |
+| intent_research | variant | weight:0.8, decay:0.90, thr:0.3 | variant-registry.ts |
+| intent_document | variant | weight:0.7, decay:0.88, thr:0.3 | variant-registry.ts |
+| prepare_edit/write/search/memory/bash_file/verify | variant | 6 variants, weight 0.5–0.8 | variant-registry.ts |
+| post_edit/search/write_large/verify_pass/verify_fail/memory | variant | 6 variants, weight 0.5–0.9 | variant-registry.ts |
+| step_after_edit/search/verify_fail | variant | 3 variants, weight 0.5–0.8 | variant-registry.ts |
+| guard_feedback_rule_1/2/3/4 | variant | 4 variants, weight 0.7–0.9 | variant-registry.ts |
+| feedback_positive | variant | weight:0.6, decay:0.80, thr:0.4 | variant-registry.ts |
+| scene_memory_recall | variant | weight:0.8, decay:0.88, thr:0.3 | variant-registry.ts |
+| step_code_ref_quality | variant | weight:0.5, decay:0.85, thr:0.4 | variant-registry.ts |
+| code_quality_feedback | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| system_ref_stuck | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| error-audit | variant | weight:0.8, decay:0.85, thr:0.35 | variant-registry.ts |

@@ -1,108 +1,62 @@
-/**
- * GuardInjector — 将 guard-engine.ts 的 checkGuard() 包装为 DynamicInjector。
- *
- * ⚠️ DEPRECATED — 不使用。原因：
- *   1. buildToolSummaryFromHistory() 从历史消息反推工具使用，不如 turn/index.ts
- *      的实例变量（this.hasKnowledgeToolsThisStep 等）准确。
- *   2. getInjection() 不含 memoStore 行为规则富化逻辑（在 turn/index.ts runGuardDetection() 中）。
- *   3. 若注册将导致双路径并行，且 injector 路径数据精度更低。
- *
- * 守卫逻辑的统一执行点保持为 turn/index.ts L1956 runGuardDetection()。
- * 本文件保留供参考——如需修复 buildToolSummaryFromHistory 精度后可启用。
- *
- * 注册 variant: 'guard-feedback'
- */
-
+import type { Agent } from '..';
 import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
-import type { Agent } from '..';
-import { checkGuard, type StepToolSummary } from '../turn/guard-engine';
-import type { ContextMessage } from '../context';
 
+interface GuardData {
+  rule: number;     // 2/3/4 only — Rule 1 (blocking) 不走注入管线
+  feedback: string;
+}
+
+/**
+ * GuardInjector — 守卫反馈注入器
+ *
+ * 职责:
+ *   将 checkGuard() 的观察结果（Rule 2/3/4）通过统一注入管线注入。
+ *
+ * 数据流:
+ *   1. turn/index.ts:runGuardDetection() 调用 checkGuard()
+ *   2. Rule 2/3/4 → setGuardData(rule, enrichedFeedback) 写入
+ *   3. 下一轮 beforeStep → injection.inject() → router.dispatch()
+ *   4. canInject() 检查变体残差 → getInjection() 返回反馈
+ *   5. 拼接为系统提醒
+ *
+ * Rule 1 (阻断) 不走此注入器 — 它设 confabulationBlocked 标记控制流程。
+ */
 export class GuardInjector extends DynamicInjector {
-  protected readonly injectionVariant = 'guard-feedback';
+  injectionVariant = 'guard-feedback';
 
-  constructor(agent: Agent) {
+  constructor(protected override readonly agent: Agent) {
     super(agent);
   }
 
-  /** 守卫反馈高优先级：注入到系统提示之后 */
+  private guardData: GuardData | null = null;
+
+  /** runGuardDetection 调用，设置本轮守卫数据供下一轮注入 */
+  setGuardData(rule: number, feedback: string): void {
+    this.guardData = { rule, feedback };
+  }
+
+  /** 每轮检测前调用，清除上一轮残留 */
+  clearGuardData(): void {
+    this.guardData = null;
+  }
+
+  /** 供 shouldContinueAfterStop 读取最近的 feedback（不限于注入） */
+  get lastFeedback(): string | null {
+    return this.guardData?.feedback ?? null;
+  }
+
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.AFTER_SYSTEM;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
-  /**
-   * 守卫反馈使用残差注意力衰减：
-   * - weight: 0.9（初始权重高，避免过多注入）
-   * - decayPerStep: 0.90（每步衰减 10%）
-   * - threshold: 0.3（注意力低于 0.3 时注入）
-   * - minStepGap: 3（最短 3 步间隔）
-   */
-  override getResidualConfig(): ResidualConfig {
-    return { weight: 0.9, decayPerStep: 0.90, threshold: 0.3, minStepGap: 3 };
+  override getResidualConfig(): ResidualConfig | undefined {
+    // scheduler 用 variant-registry 的 guard-feedback 配置
+    return { weight: 0.7, decayPerStep: 0.85, minStepGap: 0, threshold: 0.35 };
   }
 
-  /**
-   * 从上下文历史中提取最近一步的工具使用摘要。
-   * 扫描历史中最后一条 assistant 消息之后的 tool_call / tool_result 消息，
-   * 区分知识工具（Read/Grep/LSP）、写入工具（Edit/Write/Delete）、Bash 和 MemoryLookup。
-   */
-  private buildToolSummaryFromHistory(history: readonly ContextMessage[]): StepToolSummary {
-    let hasKnowledgeTools = false;
-    let hasWriteTools = false;
-    let lastBashExitCode: number | null = null;
-    let hasMemoryLookup = false;
-    let hasCurrentCodeTools = false;
-
-    // 从后往前扫描最近 10 条消息
-    // role 取值: 'system' | 'user' | 'assistant' | 'tool'
-    // tool 调用 = assistant 消息的 toolCalls[] 字段
-    // tool 结果 = role === 'tool' 的消息
-    const recent = history.slice(-10);
-    for (const msg of recent) {
-      if (msg.role === 'assistant' && msg.toolCalls) {
-        for (const tc of msg.toolCalls) {
-          const toolName = tc.name ?? '';
-          if (/^(Read|Grep|Glob|LSP|codegraph)/i.test(toolName)) {
-            hasKnowledgeTools = true;
-            hasCurrentCodeTools = true;
-          } else if (/^(Edit|Write|Delete)/i.test(toolName)) {
-            hasWriteTools = true;
-          } else if (/MemoryLookup|Memory/i.test(toolName)) {
-            hasMemoryLookup = true;
-          }
-        }
-      }
-      if (msg.role === 'tool') {
-        // Tool 结果消息：从第一个 text part 提取 Bash exit code
-        const firstText = msg.content?.[0]?.type === 'text' ? msg.content[0].text : '';
-        const exitMatch = firstText.match(/Exit.?code:\s*(-?\d+)/i) ?? firstText.match(/exit[=\s]+(\d+)/i);
-        if (exitMatch) {
-          lastBashExitCode = parseInt(exitMatch[1]!, 10);
-        }
-      }
-    }
-
-    return {
-      hasKnowledgeTools,
-      hasWriteTools,
-      lastBashExitCode,
-      hasMemoryLookup,
-      hasCurrentCodeTools,
-    };
-  }
-
-  protected getInjection(): string | undefined {
-    const history = this.agent.context?.history;
-    if (!history || history.length < 3) return undefined;
-
-    // 从 history 最后几条消息推断工具使用摘要
-    // 扫描最近 assistant 消息后的工具调用，避免硬编码假数据
-    const toolSummary = this.buildToolSummaryFromHistory(history);
-
-    const result = checkGuard(history, toolSummary);
-    if (result.rule === 0) return undefined;
-
-    return result.feedback;
+  protected override getInjection(): string | undefined {
+    if (!this.guardData || this.guardData.rule <= 1) return undefined;
+    return this.guardData.feedback;
   }
 }

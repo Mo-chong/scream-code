@@ -33,6 +33,9 @@ export interface AuditLogEntry {
    * true 表示: model未变 + 无注入 + 非compaction + 前一步有缓存 + 当前缓存率骤降 + 输入量可比 → 疑似API key切换导致不同后端
    */
   apiKeySwitched: boolean;
+  /** ContentArchive 缓存命中/未命中计数 */
+  archiveHit: number;
+  archiveMiss: number;
 }
 
 export interface AuditLoggerConfig {

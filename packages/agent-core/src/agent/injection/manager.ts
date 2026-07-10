@@ -13,12 +13,17 @@ import { AntiConfabulationInjector } from './anti_confabulation';
 import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
+import { GuardInjector } from './guard-injector';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
   private readonly router: InjectionRouter;
 
+  /** GuardInjector 暴露给 turn/index.ts 的 runGuardDetection */
+  readonly guardInjector: GuardInjector;
+
   constructor(protected readonly agent: Agent) {
+    this.guardInjector = new GuardInjector(agent);
     this.router = new InjectionRouter();
 
     // 注册所有 DynamicInjector 至 router
@@ -37,6 +42,7 @@ export class InjectionManager {
       ['quality_escalate', new QualityInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
       ['error-audit', new ErrorAuditInjector(agent)],
+      ['guard-feedback', this.guardInjector],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);

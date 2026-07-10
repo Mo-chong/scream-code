@@ -328,6 +328,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // ── Phase 13: 行为闭环与展示规范 ──────────────────────────────
   guard_feedback_rule_4:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
+  'guard-feedback':             { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   scene_memory_recall:       { weight: 0.8, decayPerStep: 0.88, threshold: 0.30, minStepGap: 5, interceptThreshold: 3 },
   step_code_ref_quality:     { weight: 0.5, decayPerStep: 0.85, threshold: 0.40, minStepGap: 6 },
 

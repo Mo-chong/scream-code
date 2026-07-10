@@ -442,9 +442,14 @@ ArchiveRecoverInput {
   │     ├─ LLM 总结上下文
   │     ├─ extractAndStoreMemos → 写记忆库
   │     ├─ 清上下文
-  │     └─ micro.reset() 重置 cutoff
-  │
-  ├─→ content-archive.ts: archive/recover
+	  ﹙     └─ micro.reset() 重置 cutoff
+	  ﹙
+	  ├─→ turn/index.ts: 增量 LLM 摘要（beforeStep，上轮 ≥ 8 步时）
+	  ﹙     ├─ lastTurnStepCount = 上轮步数
+	  ﹙     ├─ lastTurnStepCount >= 8 → summarizeWithLLM()
+	  ﹙     ├─ appendSystemReminder → 尾部（不破坏缓存前缀）
+	  ﹙     └─ 每次注入前 removeSystemRemindersByPrefix('[summary]')
+	  ﹙
   │     ├─ Point A: 每步 tool result 写入后存档
   │     ├─ Point B: Micro 截断前存档
   │     ├─ 模型通过 ArchiveRecover 召回
@@ -465,9 +470,10 @@ ArchiveRecoverInput {
 |------|----------|------|
 | maskToolObservations | **每步** | API 调用前无条件遮蔽 |
 | Point A 存档 | **每步** | tool result 写入 history 后即时存档 |
-| MicroCompaction detect | **每 BATCH_SIZE=8 步** | 8 步才检查一次 |
+| MicroCompaction detect | **每 BATCH_SIZE=8 步** | 8 步才检查一次，上下文>50%才砍 |
 | Predictor | **每步** | 持续预测上下文增长 |
 | ContentArchive TTL | **被动**（recover 时检查） | 基于创建时间，不主动轮询 |
+| 增量 LLM 摘要 | **每轮结束、上轮≥8步** | beforeStep 注入尾部，不破坏缓存前缀 |
 | FullCompaction | **容量 > 75%** | 全局压缩 |
 
 ```

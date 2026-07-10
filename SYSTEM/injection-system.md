@@ -10,9 +10,9 @@ updated: 2026-07-08
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-management.md`](attention-management.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 15 个 DynamicInjector（路径 A 原生 11 个 + 路径 B 迁移 4 个）。
+> 14 个 DynamicInjector（路径 A 原生 11 个 + 路径 B 迁移 2 个 + GuardInjector 接管）。
 > 路径 B 已清零（Phase22，2026-07-08）。详见 ZHU/DECISIONS/方案-注入系统三路径统一设计.md。
-> 路径 C (Guard) 已迁入（GuardInjector），注册于 `guard-injector.ts`。
+> 路径 C (GuardInjector) 已完成迁移（Phase33，2026-07-10）— 注册并走统一注入管线。
 
 ---
 
@@ -61,19 +61,18 @@ export interface VariantMeta {
 
 定义于 `packages/agent-core/src/agent/injection/position-strategy.ts`。
 
-`InsertPosition` 决定系统提醒注入到消息列表的位置，利用 Transformer 注意力曲线的 U 形特性：
+`InsertPosition` 枚举，3 个实际值 + 1 个 bypass 路径，决定系统提醒注入到消息列表的位置，利用 Transformer 注意力曲线的 U 形特性：
 
-| 位置 | 注意力等级 | 说明 |
-|------|-----------|------|
-| `'head'` / `'near_head'` | HIGH | 消息列表前部，primacy effect，用于 S/A 级约束 |
-| `'tail'` | MEDIUM | 消息列表末尾，recency effect，常规提醒默认 |
-| `'CONTEXT_BOTTOM'` | LOW | 上下文底部，注意力最低 |
-| `'ATTENTION_PEAK'` | DYNAMIC | 注意力峰值动态位置，由注意力路由决定 |
+| 枚举值 | 等级 | Prompt 区域 | 缓存影响 |
+|--------|------|-------------|---------|
+| `AFTER_SYSTEM` | S/A (head) | 系统提示后第一条 | **不变** → 高命中率 |
+| `MID_CONTEXT` | B | 上下文中部 | 偶变 → 中等影响 |
+| `AFTER_TOOL_CALL` | C/D/E (tail) | 消息列表末尾 | 不影响前缀 |
+| *bypass* (summary) | — | `appendSystemReminder` 尾部 | **零影响** |
 
-> `'head'` / `'near_head'` / `'tail'` 是当前使用值；
-> `'CONTEXT_BOTTOM'` / `'ATTENTION_PEAK'` 为融合计划新增预留值。
+> 早期设计文档曾含 `'head'`/`'near_head'`/`'tail'`/`'CONTEXT_BOTTOM'`/`'ATTENTION_PEAK'` 五位置方案，代码实际使用 `InsertPosition` 三枚举值 + 注意力等级映射（`position-strategy.ts:29-54`）。
 
-### 当前注册表（31 变体，见 variant-registry.ts:277-331）
+### 当前注册表（34 变体，见 variant-registry.ts:288-361）
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
@@ -125,23 +124,25 @@ VariantMeta.weight ← 基础权重
 
 ### 当前使用者
 
-`variant-registry.ts` 共注册 **31 个变体**，分为 11 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
+`variant-registry.ts` 共注册 **34 个变体**，分为 13 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
 
 | 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
 |--------|------------|-------------|-------------------|-----------|
-| `system_trigger_*` | 3 | 0.15 | 0.95 | 系统触发 |
-| `deviation_chain_*` | 3 | 1.20 | 0.90 | 偏差链检测 |
+| `system_trigger` | 1 | 0.15 | 0.95 | 系统触发 |
+| `deviation_chain_intercept` | 1 | 1.20 | 0.90 | 偏差链检测 |
 | `intent_*` | 6 | 0.50 | 0.50 | intent-injector.ts |
 | `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
 | `post_*` | 6 | 0.20 | 0.50 | 6 个注入器 |
 | `step_after_*` | 3 | 0.20 | 0.50 | 6 个注入器 |
-| `guard_feedback_*` | 4 | 0.40 | 0.85 | 行为反馈 |
-| `scene_memory_*` | 1 | 0.50 | 0.80 | scene_memory |
+| `guard_feedback_*` | 5 | 0.40 | 0.85 | 行为反馈 |
+| `scene_memory_recall` | 1 | 0.50 | 0.80 | scene_memory |
+| `step_code_ref_quality` | 1 | 0.30 | 0.80 | 代码质量 |
+| `code_quality_feedback` | 1 | 0.30 | 0.80 | 代码质量 |
 | `system_ref_stuck` | 1 | 0.50 | 0.85 | stuck.ts |
-| `code_quality_*` | 1 | 0.30 | 0.80 | 代码质量 |
 | `truncation_recover_guard` | 1 | 0.50 | 0.80 | 截断恢复 |
+| `error-audit` | 1 | 0.50 | 0.80 | error-audit-injector.ts |
 
-详情见 `variant-registry.ts:277-331`。
+详情见 `variant-registry.ts:288-345`。
 
 ---
 
@@ -258,15 +259,15 @@ export class InjectionManager {
 
 ### 4.3 CacheGroup 分类
 
-`router.ts` 按注入器 ID 将其分组，用于缓存管理和清理策略：
+`router.ts:28-38` 将注入器 ID 分组，用于缓存管理（同组共享冷却）：
 
 | 分组 | 注入器 ID | 清理策略 |
 |------|----------|---------|
-| `core` | system, step-summary, context-info, token-info, tool-result | 首次注入后缓存 |
-| `context` | context-clear, context-compacted | 生命周期事件后刷新 |
-| `feedback` | guard-feedback | 每轮评估 |
+| `core` | plugin-session-start, plan-mode, permission-mode | 首次注入后缓存 |
+| `context` | wolfpack, goal, working-set | 生命周期事件后刷新 |
+| `feedback` | user-prefs, guard-feedback | 每轮评估 |
 | `audit` | error-audit | 每轮评估 |
-| `default` | 其他 | 临时缓存 |
+| `default` | 其他（todo-list, stuck, confabulation, quality, intent） | 临时缓存 |
 
 ### 4.4 注入占位符白名单
 
@@ -337,30 +338,30 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 ## 6. 注入器清单 (Injector Catalog)
 
 > 别名：注入器列表 / DynamicInjector 清单
-> 对应代码：DynamicInjector (injection/injector.ts) + 15 个子类
+> 对应代码：DynamicInjector (injection/injector.ts) + 14 个子类（14 注册）
 
 ### 当前注入器
 
-| 文件 | 变体数 | 等级 | 触发条件 | 注入内容 | 迁移来源 |
-|------|-------|------|---------|---------|---------|
-| `goal.ts` | 3 | C | 计划模式 step | 计划目标提醒 | 路径 A 原生 |
-| `memory-rules.ts` | 2 | C | 场景记忆匹配 | 记忆规则提示 | 路径 A 原生 |
-| `permission-mode.ts` | 4 | A/B | 权限模式切换 | 模式限制说明 | 路径 A 原生 |
-| `plan-mode.ts` | 5 | B | 计划模式行为 | 计划行为约束 | 路径 A 原生 |
-| `plugin-session-start.ts` | 2 | C | 插件会话启动 | 会话初始提醒 | 路径 A 原生 |
-| `todo-list.ts` | 3 | C | todo 列表变化 | todo 状态更新 | 路径 A 原生 |
-| `user-prefs.ts` | 1 | S | 每轮 | 用户偏好 | 路径 A 原生 |
-| `wolfpack.ts` | 2 | C | WolfPack 调用 | WolfPack 行为说明 | 路径 A 原生 |
-| `working-set.ts` | 6 | B/C | working set 变化 | 文件关注提醒 | 路径 A 原生 |
-| `guard-injector.ts` | 1 | A | history ≥ 3 条 | 守卫反馈 | 路径 C 迁入 |
-| `error-audit-injector.ts` | 1 | B | 最近 5 条有失败记录 | 文件操作审计错误摘要 | 路径 A 原生 |
-| `stuck.ts` | 1 | D | 同一文件连续编辑≥3步 / 同工具报错≥2步 | 文档导航提示 | 路径 B 迁入 ✅ |
-| `anti_confabulation.ts` | 1 | C | ConfabulationDetector 得分 ≥ 2 | 反事实提醒 | 路径 B 迁入 ✅ |
-| `quality.ts` | 1 | —(绕过 budget) | QualityDetector 信号 | 语气升级 | 路径 B 迁入 ✅ |
-| `intent-injector.ts` | 1 | B | 意图检测命中 | 行为指导 (B/A 级) | 路径 B 迁入 ✅ |
+| 文件 | 变体名 | 位置 | 等级 | 触发条件 | 注册 |
+|------|--------|------|------|---------|------|
+| `user-prefs.ts` | `user_prefs` | AFTER_SYSTEM | S | 每轮 | ✅ |
+| `intent-injector.ts` | `intent_guidance` | AFTER_SYSTEM | A/B | 意图检测命中 | ✅ |
+| `plan-mode.ts` | `plan_mode` | AFTER_SYSTEM | B | 计划模式 step | ✅ |
+| `permission-mode.ts` | `permission_mode` | AFTER_SYSTEM | A/B | 权限模式切换 | ✅ |
+| `working-set.ts` | `working_set` | MID_CONTEXT | B/C | working set 变化 | ✅ |
+| `error-audit-injector.ts` | `error-audit` | MID_CONTEXT | B | 最近 5 条有失败 | ✅ |
+| `goal.ts` | `goal` | MID_CONTEXT | C | 计划模式 step | ✅ |
+| `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
+| `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
+| `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
+| `anti_confabulation.ts` | `system_ref_anti_confabulation` | AFTER_TOOL_CALL | C | ConfabulationDetector ≥2 | ✅ |
+| `quality.ts` | `quality_escalate` | AFTER_TOOL_CALL | —(跳过 budget) | QualityDetector 信号 | ✅ |
+| `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2 | ✅ |
+| `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | checkGuard Rule 2/3/4 观察 | ✅ |
 
-> **活跃总数**: 15 个注入器。`turn/injectors/` 中旧版硬编码文件（stuck/anti_confabulation/quality/intent）已删除。
-> 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数）全部迁入路径 A（DynamicInjector 管线）。
+> **注册总数**: 14 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
+> `memory-rules.ts` 不存在——早期概念文件，代码仓库中无对应源文件。
+> 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
 ### DynamicInjector 基类
 
@@ -386,15 +387,32 @@ export abstract class DynamicInjector {
 }
 ```
 
-### GuardInjector（融合新增）
+### GuardInjector（迁移完成 — 已走统一注入管线）
 
-定义于 `packages/agent-core/src/agent/injection/guard-injector.ts`（38 行，融合新增）。
+定义于 `packages/agent-core/src/agent/injection/guard-injector.ts`（新版，功能完整）。
 
 - `injectionVariant`: `'guard-feedback'`
-- 触发条件: `history.length ≥ 3`，调用 `checkGuard(history, StepToolSummary)`
-- 注入内容: `checkGuard` 返回的反馈文本（`result.rule !== 0` 时）
-- 位置等级: A（HIGH，AFTER_SYSTEM）
-- 注册 ID: `'guard-feedback'`
+- 注册状态: ✅ 已注册 `manager.ts` → `router.register('guard-feedback', guardInjector)`
+- 位置等级: C（AFTER_TOOL_CALL）
+- 数据流:
+  1. `turn/index.ts:runGuardDetection()` 调用 `guard-engine.ts:checkGuard()`
+  2. Rule 2/3/4 观察结果 → `guardInjector.setGuardData(rule, feedback)`
+  3. 下一轮 `injection.inject()` → `router.dispatch()` → `GuardInjector.getInjection()`
+  4. 走统一残差/配额/去重管线
+- Rule 1 (block) 不走此注入器 — 它设 `confabulationBlocked` 标记控制流程
+- `beforeStep` 调 `clearGuardData()` 清除上一轮残留
+- `collectConfabulationBlockReason` 读 `lastFeedback` 获取最近的反馈文本
+
+### ErrorAuditInjector（融合新增）
+
+定义于 `packages/agent-core/src/agent/injection/error-audit-injector.ts`（43 行，融合新增）。
+
+- `injectionVariant`: `'error-audit'`
+- 触发条件: `agent.fileActionAudit.getRecentEntries(5)` 中有失败记录
+- 注入内容: 最近失败的文件操作审计摘要
+- 位置等级: B（MEDIUM，MID_CONTEXT）
+- 注册 ID: `'error-audit'`
+- **运行时接线**: 需要 `agent.fileActionAudit` 实例在 agent 构造时注入，框架已就绪
 
 ### ErrorAuditInjector（融合新增）
 
@@ -409,18 +427,28 @@ export abstract class DynamicInjector {
 
 ### 注入器注册管理
 
-所有注入器在 `manager.ts` 构造函数中通过 `InjectionRouter.register(id, injector)` 批量注册：
+所有注入器在 `manager.ts` 构造函数中通过 `InjectionRouter.register(id, injector)` 批量注册（实际代码 `manager.ts:22-48`）：
 
 ```typescript
 const injectors: [string, DynamicInjector][] = [
-  ['system', new SystemInjector(agent)],
-  ['memory-rules', new MemoryRulesInjector(agent)],
-  // ... 全部 12 个 ...
-  ['guard-feedback', new GuardInjector(agent)],
+  ['plugin-session-start', new PluginSessionStartInjector(agent)],
+  ['wolfpack', new WolfPackInjector(agent)],
+  ['plan-mode', new PlanModeInjector(agent)],
+  ['permission-mode', new PermissionModeInjector(agent)],
+  ['todo-list', new TodoListInjector(agent)],
+  ['goal', new GoalInjector(agent)],
+  ['working-set', new WorkingSetInjector(agent)],
+  ['user-prefs', new UserPrefsInjector(agent)],
+  ['system_ref_stuck', new StuckInjector()],
+  ['anti_confabulation', new AntiConfabulationInjector()],
+  ['quality_escalate', new QualityInjector()],
+  ['intent_guidance', new IntentGuidanceInjector(agent)],
   ['error-audit', new ErrorAuditInjector(agent)],
 ];
 injectors.forEach(([id, inj]) => this.router.register(id, inj));
 ```
+
+> **注意**: `guard-injector.ts`（GuardInjector）已在 `manager.ts` 注册，通过统一管线调度。
 
 ### 运行时停用/启用
 
@@ -437,19 +465,22 @@ agent.injection.getRouter().enable('error-audit');
 
 **增量 LLM 摘要**（`compaction/summary.ts` + `turn/index.ts:updatePersistentSummary()`）：
 
-- 走 `kind: 'system_trigger'` → `appendSystemReminder()` → 消息尾部
+- 走 `kind: 'injection'` → `appendSystemReminder()` → 消息尾部
 - **完全绕过** S/A/B/C/D 分级系统、残差调度、InjectionRouter 管线
-- 每 30 步触发一次调 LLM 做摘要，注入到尾部
+- 触发时机：每轮结束、上轮 ≥ 8 步时 → beforeStep 注入（不干扰工具调用）
+- 改用 `lastTurnStepCount` 字段记录上轮步数（废弃 `totalSteps` 固定步数硬切）
 - 尾部内容变化不影响 KV cache 前缀 → 不影响 97.41% 缓存命中率
 - 不注册变体、不走 `shouldInjectByResidual()`、不受预算控制
+- 每次注入前 `removeSystemRemindersByPrefix('[summary]')` 清理旧摘要防沉积
+- 成本：~$0.0004/次、~$0.02/天（3756 步/天真实数据）
 
-**为什么不在本系统内**：摘要是"每 30 步更新一次的快照"，不是"根据残差衰减决定是否注入的变体"。残差系统是为重复提醒设计的（衰减→再提醒），摘要只需要"一直存在、定期更新"，语义不同。
+**为什么不在本系统内**：摘要是"上轮决策链的即时快照"，不是"根据残差衰减决定是否注入的变体"。残差系统是为重复提醒设计的（衰减→再提醒），摘要只需要"在下一轮开始前看一眼上轮做了什么"，语义不同。
 
 ### 预留注入器（Phase22 规划）
 
-| 注入器 | 变体 | 等级 | 作用 |
-|--------|------|------|------|
-| `injectors/facts.ts` | `injector_facts` | C/D | 将注入器状态暴露为结构化 flat facts 给 AI |
+| 注入器 | 变体 | 等级 | 作用 | 状态 |
+|--------|------|------|------|------|
+| `injection/facts.ts` | `injector_facts` | C/D | 将注入器状态暴露为结构化 flat facts 给 AI | ⏸️ 未实现 |
 
 ---
 
@@ -566,7 +597,7 @@ TurnFlow.resetForTurn()
 | Step 1: InjectionRouter 核心 | `router.ts`（291 行） | ✅ 完成 |
 | Step 2: VariantScheduler 迁移入 Router | `router.ts` 内建 scheduler | ✅ 完成 |
 | Step 3: PositionStrategy 标准化 | `position-strategy.ts`（112 行） | ✅ 完成 |
-| Step 4: GuardInjector | `guard-injector.ts`（38 行） | ✅ 完成 |
+| Step 4: GuardInjector | `guard-injector.ts`（新版实现） | ✅ 完成（Phase33，统一管线） |
 | Step 5: ErrorAuditInjector | `error-audit-injector.ts`（43 行） | ✅ 完成 |
 | Step 6: inject() → router 记录同步（修正版） | `manager.ts` / `turn/index.ts:1659` | ✅ 完成 |
 | Step 7: TokenBudget 过滤接口 | `router.ts` | ✅ 完成 |

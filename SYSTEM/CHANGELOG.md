@@ -50,9 +50,9 @@ updated: 2026-07-09
 
 ### 架构迁移
 ```
-路径 A (DynamicInjector) ← 15 个注入器（原 11 + 4 迁移）
+路径 A (DynamicInjector) ← 14 个注入器（原 11 + 4 迁移 + GuardInjector 迁移）
 路径 B (硬编码) ← 已清零（4 文件删除）
-路径 C (Guard) ← 已迁入（不变）
+路径 C (GuardInjector) ← ✅ 已注册并走统一注入管线（Phase33，2026-07-10）
 ```
 
 ### 二开影响
@@ -469,7 +469,7 @@ updated: 2026-07-09
 
 #### 修复
 - **FAA 双路径并行**（🔴 P0）：`turn/index.ts` L2075 inline path 删除 + `manager.ts` 注册 ErrorAuditInjector + `variant-registry.ts` 加 `error-audit` VARIANT_META → 构建 EXIT 0
-- **guard-injector 孤儿类**：标记 DEPRECATED（100 行 DynamicInjector 定义但 0 引用，`buildToolSummaryFromHistory()` 数据精度低于实时实例变量，不应注册）
+- **guard-injector 孤儿类**：Phase22 空壳 DEPRECATED → Phase33 已完成迁移（注册 `'guard-feedback'`，setGuardData/getInjection，统一管线）
 
 #### 变更
 - **FAA 全量工具记录**：旧 Edit/Write 独占 → `finalizeToolResult` hook 内全工具覆盖（Bash/Read/Grep/LSP）
@@ -488,7 +488,7 @@ updated: 2026-07-09
 - `packages/agent-core/src/agent/turn/index.ts` L2080-2090 — FAA inline 删除
 - `packages/agent-core/src/agent/injection/manager.ts` L39 — ErrorAuditInjector 注册
 - `packages/agent-core/src/agent/turn/variant-registry.ts` L344 — `error-audit` VARIANT_META
-- `packages/agent-core/src/agent/injection/guard-injector.ts` — DEPRECATED 标记
+- `packages/agent-core/src/agent/injection/guard-injector.ts` — Phase22 空壳（DEPRECATED）→ **Phase33 迁移完成**（注册 `'guard-feedback'`，setGuardData/getInjection，统一管线）
 - `packages/knowledge/src/types.ts` L82-83 + `store.ts` L660 — `sourcePath`
 
 ### Phase33: ContentArchive TTL + 文件变更缓存一致性 + sharedStore 泄漏修复 [2026-07-09]
@@ -533,7 +533,12 @@ updated: 2026-07-09
 
 #### 修复
 - **BATCH_SIZE 回归常量 8**（`micro.ts`）：删 `computeBatchSize()` 动态函数，恢复 `const BATCH_SIZE`。审计日志确认 Micro Compaction 在你场景 < 1% 影响（上下文占用达不到 50% 触发条件），动态步数是方向错误。（**经验教训**：未查数据就设计优化，白干）
-- **增量摘要前身（正则提取）废弃**：原纯文本正则提取（`extractSummaryEvents`/`mergeSummaries`）仅覆盖 6 种模式，因实用成本低（$1.16/天）且质量差（~50% 提取率），直接升级为 LLM 摘要（~95%+ 覆盖率）
+- **增量摘要触发机制修正**：
+  - 废弃：`totalSteps` 字段 + `totalSteps % 12` 固定步数硬切 + afterStep 中间触发
+  - 改为：`lastTurnStepCount` 字段记录上轮步数，beforeStep 判断 ≥8 步才触发（自然断点）
+  - 新增 `removeSystemRemindersByPrefix('[summary]')` 防止尾部死消息沉积
+  - 成本：~$0.0004/次，~$0.02/天（3756 步/天真实数据）
+  - 缓存无影响（走 appendSystemReminder 尾部）
 
 #### 文档
 - `DECISIONS/分析-基于审计日志的上下文管理痛点与优化方向.md` — 486 行全链路分析：源码执行顺序验证 maskToolObservations 是省 token 主力（~90%）、审计日志确认 Micro Compaction 仅 0.2%、10 篇论文 + 10 个开源项目交叉验证、缓存命中率 97.41% 真实数据
