@@ -490,3 +490,23 @@ updated: 2026-07-09
 - `packages/agent-core/src/agent/turn/variant-registry.ts` L344 — `error-audit` VARIANT_META
 - `packages/agent-core/src/agent/injection/guard-injector.ts` — DEPRECATED 标记
 - `packages/knowledge/src/types.ts` L82-83 + `store.ts` L660 — `sourcePath`
+
+### Phase33: ContentArchive TTL + 文件变更缓存一致性 + sharedStore 泄漏修复 [2026-07-09]
+
+#### 新功能
+- **TTL 判据 `timestamp`→`lastAccessedAt`**（`content-archive.ts:170,207,279,307`）：模型频繁 recover 的条目永不过期，不复用的正常过期。改 1 行判据 + 3 处淘汰逻辑同步
+- **文件变更缓存一致性**：Point A（`context/index.ts:384-396`）存档时 `statSync` 记 `filePath`/`fileMtime`/`fileSize`；Edit/Write 后 `invalidateByPath(path)` 自动清除关联缓存条目（`turn/index.ts:1484`）；`recover()` 内 `statSync` 对比 mtime，不一致直接删（`content-archive.ts:182-196,211-220`）——覆盖 AI 自身修改 + 外部编辑器修改
+- **`invalidateByPath()`** 新增方法（`content-archive.ts:340-350`）：文件被改后清除所有关联该路径的缓存条目，同步清理 sharedStore
+- **`getStats()` / `pruneAll()`** 新增方法（`content-archive.ts:358-375`）：调试监控 + 强制清理
+
+#### 修复
+- **sharedStore 内存泄漏**（`content-archive.ts:267,279,307,372`）：`clear()` / `pruneInternal()` / `evictOne()` 原只清理 `this.store`，static `ContentArchive.sharedStore` 同步清理；进程运行 7 天约 350MB+ 泄漏
+- **evictOne 淘汰分数用 `timestamp` 而非 `lastAccessedAt`**（`content-archive.ts:307`）：与 TTL 判据不一致
+
+#### 文档
+- `SYSTEM/context-management.md` — §1 状态表补 Predictor/缓存审计；§2 补 Point A 存档 + tool result 预处理流水线；§4 补完整参数表；§7 补缓存审计事件；§8 完整数据流重写；§9 补 predictor/audit-log；§10 依赖关系图补充
+- `DECISIONS/分析-ContentArchive-Micro-Masking三系统协同分析.md` — 1037 行 12 章节全链路分析（协同/综合评判/硬伤/优化排序/缓存一致性/泄漏审计/持久化管理）
+- `.gitignore` — 追加 `workspace/` + `*.ndjson`
+
+#### 未实现
+- evictOne 加权淘汰的 `lastAccessedAt` 同步虽然 TTL 判据已改，但 sharedStore 不直接参与加权淘汰（由 local store 负责，sharedStore 是超集）

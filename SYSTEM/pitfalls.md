@@ -88,6 +88,31 @@ cmd.exe /c "ftype NodeJSFile=\"C:\Program Files\nodejs\node.exe\" \"%1\" %*"
 
 **教训**：Git Bash 不处理 Windows 文件关联。长期方案走 npm scripts（`pnpm test`）或 `npx` 避直接调用 `.mjs`。
 
+### vitest 僵尸进程拖垮 CPU 和 Bash 工具
+
+**现象**：`Bash` 工具持续 `Premature close` / `grace timeout`，系统卡顿，新 `vitest run` 因资源不足失败。
+
+**根因**：`vitest run` 在主进程退出后未杀死所有子进程池 worker。PID 50856 的 vitest 残留进程占用了 152MB 内存 + 7147s CPU 时间，持续运行超过 24 小时。34 个僵尸 Node 进程累积导致系统资源耗尽。
+
+**解决**：
+```bash
+# 查所有 node 进程
+wmic process where "name='node.exe'" get ProcessId,CommandLine
+
+# 杀特定僵尸（PID 从上面拿到）
+wmic process where "ProcessId='50856'" call terminate
+
+# 或批量杀启动超过 5 分钟的 node 进程
+powershell -Command "Get-Process node | Where-Object { \$_.StartTime -lt (Get-Date).AddMinutes(-5) } | Stop-Process -Force"
+```
+
+**预防**：
+- `vitest run` 完成后用 `tasklist` 确认无残留 worker
+- 运行全量测试前先杀上一轮的僵尸进程
+- vitest worker 池在主进程退出时应该 `SIGTERM` 子进程——如果在 Windows 上不生效，需跟踪 vitest 官方 issue
+
+**教训**：Bash 工具超时不一定是代码问题，可能是系统资源被上一轮的僵尸进程吃光了。先查 `tasklist` / `wmic` 确认资源状态再排查其他原因。
+
 ---
 
 ### CRLF 换行符导致 Edit/sed/node 文本替换不命中
