@@ -84,9 +84,6 @@ export class ContentArchive {
   /** \u547d\u4e2d/\u672a\u547d\u4e2d\u8ba1\u6570\u5668 */
   private hits = 0;
   private misses = 0;
-  /** 命中/未命中计数器 */
-  private hits = 0;
-  private misses = 0;
   /**
    * 全局共享存储（跨 agent 实例）。
    *

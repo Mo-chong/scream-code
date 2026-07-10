@@ -46,7 +46,7 @@ import { AttentionPositionStrategy, InsertPosition } from '../injection/position
 import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
 import type { CacheMetrics } from '../usage/audit-log';
-import { extractSummaryEvents, mergeSummaries } from '../compaction/summary';
+import { summarizeWithLLM } from '../compaction/summary';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -2052,16 +2052,20 @@ export class TurnFlow {
       }
     }
 
-    const newEvents = extractSummaryEvents(recentAssistantTexts, Math.max(0, this.currentStep - 30));
-    const compiled = mergeSummaries(existingText, newEvents, 6);
-    const summaryText = compiled ? "[summary]\n" + compiled : "";
-    if (!summaryText) return;
+    // 调 LLM 做摘要，不阻塞主流程
+    summarizeWithLLM(this.agent.llm, existingText, recentAssistantTexts, Math.max(0, this.currentStep - 30))
+      .then((textContent: string) => {
+        if (!textContent) return;
+        const formattedText = "[summary]\n" + textContent;
+        this.inject(formattedText, { kind: 'system_trigger', name: 'summary' });
+        this.agent.contentArchive?.archive("summary", formattedText, { source: 'summary' });
+      })
+      .catch((err: unknown) => {
+        console.warn("[summary] LLM summarization failed:", err);
+      });
+    }
 
-    this.inject(summaryText, { kind: 'system_trigger', name: 'summary' });
-    this.agent.contentArchive?.archive(SUMMARY_KEY, summaryText, { source: 'summary' });
-  }
-
-  /** CodeRefDetector — 检测代码块是否缺路径/行号 */
+    /** CodeRefDetector — 检测代码块是否缺路径/行号 */
   private detectCodeRefIssue(): void {
     const codeRefAssistantText = extractLastAssistantText(this.agent.context.history);
     if (codeRefAssistantText.length > 100 && this.currentStep > 1) {
