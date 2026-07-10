@@ -45,7 +45,17 @@ export class TodoListReminderInjector extends DynamicInjector {
       return undefined;
     }
 
-    return renderTodoListReminder(this.currentTodos());
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    const todos = this.currentTodos();
+    const done = todos.filter((t) => t.status === 'done').length;
+    const total = todos.length;
+    this.agent.context.recordFact?.(
+      'todo-list',
+      total > 0 ? `完成 ${done}/${total}` : '空',
+      done === total && total > 0 ? 'info' : 'warn',
+    );
+
+    return renderTodoListReminder(todos);
   }
 
   private isTodoListActive(): boolean {

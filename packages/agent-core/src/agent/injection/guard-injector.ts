@@ -57,6 +57,19 @@ export class GuardInjector extends DynamicInjector {
 
   protected override getInjection(): string | undefined {
     if (!this.guardData || this.guardData.rule <= 1) return undefined;
+
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    const ruleLabel = `Rule ${this.guardData.rule}`;
+    const feedbackShort =
+      this.guardData.feedback.length > 80
+        ? this.guardData.feedback.slice(0, 80) + '…'
+        : this.guardData.feedback;
+    this.agent.context.recordFact?.(
+      'guard-rules',
+      `${ruleLabel}: ${feedbackShort}`,
+      'warn',
+    );
+
     return this.guardData.feedback;
   }
 }

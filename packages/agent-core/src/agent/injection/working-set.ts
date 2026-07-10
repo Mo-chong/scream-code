@@ -20,6 +20,13 @@ export class WorkingSetInjector extends DynamicInjector {
       if (turnsSince < WORKING_SET_REMINDER_INTERVAL) return undefined;
     }
 
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    this.agent.context.recordFact?.(
+      'working-set',
+      paths.slice(0, 5).join(', ') + (paths.length > 5 ? ', ...' : ''),
+      'info',
+    );
+
     return [
       '## Working Set',
       '',

@@ -617,7 +617,55 @@ TurnFlow.resetForTurn()
 
 ---
 
-> **相关文件**: `SYSTEM-INDEX.md` (索引链入口) | `SYSTEM/API-REFERENCE.md` (接口定义) | `SYSTEM/architecture-overview.md` (架构总图) | `ZHU/DECISIONS/INDEX.md` (决策历史)
+## § Context Facts 尾部聚合 (Phase B') [P3]
+
+### 问题 [P3]
+
+B 级注入器（error-audit、working-set、goal、todo-list、wolfpack、plugin-session-start）名义上设计为 `MID_CONTEXT` 位置，但实际代码中（`injector.ts:121-123`）`else` 分支不区分 `MID_CONTEXT` 和 `AFTER_TOOL_CALL`，全部调用 `appendSystemReminder()` → **全在尾部**。多个注入器在尾部形成 3-8 个独立碎片块，AI 在尾部需要多次扫描。
+
+### 方案 [P3]
+
+所有注入器通过 `recordFact(key, value, level)` 将关键状态写入 ContextMemory 的 `_contextFacts` Map。`router.dispatch()` 之后由 `manager.inject()` 统一调用 `flushContextFacts()` 格式化为 `[Context Facts]` 结构化块，通过 `appendSystemReminder()` 追加到尾部。
+
+```
+[Context Facts]
+  ⚠ error-audit:  最近 2 条失败记录
+  • goal:         [active] Phase B' implementation
+    working-set:  src/main.ts, src/utils/
+```
+
+#### 改动文件
+
+- `context/index.ts`: 新增 `recordFact()` / `flushContextFacts()`（+27 行）
+- `manager.ts`: `inject()` 在 dispatch 后调用 `flushContextFacts()`（+12 行，含 try/finally 异常保障）
+- `error-audit-injector.ts`: 新增 `recordFact?.()`（+7 行，error 级别）
+- `working-set.ts`: 新增 `recordFact?.()`（+7 行，info 级别）
+- `goal.ts`: 新增 `recordFact?.()`（+11 行，含 status + objective 截断）
+- `todo-list.ts`: 新增 `recordFact?.()`（+12 行，含完成进度）
+- `wolfpack.ts`: 新增 `recordFact?.() 2 处（+4 行，状态切换）
+- `plugin-session-start.ts`: 新增 `recordFact?.()`（+5 行，技能激活）
+- `guard-injector.ts`: 新增 `recordFact?.()`（+13 行，规则触发，warn 级别）
+
+所有 `recordFact` 调用使用可选链 `?.()`，确保 mock 环境不崩溃。
+
+### 关键数据 [P3]
+
+审计日志 2718 条记录实证：
+- 稳定段（turn>10，排除 compaction）平均命中率 **98.13%**
+- B 级注入器已在尾部（`appendSystemReminder`），内容变化不降低命中率（98.39% vs 98.16% 基线）
+- 当前活跃 B 注入器仅 `error-audit`(24.1%)，其他 5 个零触发
+
+### Phase M: 内容哈希测量埋点 [P3]
+
+`DynamicInjector` 基类新增 `_lastContentHash` 属性 + `getLastContentHash()` 访问器。注入成功时记录 `simpleHash(injection)`，不注入时清空为 `null`。`InjectResult` 新增 `contentHash?: string` 可选字段。router dispatch 在成功/失败分支都注入 contentHash。
+
+目的：为后续缓存命中率分析提供注入级数据支撑。
+
+相关文件: `injector.ts`（+8 行）、`router.ts`（+4 行，3 处 dispatch 注入）
+
+---
+
+> **相关文件**: `SYSTEM-INDEX.md` (索引链入口) | `SYSTEM/API-REFERENCE.md` (接口定义) | `SYSTEM/architecture-overview.md` (架构总图) | `ZHU/DECISIONS/INDEX.md` (决策历史) | `ZHU/DECISIONS/ADR-7-注入位置优化与尾部聚合策略.md` (ADR)
 
 ### 融合计划落地状态
 
@@ -638,3 +686,5 @@ TurnFlow.resetForTurn()
 | Step 10: ErrorAuditInjector 注册 | `manager.ts` | ✅ 完成 |
 | Step 11a: CacheGroup 分类 | `router.ts`（5 组） | ✅ 完成 |
 | Step 11b: 双指数残差 | 待运行时基线数据 | ⏸️ 暂缓 |
+| **Phase B': Context Facts 尾部聚合** | 7 个注入器 + `context/index.ts` | ✅ 完成 (2026-07-10) |
+| **Phase M: 内容哈希测量埋点** | `injector.ts` + `router.ts` | ✅ 完成 (2026-07-10) |

@@ -192,16 +192,16 @@ class InjectionManager {
 | IntentGuidanceInjector | `agent/injection/intent-injector.ts` | 1 | AFTER_SYSTEM | 意图检测命中 | ✅ |
 | PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ |
 | PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ |
-| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ |
-| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | 最近 5 条有失败 | ✅ |
-| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ |
-| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ |
-| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ |
-| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ |
+| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | Phase B' `recordFact` |
+| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | 最近 5 条有失败 | ✅ | Phase B' `recordFact` |
+| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | Phase B' `recordFact` |
+| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | Phase B' `recordFact` |
+| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | Phase B' `recordFact` |
+| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | Phase B' `recordFact` |
 | AntiConfabulationInjector | `agent/injection/anti_confabulation.ts` | 1 | AFTER_TOOL_CALL | ConfabulationDetector ≥2 | ✅ |
 | QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ |
 | StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步 | ✅ |
-| GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察 | ✅ |
+| GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察 | ✅ | Phase B' `recordFact` |
 
 > 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
 > `MemoryRulesInjector` 不存在（早期概念文件）。
@@ -264,6 +264,21 @@ protectHighLevelReminders(highOrigins: Set<string>): void
   // 遍历 history，匹配 highOrigins 的消息设置 protected: true
   // 在 applyCompaction() 末尾调用
   // ⚠️ 实际效果有限（compaction 后历史已被替换）
+
+// Phase B': Context Facts 尾部聚合接口
+recordFact(key: string, value: string, level?: string): void
+  // 记录一个事实到 _contextFacts Map，供尾部聚合使用
+  // key: 注入器标识（如 'error-audit', 'working-set'）
+  // value: 事实内容（如 '最近 2 条失败记录'）
+  // level: 'info' | 'warn' | 'error'（默认 'info'），影响显示图标
+  // 由各注入器在 getInjection() 中调用
+  // 事实在每次 dispatch 周期开始时自动清空
+
+flushContextFacts(): string | null
+  // 格式化所有已记录的事实为 [Context Facts] 结构化块
+  // 返回格式化文本，若没有事实则返回 null
+  // injectionManager.inject() 在 router.dispatch() 之后调用
+  // 结果通过 appendSystemReminder() 追加到尾部
 ```
 
 ### 3.6 appendSystemReminder 签名
@@ -619,6 +634,7 @@ interface InjectionEvent {
   success: boolean          // 是否成功注入
   level?: string            // S/A/B/C/D 注意力等级（仅 success=true）
   position?: string         // H(头部) / M(中部) / T(尾部)
+  contentHash?: string      // 内容哈希，用于缓存命中率分析 (Phase M)
   reason?: string           // 失败原因: residual/dedup/quota/error（仅 success=false）
   tokenEstimate?: number    // 注入内容预估 token 数
 }

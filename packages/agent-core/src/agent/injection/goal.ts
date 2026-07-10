@@ -22,6 +22,17 @@ export class GoalInjector extends DynamicInjector {
       if (turnsSince < GOAL_REMINDER_INTERVAL) return undefined;
     }
 
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    const goalStatus = goal.status;
+    const objectiveShort = goal.objective.length > 60
+      ? goal.objective.slice(0, 60) + '…'
+      : goal.objective;
+    this.agent.context.recordFact?.(
+      'goal',
+      `[${goalStatus}] ${objectiveShort}`,
+      goalStatus === 'blocked' ? 'error' : 'info',
+    );
+
     if (goal.status === 'active') return buildGoalReminder(goal);
     if (goal.status === 'blocked') return buildBlockedNote(goal);
     if (goal.status === 'paused') return buildPausedNote(goal);

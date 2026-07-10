@@ -38,6 +38,8 @@ export class WolfPackModeInjector extends DynamicInjector {
       if (this.wasActive) {
         this.wasActive = false;
         this.injectedAt = null;
+        // Phase B': record exit fact
+        this.agent.context.recordFact?.('wolfpack', '已退出', 'info');
         return WOLFPACK_MODE_EXIT_REMINDER;
       }
       return undefined;
@@ -46,6 +48,8 @@ export class WolfPackModeInjector extends DynamicInjector {
     if (!this.wasActive) {
       this.injectedAt = null;
       this.wasActive = true;
+      // Phase B': record enter fact
+      this.agent.context.recordFact?.('wolfpack', '已激活', 'info');
       return WOLFPACK_MODE_ENTER_REMINDER;
     }
 

@@ -120,10 +120,18 @@ export abstract class DynamicInjector {
           variant: this.injectionVariant,
         });
       }
+    } else {
+      // Clear stale hash when no injection occurred
+      this._lastContentHash = null;
     }
   }
 
   protected abstract readonly injectionVariant: string;
+
+  /** expose the last content hash for audit logging (Phase M) */
+  getLastContentHash(): string | null {
+    return this._lastContentHash;
+  }
 
   protected abstract getInjection(): string | Promise<string | undefined> | undefined;
 }

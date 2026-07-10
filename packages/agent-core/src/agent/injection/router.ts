@@ -110,6 +110,8 @@ export interface InjectResult {
   variant: string;
   /** 实际使用的注入位置 */
   position: InsertPosition;
+  /** 内容哈希，用于缓存命中率分析 (Phase M) */
+  contentHash?: string;
   /** 是否成功执行 */
   success: boolean;
   /** 失败原因（仅 success===false 时） */
@@ -262,6 +264,7 @@ export class InjectionRouter {
           variant: id,
           position: injector.getTargetPosition(),
           success: true,
+          contentHash: injector.getLastContentHash?.() ?? undefined,
           stepInjected: context.currentStep,
         });
         injectionCount++;
@@ -271,6 +274,7 @@ export class InjectionRouter {
           position: injector.getTargetPosition(),
           success: false,
           error: String(error),
+          contentHash: injector.getLastContentHash?.() ?? undefined,
           stepInjected: context.currentStep,
         });
       }

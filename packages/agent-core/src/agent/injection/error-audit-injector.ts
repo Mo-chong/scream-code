@@ -44,6 +44,13 @@ export class ErrorAuditInjector extends DynamicInjector {
       )
       .join('\n');
 
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    this.agent.context.recordFact?.(
+      'error-audit',
+      `最近 ${failures.length} 条失败记录`,
+      'error',
+    );
+
     return `## 文件操作审计（最近 ${failures.length} 条失败记录）\n请关注以下文件操作异常，可能与此前工具调用有关：\n${summary}`;
   }
 }

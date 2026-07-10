@@ -314,6 +314,35 @@ updated: 2026-07-11
 
 ## 二开发日志（Mo-chong fork）
 
+### Phase33 — Context Facts 尾部聚合 + 内容哈希埋点（2026-07-10）
+
+#### 新功能
+- **Context Facts 尾部聚合 (Phase B')**: 7 个注入器（error-audit/working-set/goal/todo-list/wolfpack/plugin-session-start/guard-injector）接入 `recordFact()` 接口，在 `manager.inject()` 尾部统一格式化为 `[Context Facts]` 结构化块注入。AI 在尾巴 U 形第二高点一眼扫完所有注入器关键状态，无需扫描 3-8 块碎片 | 源码证据：git diff +107/-1 | 测试验证：24/24 vitest 通过 | 缓存影响：零（`appendSystemReminder` 尾部追加）
+- **内容哈希测量埋点 (Phase M)**: `DynamicInjector` 基类新增 `_lastContentHash` + `getLastContentHash()` 访问器，`InjectResult` 新增 `contentHash?: string` 字段
+
+#### 接口变更
+- `ContextMemory` 新增 `recordFact(key, value, level)` + `flushContextFacts(): string | null`
+- `InjectionManager.inject()` 尾部集成 try/finally flush 流程
+- `DynamicInjector` 新增 `getLastContentHash(): string | null`
+- `InjectResult` 新增 `contentHash?: string`
+
+#### Bug 修复
+- **`_lastContentHash` 脏数据**: 不注入时残留旧值 → 加 `else { null }`
+- **`flushContextFacts` 异常安全**: dispatch 抛异常时 Map 泄漏 → `try { dispatch } finally { flush }`
+- **`recordFact` mock 兼容**: 7 个注入器使用 `?.()` 可选链
+
+#### 文档
+- `SYSTEM/injection-system.md`: 新增 §Context Facts 尾部聚合节，融合计划 + Phase B'/M 行
+- `ZHU/DECISIONS/ADR-7-注入位置优化与尾部聚合策略.md`: 废弃原 Phase 1，修正为 Phase B' + Phase M
+- `ZHU/workspace/研-ADR7验证与重设计分析.md`: 补全 2718 条日志实证
+
+#### 经验教训
+- Phase 1 原计划是假前提：源码证明 B 级注入器实际已在尾部（`appendSystemReminder`），先查源码再写计划
+- ADR 必须带源码验证，否则方向可能全错
+- 审计日志 2718 条确认缓存已 98.13%，"优化缓存"方向错的
+
+---
+
 ### Phase31 — L4 结构化注入：KnowledgeSearchResult 追加 sourcePath（2026-07-08）
 
 #### 新功能

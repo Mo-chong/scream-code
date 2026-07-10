@@ -171,6 +171,33 @@ export class ContextMemory {
     this._history.splice(nearHeadPos, 0, insertMsg);
   }
 
+  // ─── Context Facts (Phase B') ───────────────────────────────────────
+  private _contextFacts: Map<string, { value: string; level: string }> = new Map();
+
+  /** Record a fact for the aggregated [Context Facts] block.
+   *  Called by injectors to publish key-value pairs instead of
+   *  (or alongside) direct appendSystemReminder calls.
+   *  Facts are cleared at the start of each dispatch cycle. */
+  recordFact(key: string, value: string, level: string = 'info'): void {
+    this._contextFacts.set(key, { value, level });
+  }
+
+  /** Format and clear all collected facts. Returns the formatted block
+   *  text or null if no facts were recorded. */
+  flushContextFacts(): string | null {
+    if (this._contextFacts.size === 0) return null;
+    const lines: string[] = ['[Context Facts]'];
+    for (const [key, { value, level }] of this._contextFacts) {
+      const icon =
+        level === 'error' ? '  ⚠' :
+        level === 'warn'  ? '  •' :
+        '   ';
+      lines.push(`${icon} ${key}: ${value}`);
+    }
+    this._contextFacts.clear();
+    return lines.join('\n');
+  }
+
   /**
    * Phase22.2: 将 history 中 origin 为 S/A 级的 system-reminder 标记为 protected，
    * 使其在 compaction 时被跳过。

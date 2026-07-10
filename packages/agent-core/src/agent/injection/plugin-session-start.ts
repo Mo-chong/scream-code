@@ -38,6 +38,11 @@ export class PluginSessionStartInjector extends DynamicInjector {
       blocks.push(renderSessionStartBlock(sessionStart, skill, registry.renderSkillPrompt(skill, '')));
     }
     if (blocks.length === 0) return undefined;
+
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    const skillNames = sessionStarts.map((s) => `${s.skillName}(${s.pluginId})`).join(', ');
+    this.agent.context.recordFact?.('plugin-sessions', skillNames, 'info');
+
     return blocks.join('\n');
   }
 }
