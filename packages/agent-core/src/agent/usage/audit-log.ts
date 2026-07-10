@@ -231,6 +231,14 @@ export function buildAuditEntry(
     if (alert) alerts.push(alert);
   }
 
+  // F4: 实时告警 — 审计日志不只看才用
+  for (const alert of alerts) {
+    console.warn(`[cache-audit] ${alert}`);
+  }
+  if (apiKeySwitched) {
+    console.warn(`[cache-audit] apiKeySwitched detected at turn ${turn}`);
+  }
+
   return {
     turn,
     model,

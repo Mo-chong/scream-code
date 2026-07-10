@@ -119,7 +119,11 @@ function findSupersededPaths(
  *
  * Triggered automatically during context construction via {@link compact}.
  */
-/** Minimum steps between detect() evaluations to reduce cache-break churn. */
+/**
+ * Minimum steps between detect() evaluations to reduce cache-break churn.
+ * 默认 8（基于 maskToolObservations 遮蔽后，Micro Compaction 节省占比 < 1%），
+ * 实际由 flag `micro.batchSize` 控制，通过 SCREAM_CODE_MICRO_BATCH_SIZE 环境变量覆盖。
+ */
 const BATCH_SIZE = flags.asNumber('micro.batchSize');
 
 export class MicroCompaction {
@@ -151,10 +155,9 @@ export class MicroCompaction {
 
   /** Check whether micro-compaction is warranted and advance the cutoff.
    *
-   * Gated by a batch counter (BATCH_SIZE, registry default 8, configurable via
-   * SCREAM_CODE_MICRO_BATCH_SIZE) so the cutoff line changes
-   * infrequently, preserving KV-cache continuity. The `force` parameter
-   * bypasses the gate for full-compaction-driven resets. */
+   * Gated by BATCH_SIZE (configurable via `micro.batchSize` flag) so the
+   * cutoff line changes infrequently. The `force` parameter bypasses the
+   * gate for full-compaction-driven resets. */
   detect(force?: boolean): void {
     if (!flags.enabled('micro-compaction')) return;
 
@@ -162,14 +165,15 @@ export class MicroCompaction {
     if (!force && this.stepsSinceLastDetect < BATCH_SIZE) return;
     this.stepsSinceLastDetect = 0;
 
-    const config = this.config;
-    const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;
     const contextTokens = this.agent.context.tokenCountWithPending;
     const contextUsageRatio =
       maxContextTokens !== undefined && maxContextTokens > 0
         ? contextTokens / maxContextTokens
         : 0;
+
+    const config = this.config;
+    const { history } = this.agent.context;
     if (contextUsageRatio < config.minContextUsageRatio) return;
 
     const nextCutoff = computeCutoff(history, config);
@@ -227,11 +231,15 @@ export class MicroCompaction {
               : Array.isArray(msg.content)
                 ? msg.content.map((p) => ('text' in p ? p.text : '')).join('\n')
                 : '';
-          this.agent.contentArchive?.archive(
-            'micro:' + msg.toolCallId,
-            textContent,
-            { source: 'microCompact' },
-          );
+          // dedup: Point A (context/index.ts) 已用 'tool:'+toolCallId 存档
+          const toolKey = 'tool:' + msg.toolCallId;
+          if (!this.agent.contentArchive?.recover(toolKey)) {
+            this.agent.contentArchive?.archive(
+              'micro:' + msg.toolCallId,
+              textContent,
+              { source: 'microCompact' },
+            );
+          }
         }
         const marker =
           msg.toolCallId !== undefined && superseded.has(msg.toolCallId)

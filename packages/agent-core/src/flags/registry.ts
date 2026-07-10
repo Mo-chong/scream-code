@@ -42,7 +42,14 @@ export const FLAG_DEFINITIONS = [
     numDefault: 8,
     surface: 'internal',
   },
+  {
+    id: 'contentArchive.ttlMs',
+    env: 'SCREAM_CODE_CONTENT_ARCHIVE_TTL_MS',
+    default: true,
+    numDefault: 14400000,
+    surface: 'internal',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
-/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit | micro.batchSize */
+/** Literal union of registered flag ids: micro-compaction | wolfpack | content-archive | file-action-audit | micro.batchSize | contentArchive.ttlMs */
 export type FlagId = (typeof FLAG_DEFINITIONS)[number]['id'];

@@ -15,6 +15,7 @@
 
 import type { ContentPart } from '@scream-code/ltod';
 import { statSync } from 'node:fs';
+import { flags } from '../../flags';
 
 // ─── 类型导出 ────────────────────────────────────────
 export interface ContentArchiveEntry {
@@ -39,8 +40,10 @@ export interface ContentArchiveEntry {
 }
 
 export interface ContentArchiveConfig {
-  /** 单条存活时间（ms），默认 14_400_000（4 小时，判据用 lastAccessedAt） */
+  /** 软 TTL（ms），基于 lastAccessedAt，持续 recover 续命，默认 4 小时 */
   readonly ttlMs?: number;
+  /** 硬 TTL（ms），基于 timestamp，无论如何强制过期，默认 24 小时 */
+  readonly hardTtlMs?: number;
   /** 全局条目上限，默认 2000 */
   readonly maxEntries?: number;
 }
@@ -54,7 +57,8 @@ export interface ArchiveResult {
 }
 
 // ─── 默认值 ──────────────────────────────────────────
-const DEFAULT_TTL_MS = 14_400_000; // 4 小时（判据用 lastAccessedAt，持续 recover 的条目不丢）
+const DEFAULT_TTL_MS = 14_400_000; // 4 小时（软 TTL，基于 lastAccessedAt）
+const DEFAULT_HARD_TTL_MS = 86_400_000; // 24 小时（硬 TTL，基于 timestamp，覆盖软 TTL）（判据用 lastAccessedAt，持续 recover 的条目不丢）
 const DEFAULT_MAX_ENTRIES = 2000;
 
 // 权重常量
@@ -92,10 +96,12 @@ export class ContentArchive {
 
   private readonly store = new Map<string, ContentArchiveEntry>();
   private readonly ttlMs: number;
+  private readonly hardTtlMs: number;
   private readonly maxEntries: number;
 
   constructor(config?: ContentArchiveConfig) {
-    this.ttlMs = config?.ttlMs ?? DEFAULT_TTL_MS;
+    this.ttlMs = config?.ttlMs ?? flags.asNumber('contentArchive.ttlMs') ?? DEFAULT_TTL_MS;
+    this.hardTtlMs = config?.hardTtlMs ?? DEFAULT_HARD_TTL_MS;
     this.maxEntries = config?.maxEntries ?? DEFAULT_MAX_ENTRIES;
   }
 
@@ -174,7 +180,7 @@ export class ContentArchive {
     const entry = this.store.get(key);
     if (entry !== undefined) {
       const now = Date.now();
-      if (now - entry.lastAccessedAt > this.ttlMs) {
+      if (now - entry.timestamp > this.hardTtlMs || now - entry.lastAccessedAt > this.ttlMs) {
         this.store.delete(key);
         ContentArchive.sharedStore.delete(key);
         return undefined;
@@ -204,7 +210,7 @@ export class ContentArchive {
     if (shared === undefined) return undefined;
 
     const now = Date.now();
-    if (now - shared.lastAccessedAt > this.ttlMs) {
+    if (now - shared.timestamp > this.hardTtlMs || now - shared.lastAccessedAt > this.ttlMs) {
       ContentArchive.sharedStore.delete(key);
       return undefined;
     }
@@ -222,16 +228,8 @@ export class ContentArchive {
       }
     }
     // 从共享存储"借"回本地（soft copy-on-access）
-    const lifted: ContentArchiveEntry = {
-      content: shared.content,
-      timestamp: shared.timestamp,
-      source: shared.source,
-      priority: Math.min(PRIORITY_MAX, shared.priority + PRIORITY_BOOST),
-      protected: shared.protected,
-      lastAccessedAt: now,
-    };
-    ContentArchive.sharedStore.set(key, lifted);
-    shared.priority = lifted.priority;
+    // ⚠️ 直接 mutate shared 对象而非创建新对象：保留 filePath/fileMtime/fileSize
+    shared.priority = Math.min(PRIORITY_MAX, shared.priority + PRIORITY_BOOST);
     shared.lastAccessedAt = now;
     return shared.content;
   }
@@ -271,12 +269,14 @@ export class ContentArchive {
 
   /**
    * 内部 prune：清理所有 TTL 过期条目（protected 也删）。
+   * 软 TTL（lastAccessedAt）失效 → 超期未访问
+   * 硬 TTL（timestamp）失效 → 超过 24h 强制过期，持续 recover 也不保
    * @returns 删除的条目数
    */
   private pruneInternal(now: number): number {
     let removed = 0;
     for (const [key, entry] of this.store) {
-      if (now - entry.lastAccessedAt > this.ttlMs) {
+      if (now - entry.timestamp > this.hardTtlMs || now - entry.lastAccessedAt > this.ttlMs) {
         this.store.delete(key);
         ContentArchive.sharedStore.delete(key);
         removed++;
