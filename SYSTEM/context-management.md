@@ -82,13 +82,22 @@ FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compac
 
 | 常量 | 值 | 含义 |
 |------|----|------|
-| `DEFAULT_TTL_MS` (L50) | `1_800_000` | 30 分钟 TTL，protected 条目同样过期即删 |
-| `DEFAULT_MAX_ENTRIES` (L51) | `2000` | 全局条目上限 |
-| `PRIORITY_BOOST` (L54) | `0.1` | `recover()` 每次升权步长 |
-| `PRIORITY_MAX` (L55) | `1.0` | 权重上限 |
-| `PRIORITY_NEW` (L56) | `1.0` | 新条目初始权重 |
-| `FORCED_THRESHOLD` (L57) | `0.1` | priority < 0.1 强制优先淘汰 |
-| `ACCESS_BOOST_FACTOR` (L58) | `0.5` | 访问新鲜度因子 |
+| `DEFAULT_TTL_MS` (L45) | `14_400_000` | 4 小时软 TTL（基于 lastAccessedAt），持续 recover 续命 |
+| `DEFAULT_HARD_TTL_MS` (L46) | `86_400_000` | 24 小时硬 TTL（基于 timestamp），强制过期上限，protected 条目同样过期即删 |
+| `DEFAULT_MAX_ENTRIES` (L47) | `2000` | 全局条目上限 |
+| `PRIORITY_BOOST` (L50) | `0.1` | `recover()` 每次升权步长 |
+| `PRIORITY_MAX` (L51) | `1.0` | 权重上限 |
+| `PRIORITY_NEW` (L52) | `1.0` | 新条目初始权重 |
+| `FORCED_THRESHOLD` (L53) | `0.1` | priority < 0.1 强制优先淘汰 |
+| `ACCESS_BOOST_FACTOR` (L54) | `0.5` | 访问新鲜度因子 |
+
+**Flag 控制**：
+
+| flag | env | 默认 | 说明 |
+|------|-----|------|------|
+| `content-archive` | `SCREAM_CODE_EXPERIMENTAL_CONTENT_ARCHIVE` | `true` | 功能开关 |
+| `contentArchive.ttlMs` | `SCREAM_CODE_CONTENT_ARCHIVE_TTL_MS` | `14400000` | TTL 可配置覆盖（毫秒） |
+| `mask.keepLastN` | `SCREAM_CODE_MASK_KEEP_LAST_N` | `3` | maskToolObservations 保留条数 |
 
 ### 2.2 Point A 存档（每步写入存档）
 
@@ -97,7 +106,7 @@ FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compac
 与 MicroCompaction 截断时的 Point B 存档不同，Point A 在 **每步** tool result 写入 `context.history` 时即时存档：
 
 ```typescript
-// context/index.ts L369
+// context/index.ts L370
 this.contentArchive?.archive('tool:' + msg.toolCallId, textContent, {
   source: 'toolResult',
 });

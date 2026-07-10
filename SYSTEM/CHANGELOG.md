@@ -510,3 +510,37 @@ updated: 2026-07-09
 
 #### 未实现
 - evictOne 加权淘汰的 `lastAccessedAt` 同步虽然 TTL 判据已改，但 sharedStore 不直接参与加权淘汰（由 local store 负责，sharedStore 是超集）
+
+### Phase33 续章：maskToolObservations 增强 + 增量 LLM 摘要 + 缓存命中率上报 + BATCH_SIZE 纠正 [2026-07-10]
+
+#### 新功能
+- **maskToolObservations 增强**（`mask-tool-observations.ts`）：
+  - **占位符带工具名**：`[已遮蔽·readFile·已存档·ArchiveRecover可恢复]`，AI 扫一眼知道什么工具、已存档、怎么恢复
+  - **keepLastN 可配置**（`flags/registry.ts`）：通过 `SCREAM_CODE_MASK_KEEP_LAST_N` 环境变量覆盖默认 3
+  - **短输出保护**：< 100 字符的工具结果跳过遮蔽，小确认不浪费
+  - `turn-step.ts:79-86` 每步从 assistant 消息提取 `toolCallId→toolName` 映射传给 masking
+- **增量 LLM 摘要**（`compaction/summary.ts` 新文件 + `turn/index.ts`）：
+  - 每 30 步调 `this.agent.llm.chat()` 生成结构化摘要（emoji + step# + 操作）
+  - 输出格式：`📖 step 5: readFile user.ts | ✏️ step 12: edit server.ts port 3000→4000`
+  - 通过 `kind: 'system_trigger'` 注入尾部（不经过 S/A/B/C/D 分级，不影响缓存）
+  - 增量合并——新摘要与旧摘要合并，保留最近 6 条事件
+  - 同步写入 ContentArchive key=`summary`，跨会话持久化
+  - 日成本 ~$1.16（338 步/天 ÷ 30 × $0.105/次），占 API 账单 0.13%
+- **缓存命中率上报**（`content-archive.ts` + `audit-log.ts`）：
+  - ContentArchive 新增 `hits`/`misses` 计数器
+  - `getStats()` 返回 `{ hits, misses }`
+  - `buildAuditEntry()` 新增 `archiveHit`/`archiveMiss` 字段（`turn/index.ts:1764` 传参）
+
+#### 修复
+- **BATCH_SIZE 回归常量 8**（`micro.ts`）：删 `computeBatchSize()` 动态函数，恢复 `const BATCH_SIZE`。审计日志确认 Micro Compaction 在你场景 < 1% 影响（上下文占用达不到 50% 触发条件），动态步数是方向错误。（**经验教训**：未查数据就设计优化，白干）
+- **增量摘要前身（正则提取）废弃**：原纯文本正则提取（`extractSummaryEvents`/`mergeSummaries`）仅覆盖 6 种模式，因实用成本低（$1.16/天）且质量差（~50% 提取率），直接升级为 LLM 摘要（~95%+ 覆盖率）
+
+#### 文档
+- `DECISIONS/分析-基于审计日志的上下文管理痛点与优化方向.md` — 486 行全链路分析：源码执行顺序验证 maskToolObservations 是省 token 主力（~90%）、审计日志确认 Micro Compaction 仅 0.2%、10 篇论文 + 10 个开源项目交叉验证、缓存命中率 97.41% 真实数据
+- `DECISIONS/记录-BATCH_SIZE从动态回归常量8.md` — 决策纠正记录：BATCH_SIZE 不触发的原因和你场景的上下文占用率分析
+- `workspace/验收-上下文管理优化执行.md` — 验收报告
+
+#### 经验教训
+- BATCH_SIZE 优化是错误方向：审计日志证实影响 < 1%，白花几天
+- 所有性能优化必须先查审计日志数据，否则是拍脑袋
+- maskToolObservations 不是缓存破坏者，是缓存保护者——标准化旧工具结果为固定占位符让前缀更稳定，97.41% 命中率
