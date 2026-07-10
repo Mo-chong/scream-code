@@ -133,7 +133,7 @@ runOneTurn()
 **文件**: `packages/agent-core/src/agent/context/` | **系统说明书**: `SYSTEM/context-management.md`
 
 三层上下文管理：
-1. **ContentArchive** — LRU 2000 条 / 30min TTL，存完整的 tool result
+1. **ContentArchive** — LRU 2000 条 / 4h+24h 双窗口 TTL，存完整的 tool result + 文件缓存一致性校验（statSync）
 2. **MicroCompaction** — 轻量压缩，移除旧 tool result + 遮蔽 tool observations
 3. **FullCompaction** — LLM 总结压缩，75% headroom 触发，含 `_maxTries` 安全门控
 
@@ -211,8 +211,8 @@ packages/agent-core/src/
 │   │   └── injectors/         ← 传统注入器（stuck.ts 等）
 │   ├── context/
 │   │   ├── index.ts           ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
-│   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条 / 30min TTL）
-│   │   ├── masking.ts         ← maskToolObservations（遮蔽旧 tool result）
+│   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条 / 4h+24h 双窗口 TTL）
+│   │   ├── masking.ts         ← maskToolObservations（遮蔽旧 tool result，keepLastN 可配，短输出保护）
 │   │   ├── stabilize.ts       ← stabilizePrefix（KV-cache 命中率提升）
 │   │   └── compaction/
 │   │       ├── micro.ts       ← MicroCompaction

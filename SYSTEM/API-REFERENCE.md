@@ -414,7 +414,7 @@ interface GuardResult {
 
 ## 6. 数据层
 
-### 6.1 ContentArchive（v2.1）
+### 6.1 ContentArchive（v2.2）
 <!-- ref: ContentArchive -->
 
 **文件**: `packages/agent-core/src/agent/context/content-archive.ts`
@@ -423,35 +423,53 @@ interface GuardResult {
 class ContentArchive {
   static readonly sharedStore = new Map<string, ContentArchiveEntry>()
 
-  constructor(maxEntries?: number, ttl?: number)  // 默认 2000, 30min
+  constructor(config?: ContentArchiveConfig)  // 默认: ttlMs=4h, hardTtlMs=24h, maxEntries=2000
 
-  archive(key: string, content: string | ContentPart[], options?: ArchiveOptions): ArchiveResult
-  recover(key: string): string | ContentPart[] | undefined
-  list(): string[]
+  archive(key: string, content: string | ContentPart[], options?: ArchiveOptions): void
+  recover(key: string): string | ContentPart[] | undefined  // TTL: now - lastAccessedAt > ttlMs || now - timestamp > hardTtlMs
+  invalidateByPath(filePath: string): number                 // 按文件路径失效缓存
+  getStats(): { localSize: number; sharedSize: number; hits: number; misses: number }
+  pruneAll(): void
+  size(): number
+  list(): ContentArchiveEntry[]
   prune(): number
 }
 
+interface ContentArchiveConfig {
+  ttlMs?: number           // 软 TTL（lastAccessedAt），默认 14_400_000（4h）
+  hardTtlMs?: number       // 硬 TTL（timestamp），默认 86_400_000（24h）
+  maxEntries?: number      // 默认 2000
+}
+
 interface ArchiveOptions {
-  priority?: number       // 0-100, 默认 0.5
   source?: string
+  protected?: boolean
 }
 
 interface ContentArchiveEntry {
   content: string | ContentPart[]
-  priority: number
-  createdAt: number
-  lastAccessAt: number
+  timestamp: number          // 创建时间（硬 TTL 判据）
+  source: string
+  priority: number           // 0.0~1.0，recover() 升权
+  protected: boolean
+  lastAccessedAt: number     // 最近访问（软 TTL 判据，持续 recover 续命）
+  filePath?: string          // 关联文件路径（文件缓存一致性 stat 校验）
+  fileMtime?: number
+  fileSize?: number
 }
 ```
 
 | 配置 | 默认值 | 说明 |
 |------|--------|------|
+| ttlMs | 4h（14_400_000） | 软 TTL，基于 lastAccessedAt，持续 recover 续命 |
+| hardTtlMs | 24h（86_400_000） | 硬 TTL，基于 timestamp，强制过期上限 |
 | maxEntries | 2000 | 超过后加权淘汰 |
-| TTL | 30 min | 超时后 recover 返回 undefined |
 | priority floor | < 0.1 | 硬跳过淘汰 |
 | protected threshold | >= 100 | 保护不淘汰 |
 | dead-loop guard | 3 attempts | 淘汰循环安全门 |
 | consolation bonus | +0.5 | 幸存者加分 |
+
+**Flag 控制**：`contentArchive.ttlMs`（`SCREAM_CODE_CONTENT_ARCHIVE_TTL_MS`）覆盖 ttlMs 默认值。
 
 **淘汰公式：**
 ```
@@ -661,13 +679,23 @@ function stabilizePrefix(history: ContextMessage[]): ContextMessage[]
 ### 7.2 Observation Masking
 <!-- ref: maskToolObservations -->
 
-**文件**: `agent/context/masking.ts`
+**文件**: `utils/mask-tool-observations.ts`
 
 ```typescript
-function maskToolObservations(history: ContextMessage[], maxRecent?: number): ContextMessage[]
-  // 遮蔽旧 tool result，保留最近 maxRecent（默认 3）条
-  // 压缩/对话双路径独立处理
+const MASK_TEXT_WITH_TOOL = '[已遮蔽·{toolName}·已存档·ArchiveRecover可恢复]'
+const MASK_TEXT_DEFAULT  = '[已遮蔽·已存档·ArchiveRecover可恢复]'
+
+function maskToolObservations(
+  messages: readonly Message[],
+  keepLastN?: number,                          // flag mask.keepLastN (默认 3)，< 100 chars 不遮蔽
+  toolNameMap?: ReadonlyMap<string, string>   // {toolCallId → toolName}
+): Message[]
+  // 遮蔽旧 tool result，保留最近 keepLastN 条原文
+  // 纯函数，不修改 context.history
+  // 工具结果 < 100 chars 跳过遮蔽（短输出保护）
 ```
+
+**无接口变更**（新增可选参数，向下兼容）。
 
 ### 7.3 MicroCompaction 批次门控
 <!-- ref: MicroCompactionConfig -->
