@@ -5,6 +5,26 @@ import type { TokenUsage } from '@scream-code/ltod';
 
 // ── Types ────────────────────────────────────────────────────────
 
+/**
+ * 单条注入事件的详细记录。
+ * 由 turn/index.ts 构建，合并 InjectionRouter.dispatch() + VariantScheduler 两路来源。
+ * 每步写入 cache-audit-*.ndjson 的 injected 字段。
+ */
+export interface InjectionEvent {
+  /** 注入变体名称（如 'stuck', 'guard-feedback'） */
+  variant: string;
+  /** 是否成功注入到 context */
+  success: boolean;
+  /** 注意力级别（S/A/B/C/D — 仅成功注入时有） */
+  level?: string;
+  /** 注入位置（H/AFTER_SYSTEM / M/MID_CONTEXT / T/AFTER_TOOL_CALL） */
+  position?: string;
+  /** 失败原因（仅 success=false 时）：residual / dedup / quota / error / timeout */
+  reason?: string;
+  /** 注入内容预估 token 数 */
+  tokenEstimate?: number;
+}
+
 export interface CacheMetrics {
   hitRatio: number;          // cacheHit / (cacheHit + cacheMiss), 0 if no data
   hitTokens: number;
@@ -26,8 +46,8 @@ export interface AuditLogEntry {
   compacted: boolean;
   compactedTokens: number;
   alerts: string[];
-  /** 本轮注入的变体名列表，空表示无注入 */
-  injected: string[];
+  /** 本轮注入事件的详细记录，空数组表示无注入 */
+  injected: InjectionEvent[];
   /**
    * API 后端切换检测（heuristic）。
    * true 表示: model未变 + 无注入 + 非compaction + 前一步有缓存 + 当前缓存率骤降 + 输入量可比 → 疑似API key切换导致不同后端
@@ -117,9 +137,9 @@ export class AuditLogWriter {
       await writeFile(
         fp,
         `# cache-audit — 缓存命中审计\n` +
-        `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入变体 | modelChanged=true表示API切换过\n` +
-        `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
-        `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched\n` +
+        `# 用途: 诊断注入/compaction/API切换对KV缓存的影响 | sessionId按对话查 | injected列出本轮注入事件详情（变体/级别/位置/成败/原因）\n` +
+        `# 查: grep '"injected":\\[' cache-audit-*.ndjson | jq 'select(.injected[].level=="S")' | jq 'select(.injected[].success==false)' 找被拦截的注入\n` +
+        `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected[].{variant,success,level,position,reason,tokenEstimate},apiKeySwitched,archiveHit,archiveMiss,turnStepCount,pendingRecoverKeys,summaryTriggered\n` +
         `# started: ${new Date().toISOString()}\n`,
       );
     }
@@ -230,7 +250,7 @@ export function buildAuditEntry(
   metrics: CacheMetrics,
   compacted: boolean,
   compactedTokens: number,
-  injectedVariants: string[] = [],
+  injectedEvents: InjectionEvent[] = [],
   modelChanged = false,
   apiKeySwitched = false,
   archiveStats?: { hits: number; misses: number },
@@ -265,7 +285,7 @@ export function buildAuditEntry(
     compacted,
     compactedTokens,
     alerts,
-    injected: injectedVariants,
+    injected: injectedEvents,
     apiKeySwitched,
     archiveHit: archiveStats?.hits ?? 0,
     archiveMiss: archiveStats?.misses ?? 0,
