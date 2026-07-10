@@ -433,6 +433,18 @@ agent.injection.getRouter().disable('error-audit');
 agent.injection.getRouter().enable('error-audit');
 ```
 
+### 增量摘要注入（不经过本管线）
+
+**增量 LLM 摘要**（`compaction/summary.ts` + `turn/index.ts:updatePersistentSummary()`）：
+
+- 走 `kind: 'system_trigger'` → `appendSystemReminder()` → 消息尾部
+- **完全绕过** S/A/B/C/D 分级系统、残差调度、InjectionRouter 管线
+- 每 30 步触发一次调 LLM 做摘要，注入到尾部
+- 尾部内容变化不影响 KV cache 前缀 → 不影响 97.41% 缓存命中率
+- 不注册变体、不走 `shouldInjectByResidual()`、不受预算控制
+
+**为什么不在本系统内**：摘要是"每 30 步更新一次的快照"，不是"根据残差衰减决定是否注入的变体"。残差系统是为重复提醒设计的（衰减→再提醒），摘要只需要"一直存在、定期更新"，语义不同。
+
 ### 预留注入器（Phase22 规划）
 
 | 注入器 | 变体 | 等级 | 作用 |
