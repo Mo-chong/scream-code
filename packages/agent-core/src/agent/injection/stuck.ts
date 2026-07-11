@@ -44,7 +44,7 @@ export class StuckInjector extends DynamicInjector {
   private errorHistory: string[] = [];
 
   override getResidualConfig(): ResidualConfig {
-    return { weight: 30, decayPerStep: 0.88, threshold: 0.5, minStepGap: 3 };
+    return { weight: 0.6, decayPerStep: 0.88, threshold: 0.25, minStepGap: 3 };
   }
 
   override onContextClear(): void {
@@ -57,21 +57,34 @@ export class StuckInjector extends DynamicInjector {
   }
 
   protected override getInjection(): string | undefined {
-    const ctx = this._lastInjectContext;
-    if (!ctx?.stuckContext) return undefined;
+    // 不再依赖 stuckContext — 直接从 context.history 读取工具记录
+    const history = this.agent.context?.history;
+    if (!history || history.length === 0) return undefined;
 
-    const { stepToolCounts, getFileEditCount } = ctx.stuckContext!;
+    // 取最近 20 条 tool 消息（完整数据，未被 maskToolObservations 遮蔽）
+    const toolMsgs: any[] = [];
+    for (let i = history.length - 1; i >= 0 && toolMsgs.length < 20; i--) {
+      const msg = history[i] as any;
+      if (msg.role === 'tool') toolMsgs.unshift(msg);
+    }
+    if (toolMsgs.length === 0) return undefined;
 
     // ── 1. 更新历史 ──
-    const toolKeys = Object.keys(stepToolCounts);
-    const editToolKeys = toolKeys.filter(k => k.startsWith('edit_'));
-    const errorToolKeys = toolKeys.filter(k => k.startsWith('error_') && (stepToolCounts[k] ?? 0) > 0);
+    for (const msg of toolMsgs) {
+      const text = msg.content?.[0]?.text ?? '';
+      if (!text) continue;
 
-    for (const k of editToolKeys) {
-      this.editFileHistory.unshift(k);
-    }
-    for (const k of errorToolKeys) {
-      this.errorHistory.unshift(k);
+      // 检测文件编辑：从 Edit/Write 结果提取文件名
+      const fileMatch = text.match(/['\u201C]([\w\/\\\-\.]+)['\u201D]|file ['\u201C]([\w\/\\\-\.]+)['\u201D]/i);
+      if (fileMatch) {
+        const file = fileMatch[1] || fileMatch[2] || 'unknown';
+        this.editFileHistory.unshift(file);
+      }
+
+      // 检测报错
+      if (/error|fail|not found|exit code \d|TypeError/i.test(text)) {
+        this.errorHistory.unshift(text.slice(0, 100));
+      }
     }
     trim(this.editFileHistory, 30);
     trim(this.errorHistory, 30);

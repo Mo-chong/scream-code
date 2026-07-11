@@ -407,26 +407,27 @@ Layer 0: 位置策略 InsertPosition (position-strategy.ts) ← 注入锚点
 Cross:   VariantScheduler (variant-registry.ts)   ← 34 变体残差调度
 ```
 
-### 6.2 14 个注册注入器
+### 6.2 17 个注册注入器（Phase37）
 
-| 文件 | 变体 | 登记 | 触发 |
+| 文件 | 变体 | 等级 | 触发 |
 |------|------|------|------|
 | `user-prefs.ts` | `user_prefs` | S | 每轮 |
+| `decision-trace.ts` 🆕 | `decision_trace` | B | ILR>0.6 + step=1 |
 | `intent-injector.ts` | `intent_guidance` | A/B | 意图检测命中 |
 | `plan-mode.ts` | `plan_mode` | B | 计划模式 step |
 | `permission-mode.ts` | `permission_mode` | A/B | 权限模式切换 |
 | `working-set.ts` | `working_set` | B/C | working set 变化 |
-| `error-audit-injector.ts` | `error-audit` | B | FAA 趋势检测（超时/膨胀/分析瘫痪） |
+| `error-audit-injector.ts` | `error-audit` | B | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** |
+| `session-summary.ts` 🆕 | `session_summary` | B | step=1 / compaction 后 |
+| `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | B | ILR>0.3 + hasHighValue |
 | `goal.ts` | `goal` | C | 计划模式 step |
 | `todo-list.ts` | `todo_list` | C | todo 列表变化 |
 | `wolfpack.ts` | `wolfpack` | C | WolfPack 调用 |
 | `plugin-session-start.ts` | `plugin_session_start` | C | 插件会话启动 |
 | `anti_confabulation.ts` | `system_ref_anti_confabulation` | C | ConfabulationDetector ≥2 |
 | `quality.ts` | `quality_escalate` | —(跳过预算) | QualityDetector 信号 |
-| `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2 |
-| `guard-injector.ts` | `guard-feedback` | C | checkGuard Rule 2/3/4 观察 |
-
-> 迁移历程：`guard-injector.ts` 原为废弃空壳，Phase33 迁移完成——实现 setGuardData/getInjection、注册、走统一管线。
+| `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） |
+| `guard-injector.ts` | `guard-feedback` | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） |
 
 ### 6.3 残差注意力公式
 

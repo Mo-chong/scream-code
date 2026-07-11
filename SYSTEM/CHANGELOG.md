@@ -666,3 +666,34 @@ updated: 2026-07-11
 #### 文档
 - `SYSTEM/injection-system.md` — 增量摘要接入管线章节重写
 - `DECISIONS/分析-增量摘要设计与实现偏差复盘.md` — 全篇重写 §§10-12
+
+### Phase37 — 全部完成：工具恢复 + 决策链 + 注意力信号 + stuck/ILR/error-audit 优化 [2026-07-11]
+
+#### 新功能
+- **ToolResultRecoveryInjector**（`tool-result-recovery.ts`）— 替代 PersistentSummaryInjector。ILR>0.3 时恢复被 mask 的关键 tool 结果，按优先级 ERROR>FILE>API>SEARCH>STATUS 提取，含 hasHighValue 过滤
+- **DecisionTraceInjector**（`decision-trace.ts`）— ILR>0.6 时注入决策链快照 + 循环检测告警（连续 4 次相同操作类型）
+- **注意力信号闭环** — `turn/index.ts:2020-2033` `parseAttentionSignals()`，从 AI 回复提取 [DONE]/[NEED]/[CONFIRM] 存入 crossTurnFlags.attentionSignals
+
+#### 修复
+- **stuck** `injection/stuck.ts:47,61` — weight 30→0.6（不霸屏）；从 `context.history` 直接读取替代 `stuckContext`（1773 次失败归零）
+- **error-audit** `error-audit-injector.ts:63-95` — 删除分析瘫痪支柱（不再因 Read/Grep ≥5 警告）
+- **guard-injector** `guard-injector.ts:55` — minStepGap: 0→3, threshold: 0.35→0.25
+
+#### 优化
+- **ILR 数据驱动优化** `tool-result-recovery.ts:106-109` — 基于 7 天实盘数据（17760 轮，93.2% ILR≤0.3）：加 hasHighValue 过滤，纯 STATUS 内容不触发
+- **pushHistory 过滤** `context/index.ts:488-491` — injection/system_trigger 跳过 replayBuilder.push（不触发 TUI 重渲染）
+
+#### 注册变更
+| 变体 | 文件 | 状态 |
+|------|------|------|
+| `tool-result-recovery` | `tool-result-recovery.ts` | ✅ 新增 |
+| `decision-trace` | `decision-trace.ts` | ✅ 新增 |
+| `session-summary` | `session-summary.ts` | ✅ 已转入统一管线 |
+| `error-audit` | `error-audit-injector.ts` | ✅ 仍注册（分析瘫痪已砍） |
+| 14 个既有注入器 | — | ✅ 不变 |
+| **总数** | **17 个** | ✅ 全部注册 |
+
+#### 文档
+- `SYSTEM/injection-system.md` — 全篇：17 注入器表格 + 注册码 + 版本号
+- `SYSTEM/architecture-overview.md` — §6.2 更新为 17 注入器表
+- `DECISIONS/分析-增量摘要设计与实现偏差复盘.md` — 更新所有计划为已完成

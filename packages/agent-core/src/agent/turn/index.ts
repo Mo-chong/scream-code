@@ -227,7 +227,9 @@ export class TurnFlow {
     lastTurnHadDeviation: boolean;
     /** 🆕 Phase15: 跨回合 S→S 升级计数（跨回合累积，behaviorObserved 时单个变体重置） */
     behaviorViolations: Record<string, number>;
-  } = { lastTurnHadGuardRule1: false, lastTurnHadDeviation: false, behaviorViolations: {} };
+    /** 🆕 Phase37d: 注意力信号 — 上轮 AI 表达的状态标记 */
+    attentionSignals: { done: boolean; need: boolean; confirm: boolean };
+  } = { lastTurnHadGuardRule1: false, lastTurnHadDeviation: false, behaviorViolations: {}, attentionSignals: { done: false, need: false, confirm: false } };
   /** 🆕 Phase14 fix: Guard Rule 1 单独追踪（区分于 confabulationBlocked） */
   private guardRule1FiredThisTurn = false;
 
@@ -1748,7 +1750,10 @@ export class TurnFlow {
     // 🆕 Phase15: 行为已观察的变体 → 重置跨回合违规计数
     this.resetObservedBehaviorViolations();
 
-    // Step 3: 偏差链修复 + turn-level 统计
+    // Step 3: 注意力信号解析 [DONE]/[NEED]/[CONFIRM]
+    this.parseAttentionSignals();
+
+    // Step 4: 偏差链修复 + turn-level 统计
     this.tryResolveDeviationChain();
     if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
     if (this.editCalledSuccessThisStep) this.totalStepsWithEditsThisTurn++;
@@ -1999,14 +2004,34 @@ export class TurnFlow {
       const record = this.variantRegistry.get(variant);
       // 正常重置：LLM 表现出改正行为
       if (record?.behaviorObserved === true) {
-        delete this.crossTurnFlags.behaviorViolations[variant];
+        delete this.crossTurnFlags!.behaviorViolations[variant];
         continue;
       }
       // 强制重置：S→S 升级连续 6 次无改善 → 防止偏差链死锁
-      if (this.crossTurnFlags.behaviorViolations[variant] >= 6) {
-        delete this.crossTurnFlags.behaviorViolations[variant];
+      const flags = this.crossTurnFlags as any;
+      if ((flags.behaviorViolations[variant] ?? 0) >= 6) {
+        delete flags.behaviorViolations[variant];
       }
     }
+  }
+
+  /** 🆕 Phase37d: 注意力信号解析 — 从 AI 回复中提取 [DONE]/[NEED]/[CONFIRM] */
+  private parseAttentionSignals(): void {
+    const history = this.agent.context.history;
+    let text = '';
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg && msg.role === 'assistant') {
+        const part = msg.content?.[0];
+        if (part && typeof part === 'object' && 'text' in part) {
+          text = (part as any).text as string;
+        }
+        break;
+      }
+    }
+    this.crossTurnFlags.attentionSignals.done = /\[DONE\]|\[done\]/i.test(text);
+    this.crossTurnFlags.attentionSignals.need = /\[NEED\]|\[need\]/i.test(text);
+    this.crossTurnFlags.attentionSignals.confirm = /\[CONFIRM\]|\[confirm\]/i.test(text);
   }
 
   /** SceneMemoryDetector — 用户说了"上次/以前"但 AI 没查记忆 */

@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-08
+updated: 2026-07-11
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -72,7 +72,23 @@ inject(content, origin):
   6. 注入为 <system-reminder> 消息
 ```
 
-### 1.5 停止条件
+### 1.5 注意力信号闭环 🆕
+<!-- ref: attentionSignals -->
+
+在每轮 afterStep 结束时自动解析 AI 回复中的状态标记，存入 `crossTurnFlags.attentionSignals`：
+
+```typescript
+// turn/index.ts:2020-2033
+parseAttentionSignals():
+  [DONE]   → signals.done = true    — AI 确认已完成
+  [NEED]   → signals.need = true    — AI 表示还需要更多
+  [CONFIRM] → signals.confirm = true — AI 需要用户确认
+```
+
+> Phase37 (2026-07-11) 新增。供行为规则/注入器在下一轮决策时参考 AI 的显式意图。
+> 不会自动触发任何动作，只是标记。消费方需要单独实现。
+
+### 1.6 停止条件
 <!-- ref: stopTriggers -->
 
 | 条件 | 触发位置 | 说明 |
@@ -183,29 +199,32 @@ class InjectionManager {
 }
 ```
 
-### 3.2 17 个注入器（全部注册，统一管线）
+### 3.2 17 个注入器（全部注册，统一管线 Phase37）
 <!-- ref: injectors -->
 
-| 注入器 | 源文件 | 变体数 | 位置 | 触发条件 | 注册 |
-|--------|--------|--------|------|---------|------|
-| UserPrefsInjector | `agent/injection/user-prefs.ts` | 1 | AFTER_SYSTEM | 每轮 | ✅ |
-| IntentGuidanceInjector | `agent/injection/intent-injector.ts` | 1 | AFTER_SYSTEM | 意图检测命中 | ✅ |
-| PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ |
-| PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ |
-| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | Phase B' `recordFact` |
-| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | FAA 趋势检测（超时/膨胀/分析瘫痪） | ✅ | Phase B' `recordFact`, Phase34 2-Pillar |
-| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | Phase B' `recordFact` |
-| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | Phase B' `recordFact` |
-| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | Phase B' `recordFact` |
-| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | Phase B' `recordFact` |
-| AntiConfabulationInjector | `agent/injection/anti_confabulation.ts` | 1 | AFTER_TOOL_CALL | ConfabulationDetector ≥2 | ✅ |
-| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ |
-| StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步 | ✅ |
-| GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察 | ✅ | Phase B' `recordFact` |
+| 注入器 | 源文件 | 变体数 | 位置 | 触发条件 | 注册 | 备注 |
+|--------|--------|--------|------|---------|------|------|
+| UserPrefsInjector | `agent/injection/user-prefs.ts` | 1 | AFTER_SYSTEM | 每轮 | ✅ | |
+| DecisionTraceInjector 🆕 | `agent/injection/decision-trace.ts` | 1 | AFTER_SYSTEM | ILR>0.6 + step=1 | ✅ | Phase37 |
+| IntentGuidanceInjector | `agent/injection/intent-injector.ts` | 1 | AFTER_SYSTEM | 意图检测命中 | ✅ | |
+| PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ | |
+| PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ | |
+| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | |
+| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** | ✅ | Phase37 |
+| SessionSummaryInjector 🆕 | `agent/injection/session-summary.ts` | 1 | MID_CONTEXT | step=1 / compaction 后 | ✅ | Phase33 |
+| ToolResultRecoveryInjector 🆕 | `agent/injection/tool-result-recovery.ts` | 1 | MID_CONTEXT | ILR>0.3 + hasHighValue | ✅ | Phase37 |
+| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | |
+| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | |
+| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | |
+| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | |
+| AntiConfabulationInjector | `agent/injection/anti_confabulation.ts` | 1 | AFTER_TOOL_CALL | ConfabulationDetector ≥2 | ✅ | |
+| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ | |
+| StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步（weight 30→0.6） | ✅ | Phase37 |
+| GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ | Phase37 |
 
 > 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
 > `MemoryRulesInjector` 不存在（早期概念文件）。
-> GuardInjector 迁移历程：Phase22 创建空壳（废弃未注册）→ Phase33 完成迁移（setGuardData/getInjection，注册 `'guard-feedback'`，走统一管线）。
+> Phase37（07-11）：新增 DecisionTraceInjector + ToolResultRecoveryInjector + SessionSummaryInjector。stuck weight=30→0.6。guard-injector minStepGap=0→3。error-audit 删除分析瘫痪支柱。
 > **完整变体列表见** `variant-registry.ts:288-345`。
 
 ### 3.3 VariantScheduler（残差调度，取代旧 QUOTA_TABLE）
@@ -269,7 +288,7 @@ protectHighLevelReminders(highOrigins: Set<string>): void
 recordFact(key: string, value: string, level?: string): void
   // 记录一个事实到 _contextFacts Map，供尾部聚合使用
   // key: 注入器标识（如 'error-audit', 'working-set'）
-  // value: 事实内容（如 '检测到连续超时；检测到分析瘫痪'）
+  // value: 事实内容（如 '检测到连续超时'）
   // level: 'info' | 'warn' | 'error'（默认 'info'），影响显示图标
   // 由各注入器在 getInjection() 中调用
   // 事实在每次 dispatch 周期开始时自动清空
@@ -290,6 +309,25 @@ appendSystemReminder(content, origin, undefined)  // 不设 protected
 appendSystemReminder(content, origin, true)        // 设 protected
 appendSystemReminder(content, origin, false)       // 设 protected = true（语义上"不保护"仍设 true）
 ```
+
+### 3.7 pushHistory 过滤 🔒
+<!-- ref: pushHistoryFilter -->
+
+```typescript
+// agent/context/index.ts:488-491
+private pushHistory(...messages: ContextMessage[]): void {
+  for (const message of messages) {
+    // 注入/系统触发的消息不进 replay → 不触发 TUI 重渲染 → 不闪烁
+    if (message.origin?.kind === 'injection' || message.origin?.kind === 'system_trigger') {
+      continue;
+    }
+    this.agent.replayBuilder.push({ type: 'message', message });
+  }
+}
+```
+
+> Phase37 (2026-07-11) 新增过滤。origin.kind 为 `injection`（DynamicInjector）或 `system_trigger`（行为规则/收敛门）的消息跳过 replayBuilder，不影响 _history（AI 仍可看到）。
+> 配合 session-replay.ts:235 的回放过滤，形成双保险。
 
 ---
 
@@ -1176,17 +1214,18 @@ class KnowledgeLookupTool implements StepTool
 | prepare_edit/write/search/memory/bash_file/verify | variant | 6 variants, weight 0.5–0.8 | variant-registry.ts |
 | post_edit/search/write_large/verify_pass/verify_fail/memory | variant | 6 variants, weight 0.5–0.9 | variant-registry.ts |
 | step_after_edit/search/verify_fail | variant | 3 variants, weight 0.5–0.8 | variant-registry.ts |
-| guard_feedback_rule_1/2/3/4 | variant | 4 variants, weight 0.7–0.9 | variant-registry.ts |
+| guard_feedback_rule_1/2/3/4 | variant | 4 variants, weight 0.7–0.9, minStepGap:3（Phase37: 0→3） | guard-injector.ts |
 | feedback_positive | variant | weight:0.6, decay:0.80, thr:0.4 | variant-registry.ts |
 | scene_memory_recall | variant | weight:0.8, decay:0.88, thr:0.3 | variant-registry.ts |
 | step_code_ref_quality | variant | weight:0.5, decay:0.85, thr:0.4 | variant-registry.ts |
 | code_quality_feedback | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
-| system_ref_stuck | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| system_ref_stuck | variant | weight:0.6（Phase37: 30→0.6）, decay:0.88, thr:0.25, minStepGap:3 | stuck.ts |
 | truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
-| error-audit | variant | weight:0.8, decay:0.85, thr:0.35 | variant-registry.ts |
-| **session_summary** | **variant** | **weight:0.8, decay:0.88, thr:0.3** | **session-summary.ts (新建)** |
-| **persistent_summary** | **variant** | **weight:0.9, decay:0.90, thr:0.2** | **persistent-summary.ts (新建)** |
+| error-audit | variant | weight:0.5, decay:0.85, thr:0.2, minStepGap:2（Phase37: 分析瘫痪已砍） | error-audit-injector.ts |
+| session_summary | variant | weight:0.8, decay:0.88, thr:0.3 | session-summary.ts |
+| tool_result_recovery 🆕 | variant | weight:0.6, decay:0.85, thr:0.15, minStepGap:3 + hasHighValue过滤 | tool-result-recovery.ts |
+| decision_trace 🆕 | variant | weight:0.5, decay:0.85, thr:0.15, minStepGap:5 | decision-trace.ts |
+| persistent_summary | variant | ❌ 已替换为 tool_result_recovery | persistent-summary.ts（保留可回退） |
 
-> Phase36: `session_summary` 和 `persistent_summary` 新建为 DynamicInjector，注册到 `manager.ts` 的 `injectors[]`
-> 数组，与既有 15 个注入器共享 `maxInjectionsPerStep` 预算 + 6 道门。
-> 废止 `turn/index.ts:833-840` 和 `turn/index.ts:843-846` 的直接 `this.inject()` 调用。
+> Phase37 (2026-07-11): stuck weight 30→0.6; guard-injector minStepGap 0→3; error-audit 删分析瘫痪支柱;
+> 新增 tool_result_recovery + decision_trace; persistent_summary 退役。

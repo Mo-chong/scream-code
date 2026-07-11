@@ -16,6 +16,8 @@ import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
 import { PersistentSummaryInjector } from './persistent-summary';
+import { ToolResultRecoveryInjector } from './tool-result-recovery';
+import { DecisionTraceInjector } from './decision-trace';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -46,7 +48,11 @@ export class InjectionManager {
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
       ['session-summary', new SessionSummaryInjector(agent)],
-      ['persistent-summary', new PersistentSummaryInjector(agent)],
+      // [替换 2026-07-11] PersistentSummaryInjector → ToolResultRecoveryInjector
+      // PersistentSummaryInjector 基于 ILR 恢复，见 tool-result-recovery.ts
+      // 旧文件 persistent-summary.ts 保留不动，可回退
+      ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
+      ['decision-trace', new DecisionTraceInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);

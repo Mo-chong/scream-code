@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-08
+updated: 2026-07-11
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -10,9 +10,10 @@ updated: 2026-07-08
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-management.md`](attention-management.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 14 个 DynamicInjector（路径 A 原生 11 个 + 路径 B 迁移 2 个 + GuardInjector 接管）。
+> 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个：ToolResultRecovery / DecisionTrace / SessionSummary）。
 > 路径 B 已清零（Phase22，2026-07-08）。详见 ZHU/DECISIONS/方案-注入系统三路径统一设计.md。
-> 路径 C (GuardInjector) 已完成迁移（Phase33，2026-07-10）— 注册并走统一注入管线。
+> 路径 C (GuardInjector) 已完成迁移（Phase33，2026-07-10）。
+> Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化 | 注意力信号闭环 | pushHistory 过滤
 
 ---
 
@@ -76,9 +77,28 @@ export interface VariantMeta {
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
-| `system_ref_stuck` | 1.0 | 0.85 | 0.18 | 3 | D | 痛点感知：检测 AI 钻牛角尖后注入文档导航 |
+| `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: ctx.history替代stuckContext） |
+| `system_ref_anti_confabulation` | 0.6 | 0.85 | 0.25 | 3 | C | 反事实检测 ≥2 步 |
+| `quality_escalate` | — | — | — | — | C | 质量偏差检测（跳过残差） |
+| `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
+| `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
+| `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
+| `tool_result_recovery` 🆕 | 0.6 | 0.85 | 0.15 | 3 | B | 被mask的关键tool结果恢复 |
+| `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
+| `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
+| `prepare_*` (6变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入 |
+| `post_*` (6变体) | 0.20 | 0.50 | 0.3 | 2 | C | 执行后注入 |
+| `step_after_*` (3变体) | 0.20 | 0.50 | 0.3 | 2 | C | 步后注入 |
+| `guard_feedback_*` (4变体) | 0.7-0.9 | 0.85 | 0.25 | 3 | C | 行为规则反馈（Phase37: minStepGap 0→3） |
+| `feedback_positive` | 0.6 | 0.80 | 0.4 | 3 | S | 正向反馈 |
+| `scene_memory_recall` | 0.8 | 0.88 | 0.3 | 3 | B | 场景记忆召回 |
+| `step_code_ref_quality` | 0.5 | 0.85 | 0.4 | 2 | C | 代码质量参考 |
+| `code_quality_feedback` | 0.7 | 0.85 | 0.35 | 2 | C | 代码质量反馈 |
+| `truncation_recover_guard` | 0.7 | 0.85 | 0.35 | 2 | C | 截断恢复守卫 |
+| `system_trigger` (1变体) | 0.15 | 0.95 | 0.1 | 1 | S | 系统触发（bypass，不走残差） |
+| `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
 
-### 残差衰减函数
+> Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
 
 ```typescript
 export function getScore(variant: string, stepDelta: number): number {
@@ -338,29 +358,32 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 ## 6. 注入器清单 (Injector Catalog)
 
 > 别名：注入器列表 / DynamicInjector 清单
-> 对应代码：DynamicInjector (injection/injector.ts) + 14 个子类（14 注册）
+> 对应代码：DynamicInjector (injection/injector.ts) + 17 个子类（17 注册）
 
 ### 当前注入器
 
 | 文件 | 变体名 | 位置 | 等级 | 触发条件 | 注册 |
 |------|--------|------|------|---------|------|
 | `user-prefs.ts` | `user_prefs` | AFTER_SYSTEM | S | 每轮 | ✅ |
+| `decision-trace.ts` 🆕 | `decision_trace` | AFTER_SYSTEM | B | ILR>0.6 + step=1 | ✅ |
 | `intent-injector.ts` | `intent_guidance` | AFTER_SYSTEM | A/B | 意图检测命中 | ✅ |
 | `plan-mode.ts` | `plan_mode` | AFTER_SYSTEM | B | 计划模式 step | ✅ |
 | `permission-mode.ts` | `permission_mode` | AFTER_SYSTEM | A/B | 权限模式切换 | ✅ |
 | `working-set.ts` | `working_set` | MID_CONTEXT | B/C | working set 变化 | ✅ |
-| `error-audit-injector.ts` | `error-audit` | MID_CONTEXT | B | FAA 趋势检测（超时死循环/耗时膨胀/分析瘫痪） | ✅ |
+| `error-audit-injector.ts` | `error-audit` | MID_CONTEXT | B | FAA 趋势检测（超时死循环/耗时膨胀）**分析瘫痪已砍** | ✅ |
 | `goal.ts` | `goal` | MID_CONTEXT | C | 计划模式 step | ✅ |
 | `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
+| `session-summary.ts` 🆕 | `session_summary` | MID_CONTEXT | B | step=1 / compaction 后 | ✅ |
+| `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ✅ |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
 | `anti_confabulation.ts` | `system_ref_anti_confabulation` | AFTER_TOOL_CALL | C | ConfabulationDetector ≥2 | ✅ |
 | `quality.ts` | `quality_escalate` | AFTER_TOOL_CALL | —(跳过 budget) | QualityDetector 信号 | ✅ |
-| `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2 | ✅ |
-| `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | checkGuard Rule 2/3/4 观察 | ✅ |
+| `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
+| `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ |
 
-> **注册总数**: 14 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
-> `memory-rules.ts` 不存在——早期概念文件，代码仓库中无对应源文件。
+> **注册总数**: 17 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
+> Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
 ### DynamicInjector 基类
@@ -414,10 +437,10 @@ export abstract class DynamicInjector {
 - 触发条件（2 支柱，顺序执行，最多触发 1 条）:
   1. **超时死循环（P0）**: Bash 连续 ≥2 次失败且 `durationMs > 30_000ms` → `FATAL|TIMEOUT`
   2. **耗时膨胀（P0）**: 同工具类型最新耗时 > 均值 ×1.5（仅支柱一未命中时） → `WARN|INFLATE`
-  3. **分析瘫痪（P0）**: Read+Grep ≥5 且 Edit+Write === 0 → `WARN|ANALYSIS`
+  ~~3. 分析瘫痪（已删除 Phase37）~~
 - 注入格式: AI 原生 3 行定长（AI 50ms 解析）→ `PREFIX|CAT|key=val\nROOT|根因\nACT|opt1|opt2|opt3`
 - Context Facts: 命中时调用 `recordFact('error-audit', ..., 'error')`
-- VARIANT_META: `{ weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 2 }`
+- VARIANT_META: `{ weight: 0.5, decayPerStep: 0.85, threshold: 0.2, minStepGap: 2 }`
 - **运行时接线**: 需要 `agent.fileActionAudit` 实例在 agent 构造时注入，框架已就绪
 
 ### 注入器注册管理
@@ -439,11 +462,16 @@ const injectors: [string, DynamicInjector][] = [
   ['quality_escalate', new QualityInjector()],
   ['intent_guidance', new IntentGuidanceInjector(agent)],
   ['error-audit', new ErrorAuditInjector(agent)],
+  ['guard-feedback', this.guardInjector],
+  ['session-summary', new SessionSummaryInjector(agent)],
+  ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
+  ['decision-trace', new DecisionTraceInjector(agent)],
 ];
 injectors.forEach(([id, inj]) => this.router.register(id, inj));
 ```
 
-> **注意**: `guard-injector.ts`（GuardInjector）已在 `manager.ts` 注册，通过统一管线调度。
+> **注册总数**: 17 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
+> Phase37 调整：stuck weight=30→0.6 + context.history 替代 stuckContext | guard-injector minStepGap=0→3 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化。
 
 ### 运行时停用/启用
 

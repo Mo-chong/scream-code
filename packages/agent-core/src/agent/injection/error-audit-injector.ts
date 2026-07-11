@@ -8,9 +8,6 @@
  *     - 连续≥2次 Bash 超时 → FATAL|TIMEOUT
  *     - 最新工具耗时 > 滚动均值×1.5 → WARN|INFLATE
  *
- *   支柱二（P0）：分析瘫痪
- *     - Read+Grep ≥5 且 0 Edit+Write → WARN|ANALYSIS
- *
  * 注入格式：AI 原生 3 行定长（AI 50ms 解析）
  *   PREFIX|CAT|key=value
  *   ROOT|cause
@@ -19,7 +16,7 @@
  * 注册 variant: 'error-audit'
  */
 
-import { DynamicInjector } from './injector';
+import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
 import type { Agent } from '..';
 import type { FileActionAuditEntry } from '../audit/file-action-audit';
@@ -62,10 +59,6 @@ export class ErrorAuditInjector extends DynamicInjector {
       if (inflateResult) blocks.push(inflateResult);
     }
 
-    // ── 支柱二：分析瘫痪（Read/Grep ≥5 且 0 Edit/Write）──
-    const analysisResult = this.detectAnalysisParalysis(entries);
-    if (analysisResult) blocks.push(analysisResult);
-
     if (blocks.length === 0) return undefined;
 
     const injection = blocks.join('\n');
@@ -75,7 +68,6 @@ export class ErrorAuditInjector extends DynamicInjector {
     if (timeoutResult) facts.push('检测到连续超时');
     if (!timeoutResult && blocks.some((b) => b.startsWith('WARN|INFLATE')))
       facts.push('检测到耗时膨胀');
-    if (analysisResult) facts.push('检测到分析瘫痪');
     this.agent.context.recordFact?.('error-audit', facts.join('；'), 'error');
 
     return injection;
@@ -147,24 +139,4 @@ export class ErrorAuditInjector extends DynamicInjector {
     return null;
   }
 
-  /**
-   * 分析瘫痪检测 — Read/Grep ≥5 且 Edit+Write === 0
-   */
-  private detectAnalysisParalysis(
-    entries: FileActionAuditEntry[],
-  ): string | null {
-    const reads = entries.filter((e) => e.action === 'Read').length;
-    const greps = entries.filter((e) => e.action === 'Grep').length;
-    const writes = entries.filter(
-      (e) => e.action === 'Edit' || e.action === 'Write',
-    ).length;
-    if (reads + greps >= 5 && writes === 0) {
-      return [
-        `WARN|ANALYSIS|reads=${reads} greps=${greps}`,
-        'ROOT|持续读取/搜索但无实质修改',
-        'ACT|停止读取新文件|形成完整方案再执行|直接编辑已知目标',
-      ].join('\n');
-    }
-    return null;
-  }
 }
