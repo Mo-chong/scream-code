@@ -57,6 +57,8 @@ export interface AppState {
   cacheMissTokens: number;
   lastStepCacheHit: number;
   lastStepCacheMiss: number;
+  lastStepTokenInput: number;
+  lastStepTokenInput: number;
   isCompacting: boolean;
   lastCompactionFinishedAt: number | undefined;
   autoCompactionCount: number;

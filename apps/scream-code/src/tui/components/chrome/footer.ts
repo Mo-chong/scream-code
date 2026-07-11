@@ -445,8 +445,8 @@ export class FooterComponent implements Component {
     const lines = [truncateToWidth(line1, width)];
 
     // 第2行：左路径 + 居中缓存率
-    const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens } = state;
-    const stepTotal = lastStepCacheHit + lastStepCacheMiss;
+    const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens, lastStepTokenInput } = state;
+    const stepTotal = lastStepTokenInput;
     const totalTotal = cacheHitTokens + cacheMissTokens;
     {
       const dim = chalk.hex(colors.textDim);

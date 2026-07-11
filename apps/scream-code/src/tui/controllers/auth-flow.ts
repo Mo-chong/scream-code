@@ -119,6 +119,8 @@ export class AuthFlowController {
       cacheMissTokens: 0,
       lastStepCacheHit: 0,
       lastStepCacheMiss: 0,
+      lastStepTokenInput: 0,
+      lastStepTokenInput: 0,
     });
   }
 }
