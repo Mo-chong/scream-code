@@ -1,20 +1,8 @@
 /**
- * ErrorAuditInjector — FAA 再生（2-Pillar 消费者终审版）
+ * ErrorAuditInjector — 在 tool 错误后将审计追踪注入上下文。
  *
- * 废弃旧功能"马后炮罗列失败"（与 guard/偏差链重叠），
- * 改为双支柱注入 FAA 全量操作记录中的趋势信号：
- *
- *   支柱一（P0）：超时死循环+耗时膨胀
- *     - 连续≥2次 Bash 超时 → FATAL|TIMEOUT
- *     - 最新工具耗时 > 滚动均值×1.5 → WARN|INFLATE
- *
- *   支柱二（P0）：分析瘫痪
- *     - Read+Grep ≥5 且 0 Edit+Write → WARN|ANALYSIS
- *
- * 注入格式：AI 原生 3 行定长（AI 50ms 解析）
- *   PREFIX|CAT|key=value
- *   ROOT|cause
- *   ACT|opt1|opt2|opt3
+ * 当最近一轮 toolCall 出现失败时，查询 FileActionAudit 最近记录，
+ * 将审计摘要注入为 system reminder，帮助 AI 排查根因。
  *
  * 注册 variant: 'error-audit'
  */
@@ -31,140 +19,38 @@ export class ErrorAuditInjector extends DynamicInjector {
     super(agent);
   }
 
-  /** 注入到上下文中间位置（靠近尾部，不干扰决策） */
+  /** 审计错误摘要注入到上下文中间位置 */
   override getTargetPosition(): InsertPosition {
     return InsertPosition.MID_CONTEXT;
   }
 
-  /** 残差控制：降低每轮注入频率 */
-  override getResidualConfig(): ResidualConfig | undefined {
-    return { weight: 0.5, decayPerStep: 0.85, minStepGap: 2, threshold: 0.2 };
-  }
-
   protected getInjection(): string | undefined {
+    // 仅当存在 fileActionAudit 实例才注入
     const audit = (this.agent as any).fileActionAudit as
       | { getRecentEntries: (n: number) => FileActionAuditEntry[] }
       | undefined;
     if (!audit) return undefined;
 
-    const entries = audit.getRecentEntries(10);
-    if (entries.length < 2) return undefined;
+    const recent = audit.getRecentEntries(5);
+    const failures = recent.filter((e) => !e.success);
+    if (failures.length === 0) return undefined;
 
-    const blocks: string[] = [];
+    const summary = failures
+      .map(
+        (f) =>
+          `- ${f.action} (${f.toolCallId}) — ${f.resultPreview}${
+            f.durationMs ? ` — ${f.durationMs}ms` : ''
+          }`,
+      )
+      .join('\n');
 
-    // ── 支柱一：超时死循环（连续≥2次 Bash 超时）──
-    const timeoutResult = this.detectConsecutiveTimeouts(entries);
-    if (timeoutResult) blocks.push(timeoutResult);
-
-    // ── 支柱一：耗时膨胀（latest > avg×1.5），仅超时未命中时检查 ──
-    if (!timeoutResult) {
-      const inflateResult = this.detectDurationInflation(entries);
-      if (inflateResult) blocks.push(inflateResult);
-    }
-
-    // ── 支柱二：分析瘫痪（Read/Grep ≥5 且 0 Edit/Write）──
-    const analysisResult = this.detectAnalysisParalysis(entries);
-    if (analysisResult) blocks.push(analysisResult);
-
-    if (blocks.length === 0) return undefined;
-
-    const injection = blocks.join('\n');
-
-    // 记录事实供 [Context Facts] 聚合
-    const facts: string[] = [];
-    if (timeoutResult) facts.push('检测到连续超时');
-    if (!timeoutResult && blocks.some((b) => b.startsWith('WARN|INFLATE')))
-      facts.push('检测到耗时膨胀');
-    if (analysisResult) facts.push('检测到分析瘫痪');
-    this.agent.context.recordFact?.('error-audit', facts.join('；'), 'error');
-
-    return injection;
-  }
-
-  /**
-   * 连续超时检测 — 在 entries 流中找连续 2+ 条 Bash 超时
-   *
-   * 超时判别：Bash 失败 + durationMs > TIMEOUT_MS_THRESHOLD
-   *   ≥30000ms -> 超时（工具报错通常在 <5s 内返回）
-   * 非超时 / 成功 → 重置计数器，确保真正连续
-   */
-  private readonly TIMEOUT_MS_THRESHOLD = 30_000;
-
-  private detectConsecutiveTimeouts(
-    entries: FileActionAuditEntry[],
-  ): string | null {
-    let consecutive = 0;
-    for (const e of entries) {
-      const isTimeout =
-        e.action.startsWith('Bash') &&
-        !e.success &&
-        e.durationMs > this.TIMEOUT_MS_THRESHOLD;
-      if (isTimeout) {
-        consecutive++;
-        if (consecutive >= 2) {
-          return [
-            `FATAL|TIMEOUT|action=Bash consecutive=${consecutive} max=${e.durationMs}ms`,
-            'ROOT|连续超时可能导致死循环',
-            'ACT|中断当前策略|检查阻塞条件|改用更直接的工具链',
-          ].join('\n');
-        }
-      } else {
-        consecutive = 0;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * 耗时膨胀检测 — 同工具类型内最新耗时 > 滚动均值×1.5
-   *
-   * 只对比相同 action 的条目，避免跨工具误报
-   * （如 Bash 构建耗时 > Read 均值不触发）
-   * 仅在同类型 ≥3 条有效数据时启用
-   */
-  private detectDurationInflation(
-    entries: FileActionAuditEntry[],
-  ): string | null {
-    const latest = entries[0];
-    if (!latest || !latest.durationMs || latest.durationMs <= 0) return null;
-
-    const sameTool = entries.filter(
-      (e) => e.action === latest.action && e.success && e.durationMs > 0,
+    // Phase B': record as context fact for aggregated [Context Facts] block
+    this.agent.context.recordFact?.(
+      'error-audit',
+      `最近 ${failures.length} 条失败记录`,
+      'error',
     );
-    if (sameTool.length < 3) return null;
 
-    const avg =
-      sameTool.reduce((s, e) => s + e.durationMs, 0) / sameTool.length;
-
-    if (latest.durationMs > avg * 1.5) {
-      const ratio = (latest.durationMs / avg).toFixed(1);
-      return [
-        `WARN|INFLATE|tool=${latest.action} ratio=${ratio} avg=${Math.round(avg)}ms cur=${latest.durationMs}ms`,
-        'ROOT|工具耗时异常膨胀',
-        'ACT|避免逐行编辑|考虑一次性重写|检查是否陷入局部优化',
-      ].join('\n');
-    }
-    return null;
-  }
-
-  /**
-   * 分析瘫痪检测 — Read/Grep ≥5 且 Edit+Write === 0
-   */
-  private detectAnalysisParalysis(
-    entries: FileActionAuditEntry[],
-  ): string | null {
-    const reads = entries.filter((e) => e.action === 'Read').length;
-    const greps = entries.filter((e) => e.action === 'Grep').length;
-    const writes = entries.filter(
-      (e) => e.action === 'Edit' || e.action === 'Write',
-    ).length;
-    if (reads + greps >= 5 && writes === 0) {
-      return [
-        `WARN|ANALYSIS|reads=${reads} greps=${greps}`,
-        'ROOT|持续读取/搜索但无实质修改',
-        'ACT|停止读取新文件|形成完整方案再执行|直接编辑已知目标',
-      ].join('\n');
-    }
-    return null;
+    return `## 文件操作审计（最近 ${failures.length} 条失败记录）\n请关注以下文件操作异常，可能与此前工具调用有关：\n${summary}`;
   }
 }
