@@ -1,4 +1,5 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
+<!-- updated: 2026-07-11 -->
 # 合并上游仓库 SOP（AI 执行手册）[P0]
 
 > **用途**: 二开 fork 合并上游作者仓库，AI 按此流程执行，用户逐条确认。
@@ -287,7 +288,7 @@ git branch -D $合并分支
 | 功能异常但无冲突标记 | 语义冲突（接口兼容） | 回滚 → 按 §2.2 做功能分析，手动适配 |
 | 上游 force-push 历史不一致 | 上游 rebase 了 | 删 `$合并分支` → 从 `$上游remote/main` 重开分支 → cherry-pick 二开 commit |
 | guard 拦截 commit | pre-commit 检测到未 build | 先 `$构建命令`，再 `git add -A && git commit` |
-| scream 启动后加载的是旧代码 | 入口 `D:/reasonix/scream` 指向 npm 而非 fork 编译产物 | 已永久修复：scream shim 优先加载 `D:/AI/ScreamCode/packages/agent-core/dist/index.mjs`，不存在时自动降级 npm。`reasonix/` 不是 git 仓库，merge 影响不到该文件 |
+| scream 启动后加载的是旧代码 | 入口指向 npm 全局安装而非 fork 编译产物 | 已永久修复：`D:\AI\ScreamCode\bin\scream` 直接指向 `packages/agent-core/dist/index.mjs`。旧全局 npm 包 (`npm uninstall -g`) + `D:\reasonix` 下旧 shim（回收站删除）已清理。merge 不影响 shim 文件 |
 
 ---
 
@@ -386,6 +387,6 @@ system.md 同步完成后 → 更新本次 baseline 以备下次对比。
 | 2026-06 | v0.8.5 | 6 | 架构冲突上游为基底 |
 | 2026-07 | v0.8.5→v0.8.10 | 7 | system.md 同步 2 条：Knowledge Library + User Preferences 块 |
 | 2026-07 | v0.9.2 | 4 | cleanFastembedCache 别名桥接；HEAD 保留增强 |
-| 2026-07 | v0.9.7 | 3 | migration-legacy 跟上游删除；pnpm-workspace 取上游版本 |
+| 2026-07 | v0.9.7 | 3+8 | migration-legacy 跟上游删除；pnpm-workspace 取上游版本；shim 指向 apps/scream-code/dist/main.mjs（非 agent-core 库入口）— Phase34 |
 
 <!-- EOF -->

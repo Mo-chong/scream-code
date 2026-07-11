@@ -30,13 +30,14 @@ if [ ! -f "$BUNDLE_PATH" ]; then
   exit 2
 fi
 
-# 查找比 bundle 更新的 .ts 源文件
-SRC_NEWER=$(find packages/agent-core/src apps/scream-code/src \
-  -name '*.ts' -newer "$BUNDLE_PATH" 2>/dev/null | head -10)
+# 检查源文件是否有真实改动（用 git diff，不用 find -newer）
+# Git on Windows 的 checkout/merge/stash 会覆写所有文件 mtime，
+# 导致 find -newer 假阳性拦截 commit。git diff 只比较内容变更。
+SRC_CHANGED=$(git diff HEAD --name-only -- packages/agent-core/src apps/scream-code/src 2>/dev/null | grep '\.ts$' | head -10)
 
-if [ -n "$SRC_NEWER" ]; then
-  echo "🔴 [guard] 以下源文件比 bundle 更新，但 bundle 未重建："
-  echo "$SRC_NEWER" | sed 's/^/  /'
+if [ -n "$SRC_CHANGED" ]; then
+  echo "🔴 [guard] 以下源文件有未构建的变更，但 bundle 未更新："
+  echo "$SRC_CHANGED" | sed 's/^/  /'
   echo ""
   echo "使用 scream-dev 自动重建："
   echo "  ./bin/scream-dev"

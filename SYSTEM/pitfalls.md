@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/pitfalls, status/final]
 keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
-updated: 2026-07-09
+updated: 2026-07-11
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -515,11 +515,15 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 **解决**：互补冲突不取舍，双方保留。手动去掉冲突标记，保留双方代码行。不是 --ours 或 --theirs。
 
-### Merge commit 被 guard hook 拦截
+### Merge commit 被 guard hook 拦截（已根因修复）
 
 **现象**：`git commit` 时 guard-bundle-stale.sh 检查源码 vs 产物时间戳，源码更新则阻止 commit。
 
-**解决**：merge 后先 `bash scripts/build-dev.sh` 全量构建，再 `git add -A && git commit`。
+**旧机理**：`find -newer` 比较文件 mtime。Git on Windows 的 `checkout/merge/stash` 覆写所有已跟踪文件 mtime，导致 100% 假阳性。
+
+**修复**：`guard-bundle-stale.sh` 改用 `git diff HEAD --name-only` 检查实际内容变更，不受 mtime 影响。
+
+**预防**：merge 后仍应先 `bash scripts/build-dev.sh`（bundle 确实需要更新），但 guard 不会再误拦截纯分支切换场景。
 
 ### 上游新增 @scream-code/knowledge 子包
 
@@ -905,3 +909,16 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
    - **修复**：压缩后 `while (remaining[0]?.role === 'tool') remaining = remaining.slice(1)`
      (`context/index.ts:311-326`)
    - **教训**：压缩历史时必须保持 `tool_calls ↔ tool` 配对完整
+
+7. **上游 v0.9.7 包 exports 指向 `.ts` 源码 → tsdown bundle 编译但运行时崩溃** [Phase34]
+   - **现象**：merge 完成后 `scream` 启动报 `ERR_MODULE_NOT_FOUND`，提示找不到 `.ts` 文件。`build-dev.sh` 编译通过但运行崩
+   - **根因**：上游将 6 个包的 `package.json` 中 `exports.default` 指向 `./src/index.ts`。tsdown 开发环境自动补扩展名，但 Node.js ESM 不自动补 `.ts`，运行时崩
+   - **修复**：不需要改 exports（反而不稳定，改 `dist/` 会导致 bundle 内 `__dirname` 双重声明）。正确做法是 CLI shim 指向 `apps/scream-code/dist/main.mjs`（真正的 bundle），不走库入口
+   - **波及包**：不影响——CLI bundle 已正确打包了所有依赖
+   - **教训**：merge 后先 `scream --version` 验证运行。运行时崩不一定改 exports——先确认 shim 是否指向了正确的 CLI 入口
+
+8. **shim 指向库入口而非 CLI bundle → scream 静默无输出** [Phase34]
+   - **现象**：`scream --version` 无输出，exit 0。bash 和 PowerShell 都无输出
+   - **根因**：`bin/scream` shim 写的是 `node packages/agent-core/dist/index.mjs`（库入口）。这个文件加载完就静静退出，不认识 `--version`。正确的 CLI 入口是 `apps/scream-code/dist/main.mjs`（CLI bundle，package.json 中 `bin` 字段指定的）
+   - **修复**：3 个 shim（bash/cmd/ps1）全改为指向 `apps/scream-code/dist/main.mjs`
+   - **教训**：写 shim 前查 `package.json#bin` 字段——它告诉你真正的 CLI 入口在哪。别猜。另：排查无输出时第一时间重定向 stdout/stderr 到文件，而不是猜 PowerShell 策略、猜 CWD、猜代理

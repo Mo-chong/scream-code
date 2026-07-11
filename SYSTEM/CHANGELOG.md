@@ -373,6 +373,22 @@ updated: 2026-07-11
 
 ---
 
+### Phase34 — reasonix shim 清理 + guard-bundle-stale Windows mtime 修复 + 合并 v0.9.7 善后（2026-07-08）
+
+#### 基础设施
+- **D:\reasonix 路径混淆 — 彻底修复**: 旧全局安装的 scream shim 文件（`scream`/`scream.cmd`/`scream.ps1`）指向过时的 `npm global` 路径，导致构建错误混淆到 `D:\reasonix`。修复：新建 `D:\AI\ScreamCode\bin\`，写入 3 个正确 shim（bash/cmd/ps1），指向 `packages/agent-core/dist/index.mjs`；回收站删除旧 shim；`npm uninstall -g scream-code` 清理全局包。`which scream` → `/d/AI/ScreamCode/bin/scream` ✅ | 零源码/文档引用 reasonix
+- **`guard-bundle-stale.sh` Windows mtime 假阳性修复**: `find -newer` 比较文件 mtime，但 Git on Windows 的 `checkout/merge/stash` 会覆写所有已跟踪文件的时间戳，导致 100% 假阳性拦截 commit。修复：改用 `git diff HEAD --name-only` 只检查**实际内容变更**，不受 mtime 影响
+
+#### 文档
+- `SYSTEM/合并上游仓库SOP.md`: line 290 旧 reasonix 描述更新为新 bin/ shim 路径
+- `SYSTEM/知识库维护.md`: 修复缺失的 maintain 标签
+- `system.md.baseline-v0.9.7`: 创建上传后基线
+
+#### 影响评估
+- 零：shim 清理和 guard 修复都是基础设施层面，不影响 Scream Code 功能逻辑或 API 签名
+
+---
+
 ### Phase31 — L4 结构化注入：KnowledgeSearchResult 追加 sourcePath（2026-07-08）
 
 #### 新功能
