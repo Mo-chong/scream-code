@@ -2003,7 +2003,7 @@ export class TurnFlow {
         continue;
       }
       // 强制重置：S→S 升级连续 6 次无改善 → 防止偏差链死锁
-      if (this.crossTurnFlags.behaviorViolations[variant] >= 6) {
+      if ((this.crossTurnFlags.behaviorViolations[variant] ?? 0) >= 6) {
         delete this.crossTurnFlags.behaviorViolations[variant];
       }
     }

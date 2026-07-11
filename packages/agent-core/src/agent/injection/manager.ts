@@ -12,7 +12,7 @@ import { StuckInjector } from './stuck';
 import { AntiConfabulationInjector } from './anti_confabulation';
 import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
-import { ErrorAuditInjector } from './error-audit-injector';
+// import { ErrorAuditInjector } from './error-audit-injector';  // [切断 2026-07-11]
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
 import { PersistentSummaryInjector } from './persistent-summary';
@@ -43,7 +43,10 @@ export class InjectionManager {
       ['anti_confabulation', new AntiConfabulationInjector(agent)],
       ['quality_escalate', new QualityInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
-      ['error-audit', new ErrorAuditInjector(agent)],
+      // [切断 2026-07-11] ErrorAuditInjector — 每步检测 FileActionAudit 失败记录并注入 AI。
+      // 在 TUI live 渲染路径缺过滤时，其高频注入（审计日志 top2：765次/本对话）导致 UI 闪烁。
+      // 代码保留（可恢复），系统不加载。替代方案：pushHistory() 加 origin.kind 过滤已实施。
+      // ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
       ['session-summary', new SessionSummaryInjector(agent)],
       ['persistent-summary', new PersistentSummaryInjector(agent)],

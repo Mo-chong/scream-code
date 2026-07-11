@@ -501,6 +501,10 @@ export class ContextMemory {
       if (message.origin?.kind === 'background_task') {
         this.agent.background.markDeliveredNotification(message.origin);
       }
+      // 注入/系统触发的消息不进 replay → 不触发 TUI 重渲染 → 不闪烁
+      if (message.origin?.kind === 'injection' || message.origin?.kind === 'system_trigger') {
+        continue;
+      }
       this.agent.replayBuilder.push({
         type: 'message',
         message,
