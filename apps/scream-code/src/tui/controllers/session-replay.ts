@@ -232,7 +232,7 @@ export class SessionReplayRenderer {
       this.renderHookResult(context, message);
       return;
     }
-    if (message.origin?.kind === 'injection') {
+    if (message.origin?.kind === 'injection' || message.origin?.kind === 'system_trigger') {
       return;
     }
     if (message.origin?.kind === 'cron_job') {

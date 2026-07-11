@@ -65,7 +65,7 @@
 | **知识库维护** 🆕 | `SYSTEM/知识库维护.md` | 按源码逆向分析的分档矩阵：高/中/低/绝对不能放，含自检清单 |
 | **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + W/D/T 三级参数 + VariantScheduler 残差门控 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
-| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 15个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 17个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | 四层架构：maskToolObservations + ContentArchive（LRU 2000 条/30min TTL，sharedStore 跨子 agent 共享）+ MicroCompaction（3 道关卡）+ FullCompaction（LLM 总结→记忆库）。ArchiveRecover MCP 工具已放开。Bash 降噪：ANSI 剥离 + 重复行去重 |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（summarizeOnce 封装 + CompactionReport）+ MicroCompaction（isUseless/isOversizedTruncatable 两阶段）+ render-messages.ts。前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
@@ -234,9 +234,11 @@
     agent/index.ts                → Agent 类（所有子系统的容器）
     agent/turn/index.ts           → 回合控制核心（1737 行）
     agent/context/index.ts        → appendUserMessage / appendSystemReminder
-    agent/injection/manager.ts    → InjectionManager（15 个 DynamicInjector，Phase22 路径 B 清零）
+    agent/injection/manager.ts    → InjectionManager（17 个 DynamicInjector，Phase22 路径 B 清零）
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
+    agent/injection/session-summary.ts → SessionSummaryInjector（Phase36 新增，接管 session memory 注入）
+    agent/injection/persistent-summary.ts → PersistentSummaryInjector（Phase36 新增，基于 ILR 接管持久摘要注入）
     tools/builtin/memory/
       memory-lookup.ts            → MemoryLookup 工具
       memory-write.ts             → MemoryWrite 工具

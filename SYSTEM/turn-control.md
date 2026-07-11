@@ -133,4 +133,12 @@ runOneTurn()
 **LSP 双层 fallback 修复**（registry.ts + client.ts）：
 - `_resolveCmd()` 3 重 fallback：npm → npm.cmd → nodeBin/npm.cmd
 - `npx fallback` Windows 上改为 cmd.exe 包装 spawn
+
+**Phase36: ILR 触发取代步数阈值**（`turn/index.ts:93-107`）：
+- `shouldTriggerPersistentSummary(stepCount >= 8)` → `computeILR(history, keepLastN=3) > 0`
+- 新增纯函数：`computeILR()` / `getSummaryLevel()` / 重写 `shouldTriggerPersistentSummary()`
+- 新签名：`shouldTriggerPersistentSummary(history: readonly any[], _stepCount: number): boolean`
+- 触发基于实际被 maskToolObservations 遮蔽的信息量（字节比例），而非步数
+- 两步分级：ILR > 0→factual（事实摘要）、ILR > 0.6→full（完整上下文恢复）
+- 审计日志 7008 条 tool 记录验证：67.6% > 100 字符被遮蔽，ILR 覆盖率显著优于步数阈值
 - 解决 bundle 环境 PATH 极简下 LSP 不可用的问题

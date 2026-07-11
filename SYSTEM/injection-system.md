@@ -140,7 +140,7 @@ VariantMeta.weight ← 基础权重
 | `code_quality_feedback` | 1 | 0.30 | 0.80 | 代码质量 |
 | `system_ref_stuck` | 1 | 0.50 | 0.85 | stuck.ts |
 | `truncation_recover_guard` | 1 | 0.50 | 0.80 | 截断恢复 |
-| `error-audit` | 1 | 0.50 | 0.80 | error-audit-injector.ts |
+| `error-audit` | 1 | 0.80 | 0.85 | error-audit-injector.ts |
 
 详情见 `variant-registry.ts:288-345`。
 
@@ -349,7 +349,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `plan-mode.ts` | `plan_mode` | AFTER_SYSTEM | B | 计划模式 step | ✅ |
 | `permission-mode.ts` | `permission_mode` | AFTER_SYSTEM | A/B | 权限模式切换 | ✅ |
 | `working-set.ts` | `working_set` | MID_CONTEXT | B/C | working set 变化 | ✅ |
-| `error-audit-injector.ts` | `error-audit` | MID_CONTEXT | B | 最近 5 条有失败 | ✅ |
+| `error-audit-injector.ts` | `error-audit` | MID_CONTEXT | B | FAA 趋势检测（超时死循环/耗时膨胀/分析瘫痪） | ✅ |
 | `goal.ts` | `goal` | MID_CONTEXT | C | 计划模式 step | ✅ |
 | `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
@@ -403,26 +403,21 @@ export abstract class DynamicInjector {
 - `beforeStep` 调 `clearGuardData()` 清除上一轮残留
 - `collectConfabulationBlockReason` 读 `lastFeedback` 获取最近的反馈文本
 
-### ErrorAuditInjector（融合新增）
+### ErrorAuditInjector（Phase33 FAA Regeneration）
 
-定义于 `packages/agent-core/src/agent/injection/error-audit-injector.ts`（43 行，融合新增）。
-
-- `injectionVariant`: `'error-audit'`
-- 触发条件: `agent.fileActionAudit.getRecentEntries(5)` 中有失败记录
-- 注入内容: 最近失败的文件操作审计摘要
-- 位置等级: B（MEDIUM，MID_CONTEXT）
-- 注册 ID: `'error-audit'`
-- **运行时接线**: 需要 `agent.fileActionAudit` 实例在 agent 构造时注入，框架已就绪
-
-### ErrorAuditInjector（融合新增）
-
-定义于 `packages/agent-core/src/agent/injection/error-audit-injector.ts`（43 行，融合新增）。
+定义于 `packages/agent-core/src/agent/injection/error-audit-injector.ts`（165 行，Phase33 FAA Regeneration 替换）。
 
 - `injectionVariant`: `'error-audit'`
-- 触发条件: `agent.fileActionAudit.getRecentEntries(5)` 中有失败记录
-- 注入内容: 最近失败的文件操作审计摘要
-- 位置等级: B（MEDIUM，MID_CONTEXT）
+- 注入位置: `MID_CONTEXT`（B 级）
 - 注册 ID: `'error-audit'`
+- 数据源: `agent.fileActionAudit.getRecentEntries(10)`（FAA 全量操作记录，最新 10 条）
+- 触发条件（2 支柱，顺序执行，最多触发 1 条）:
+  1. **超时死循环（P0）**: Bash 连续 ≥2 次失败且 `durationMs > 30_000ms` → `FATAL|TIMEOUT`
+  2. **耗时膨胀（P0）**: 同工具类型最新耗时 > 均值 ×1.5（仅支柱一未命中时） → `WARN|INFLATE`
+  3. **分析瘫痪（P0）**: Read+Grep ≥5 且 Edit+Write === 0 → `WARN|ANALYSIS`
+- 注入格式: AI 原生 3 行定长（AI 50ms 解析）→ `PREFIX|CAT|key=val\nROOT|根因\nACT|opt1|opt2|opt3`
+- Context Facts: 命中时调用 `recordFact('error-audit', ..., 'error')`
+- VARIANT_META: `{ weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 2 }`
 - **运行时接线**: 需要 `agent.fileActionAudit` 实例在 agent 构造时注入，框架已就绪
 
 ### 注入器注册管理
@@ -461,20 +456,30 @@ agent.injection.getRouter().disable('error-audit');
 agent.injection.getRouter().enable('error-audit');
 ```
 
-### 增量摘要注入（不经过本管线）
+### 增量摘要注入（Phase36 已接入统一管线）
 
-**增量 LLM 摘要**（`compaction/summary.ts` + `turn/index.ts:updatePersistentSummary()`）：
+**变更记录**：
 
-- 走 `kind: 'injection'` → `appendSystemReminder()` → 消息尾部
-- **完全绕过** S/A/B/C/D 分级系统、残差调度、InjectionRouter 管线
-- 触发时机：每轮结束、上轮 ≥ 8 步时 → beforeStep 注入（不干扰工具调用）
-- 改用 `lastTurnStepCount` 字段记录上轮步数（废弃 `totalSteps` 固定步数硬切）
-- 尾部内容变化不影响 KV cache 前缀 → 不影响 97.41% 缓存命中率
-- 不注册变体、不走 `shouldInjectByResidual()`、不受预算控制
-- 每次注入前 `removeSystemRemindersByPrefix('[summary]')` 清理旧摘要防沉积
-- 成本：~$0.0004/次、~$0.02/天（3756 步/天真实数据）
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| Phase23-34 | ❌ 绕过管线 | 直接 `appendSystemReminder()`，不走 dispatch |
+| Phase35 | ❌ 临时切断 | 因 user 连续 400 注释调用 |
+| **Phase36** | ✅ **接入统一管线** | 新建 `SessionSummaryInjector` + `PersistentSummaryInjector`，走 `InjectionRouter` 6 道门 |
 
-**为什么不在本系统内**：摘要是"上轮决策链的即时快照"，不是"根据残差衰减决定是否注入的变体"。残差系统是为重复提醒设计的（衰减→再提醒），摘要只需要"在下一轮开始前看一眼上轮做了什么"，语义不同。
+**实现**：
+
+- `session-summary.ts` — `SessionSummaryInjector`：`getInjection()` 返回 `agent.sessionMemory.getSessionSummary()`，在 step1 或 compaction 后触发
+- `persistent-summary.ts` — `PersistentSummaryInjector`：基于 ILR（Information Loss Ratio）在 `computeILR(history) > 0` 时注入结构化摘要
+- 注册于 `manager.ts:30-49` 的 `injectors` 数组，与 15 个既有注入器共享 `maxInjectionsPerStep=3` 预算
+- 不再绕过 S/A/B/C/D 分级系统、残差调度、预算控制
+- 不再有专门的 `removeSystemRemindersByPrefix('[summary]')` 清理（由调度系统自动管理）
+
+**触发条件**：
+
+| 注入器 | 触发 | 频率管控 |
+|--------|------|---------|
+| `session-summary` | step===1 或 compaction 后 | 受残差调度 + 预算限制 |
+| `persistent-summary` | ILR > 0（有信息被 mask） | 受残差调度 + 预算限制 |
 
 ### 截断数据自动恢复（TruncationTracker，Phase24.2）
 
@@ -629,7 +634,7 @@ B 级注入器（error-audit、working-set、goal、todo-list、wolfpack、plugi
 
 ```
 [Context Facts]
-  ⚠ error-audit:  最近 2 条失败记录
+  ⚠ error-audit:  检测到连续超时
   • goal:         [active] Phase B' implementation
     working-set:  src/main.ts, src/utils/
 ```
@@ -678,13 +683,14 @@ B 级注入器（error-audit、working-set、goal、todo-list、wolfpack、plugi
 | Step 2: VariantScheduler 迁移入 Router | `router.ts` 内建 scheduler | ✅ 完成 |
 | Step 3: PositionStrategy 标准化 | `position-strategy.ts`（112 行） | ✅ 完成 |
 | Step 4: GuardInjector | `guard-injector.ts`（新版实现） | ✅ 完成（Phase33，统一管线） |
-| Step 5: ErrorAuditInjector | `error-audit-injector.ts`（43 行） | ✅ 完成 |
+| Step 5: ErrorAuditInjector | `error-audit-injector.ts`（165 行，Phase33 2-Pillar） | ✅ 完成 |
 | Step 6: inject() → router 记录同步（修正版） | `manager.ts` / `turn/index.ts:1659` | ✅ 完成 |
 | Step 7: TokenBudget 过滤接口 | `router.ts` | ✅ 完成 |
 | Step 8: Guard/Injector 边界清理 | 审计确认（0 文件改动） | ✅ 完成 |
 | Step 9: disable/enable 链式 API | `router.ts` | ✅ 完成 |
-| Step 10: ErrorAuditInjector 注册 | `manager.ts` | ✅ 完成 |
+| Step 10: ErrorAuditInjector 注册 | `manager.ts` | ✅ 完成（Phase30） |
 | Step 11a: CacheGroup 分类 | `router.ts`（5 组） | ✅ 完成 |
 | Step 11b: 双指数残差 | 待运行时基线数据 | ⏸️ 暂缓 |
 | **Phase B': Context Facts 尾部聚合** | 7 个注入器 + `context/index.ts` | ✅ 完成 (2026-07-10) |
-| **Phase M: 内容哈希测量埋点** | `injector.ts` + `router.ts` | ✅ 完成 (2026-07-10) |
+| **Phase M: 内容哈希测量埋点** | `injector.ts` / `router.ts` | ✅ 完成 (2026-07-10) |
+| **Phase33: FAA Regeneration** | `error-audit-injector.ts` → 2-Pillar 趋势检测 | ✅ 完成 (2026-07-10) |

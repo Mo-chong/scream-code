@@ -52,7 +52,7 @@ export class GuardInjector extends DynamicInjector {
 
   override getResidualConfig(): ResidualConfig | undefined {
     // scheduler 用 variant-registry 的 guard-feedback 配置
-    return { weight: 0.7, decayPerStep: 0.85, minStepGap: 0, threshold: 0.35 };
+    return { weight: 0.7, decayPerStep: 0.85, minStepGap: 3, threshold: 0.25 };
   }
 
   protected override getInjection(): string | undefined {

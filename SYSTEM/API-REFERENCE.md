@@ -183,7 +183,7 @@ class InjectionManager {
 }
 ```
 
-### 3.2 14 个注入器（全部注册，统一管线）
+### 3.2 17 个注入器（全部注册，统一管线）
 <!-- ref: injectors -->
 
 | 注入器 | 源文件 | 变体数 | 位置 | 触发条件 | 注册 |
@@ -193,7 +193,7 @@ class InjectionManager {
 | PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ |
 | PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ |
 | WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | Phase B' `recordFact` |
-| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | 最近 5 条有失败 | ✅ | Phase B' `recordFact` |
+| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | FAA 趋势检测（超时/膨胀/分析瘫痪） | ✅ | Phase B' `recordFact`, Phase34 2-Pillar |
 | GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | Phase B' `recordFact` |
 | TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | Phase B' `recordFact` |
 | WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | Phase B' `recordFact` |
@@ -269,7 +269,7 @@ protectHighLevelReminders(highOrigins: Set<string>): void
 recordFact(key: string, value: string, level?: string): void
   // 记录一个事实到 _contextFacts Map，供尾部聚合使用
   // key: 注入器标识（如 'error-audit', 'working-set'）
-  // value: 事实内容（如 '最近 2 条失败记录'）
+  // value: 事实内容（如 '检测到连续超时；检测到分析瘫痪'）
   // level: 'info' | 'warn' | 'error'（默认 'info'），影响显示图标
   // 由各注入器在 getInjection() 中调用
   // 事实在每次 dispatch 周期开始时自动清空
@@ -1184,3 +1184,9 @@ class KnowledgeLookupTool implements StepTool
 | system_ref_stuck | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
 | truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
 | error-audit | variant | weight:0.8, decay:0.85, thr:0.35 | variant-registry.ts |
+| **session_summary** | **variant** | **weight:0.8, decay:0.88, thr:0.3** | **session-summary.ts (新建)** |
+| **persistent_summary** | **variant** | **weight:0.9, decay:0.90, thr:0.2** | **persistent-summary.ts (新建)** |
+
+> Phase36: `session_summary` 和 `persistent_summary` 新建为 DynamicInjector，注册到 `manager.ts` 的 `injectors[]`
+> 数组，与既有 15 个注入器共享 `maxInjectionsPerStep` 预算 + 6 道门。
+> 废止 `turn/index.ts:833-840` 和 `turn/index.ts:843-846` 的直接 `this.inject()` 调用。

@@ -55,7 +55,7 @@ L1 核心执行层 —— 同一执行引擎的 4 个视图
   turn-control.md
   └─ 回合调度：runOneTurn → afterStep → convergenceGate
      ├── attention-management.md — 注意力决策（残差→预算→位置→检测）
-     ├── injection-system.md — 内容执行（14 injector + router + manager）
+     ├── injection-system.md — 内容执行（17 injector + router + manager）
      └── context-management.md — 数据管理（存档·审计·截断恢复）
 
 L2 支撑层 —— 被 L1 调用的功能模块
@@ -76,7 +76,7 @@ L4 独立层 —— 不参与执行，独立参考
 |:-----------|---------|
 | turn-control.md | `turn/` (+`detectors/` +`injection/`) |
 | attention-management.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
-| injection-system.md | `injection/` (14 injector + router + manager) |
+| injection-system.md | `injection/` (17 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
 | guard-engine.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
 
@@ -416,7 +416,7 @@ Cross:   VariantScheduler (variant-registry.ts)   ← 34 变体残差调度
 | `plan-mode.ts` | `plan_mode` | B | 计划模式 step |
 | `permission-mode.ts` | `permission_mode` | A/B | 权限模式切换 |
 | `working-set.ts` | `working_set` | B/C | working set 变化 |
-| `error-audit-injector.ts` | `error-audit` | B | 最近 5 条有失败 |
+| `error-audit-injector.ts` | `error-audit` | B | FAA 趋势检测（超时/膨胀/分析瘫痪） |
 | `goal.ts` | `goal` | C | 计划模式 step |
 | `todo-list.ts` | `todo_list` | C | todo 列表变化 |
 | `wolfpack.ts` | `wolfpack` | C | WolfPack 调用 |

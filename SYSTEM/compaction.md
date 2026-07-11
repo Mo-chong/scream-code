@@ -190,3 +190,12 @@ loopControl:
   reservedContextSize: 4000        # 预览保留的上下文空间
   compactionTriggerRatio: 0.7      # 触发压缩的上下文占比
 ```
+
+### Phase36: 孤儿 tool 清理 [bugfix]
+
+| 项目 | 内容 |
+|------|------|
+| 问题 | `applyCompaction` 压缩后保留的 `role:'tool'` 消息前面没有带 `tool_calls` 的 assistant → Anthropic API 400 (`tool must be response to tool_calls`) |
+| 根因 | `this._history.slice(summary.compactedCount)` 保留了 orphan tool 消息 |
+| 修复 | `context/index.ts:311-326`：压缩后 `while (remaining[0]?.role === 'tool') remaining = remaining.slice(1)` |
+| 效果 | compaction 后 tool-calls 配对消息保持完整 |

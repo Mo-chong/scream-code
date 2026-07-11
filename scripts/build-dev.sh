@@ -5,12 +5,14 @@
 # - 绕过 pnpm lifecycle（prepare 脚本依赖 node PATH），直调 tsdown
 # - 自动处理 agent-core → scream-code(alwaysBundle) 两段构建链
 # - 零环境依赖（硬编码 node 完整路径）
+# - 固定 TZ=Asia/Shanghai 统一北京时间时间戳
 #
 # 背景：上游 LIUTod/scream-code 发 npm 编译包，
 #       二开 fork 用 alwaysBundle 强制从源码打包 @scream-* 包。
 #       改 agent-core 源码后必须重建两个包才生效。
 #       详情见 SYSTEM/pitfalls.md > 构建卡在 prepare 脚本
 set -euo pipefail
+export TZ=Asia/Shanghai
 
 NODE="/c/Program Files/nodejs/node.exe"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

@@ -1,4 +1,4 @@
-import { appendFileSync, createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, fsyncSync } from 'node:fs';
 
 import { writeFile, appendFile } from 'node:fs/promises';
 
@@ -76,7 +76,7 @@ export interface AuditLogEntry {
 
   sessionId: string;
 
-  /** ISO timestamp */
+  /** 本地时间戳 YYYY-MM-DD HH:mm:ss */
 
   ts: string;
 
@@ -208,6 +208,15 @@ export function computeCacheMetrics(usage: TokenUsage): CacheMetrics {
 
 // ── Audit log writer ─────────────────────────────────────────────
 
+/** 获取本地时区日期字符串 YYYY-MM-DD */
+function getLocalDateStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 
 
 export class AuditLogWriter {
@@ -252,7 +261,7 @@ export class AuditLogWriter {
 
   private get filePath(): string {
 
-    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const date = getLocalDateStr(); // YYYY-MM-DD
 
     return join(this.logDir, `cache-audit-${date}.ndjson`);
 
@@ -264,7 +273,7 @@ export class AuditLogWriter {
 
     await this.ensureDir();
 
-    this.currentDate = new Date().toISOString().slice(0, 10);
+    this.currentDate = getLocalDateStr();
 
     const fp = this.filePath;
 
@@ -350,7 +359,7 @@ export class AuditLogWriter {
 
     // 按日期轮转：新的一天 → 关旧流开新流
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateStr();
 
     if (today !== this.currentDate) {
 
@@ -372,7 +381,7 @@ export class AuditLogWriter {
 
 	  `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
 
-	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched\n` +
+	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched,turnStepCount,pendingRecoverKeys,summaryTriggered\n` +
 
 	  `# started: ${new Date().toISOString()}
 
@@ -394,12 +403,9 @@ export class AuditLogWriter {
 
 
 
-    // Auto-flush every N entries
-
+    // Auto-flush to disk every N entries (real fsync)
     if (this.entryCount % 20 === 0) {
-
-      this.stream.write(''); // flush hint
-
+      this.flush(); // sync fsync, no await needed
     }
 
   }
@@ -407,13 +413,13 @@ export class AuditLogWriter {
 
 
   async flush(): Promise<void> {
-
-    // createWriteStream with 'a' doesn't have a great flush, but
-
-    // we can close and reopen to guarantee durability on demand.
-
-    // For now, rely on the OS buffer.
-
+    if (this.stream && typeof (this.stream as any).fd === 'number') {
+      try {
+        fsyncSync((this.stream as any).fd as number);
+      } catch {
+        // fd 可能已关闭，忽略
+      }
+    }
   }
 
 
@@ -602,7 +608,7 @@ export function buildAuditEntry(
 
     modelChanged,
 
-    ts: new Date().toISOString(),
+    ts: getLocalDateStr() + 'T' + new Date().toLocaleTimeString('zh-CN', { hour12: false }),
 
     totalInput: metrics.totalInput,
 

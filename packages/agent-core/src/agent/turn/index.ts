@@ -88,6 +88,36 @@ const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
 
 // Phase24.2: 只读工具集合移至 TruncationTrackerConfig.readOnlyTools
 
+// Phase36: ILR (Information Loss Ratio) 触发取代步数阈值
+// 基于 maskToolObservations 的真实信息丢失量判断是否需恢复上下文
+export type SummaryLevel = 'none' | 'factual' | 'full';
+
+export function computeILR(history: readonly any[], keepLastN = 3): number {
+  const toolMsgs = history.filter(m => m.role === 'tool');
+  if (toolMsgs.length === 0) return 0;
+  const maskThreshold = Math.max(0, toolMsgs.length - keepLastN);
+  let totalBytes = 0, maskedBytes = 0;
+  for (let i = 0; i < toolMsgs.length; i++) {
+    const msg = toolMsgs[i]!;
+    const text = typeof msg.content === 'string' ? msg.content
+      : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
+    const isMasked = i < maskThreshold && text.startsWith('[tool output masked');
+    totalBytes += text.length;
+    if (isMasked) maskedBytes += text.length;
+  }
+  return totalBytes === 0 ? 0 : maskedBytes / totalBytes;
+}
+
+export function getSummaryLevel(ilr: number): SummaryLevel {
+  if (ilr > 0.6) return 'full';
+  if (ilr > 0) return 'factual';
+  return 'none';
+}
+
+export function shouldTriggerPersistentSummary(history: readonly any[], _stepCount: number): boolean {
+  return getSummaryLevel(computeILR(history, 3)) !== 'none';
+}
+
 /** Phase 14: 收敛条件接口 — 每个条件是一个 check 函数 + 优先级 */
 interface ConvergenceCondition {
   readonly check: () => string | null;
@@ -800,20 +830,22 @@ export class TurnFlow {
                 );
               }
 
-              if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
-                const sessionSummary = this.agent.sessionMemory.getSessionSummary();
-                if (sessionSummary.length > 0) {
-                  this.inject(sessionSummary, {
-                    kind: 'injection',
-                    variant: 'session_memory',
-                  });
-                }
-              }
+              // Phase36: session-summary 和 persistent-summary 已改为 DynamicInjector，
+              // 走 InjectionRouter 管线统一调度，不再直接注入（见 manager.ts 注册）
+              // if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
+              //   const sessionSummary = this.agent.sessionMemory.getSessionSummary();
+              //   if (sessionSummary.length > 0) {
+              //     this.inject(sessionSummary, {
+              //       kind: 'injection',
+              //       variant: 'session_memory',
+              //     });
+              //   }
+              // }
 
-              // 每轮开始时触发增量摘要（上轮 ≥ 8 步时）
-              if (stepNumber === 1) {
-                this.updatePersistentSummary();
-              }
+              // [切断] persistent summary 注入链路——上轮≥8步时触发，但会连续注入导致400错误
+              // if (stepNumber === 1) {
+              //   this.updatePersistentSummary();
+              // }
 
               // Suggest /dream on the first step when conditions are met
               if (stepNumber === 1 && this.agent.dreamTracker.shouldSuggest()) {
@@ -1965,7 +1997,13 @@ export class TurnFlow {
   private resetObservedBehaviorViolations(): void {
     for (const variant of Object.keys(this.crossTurnFlags.behaviorViolations)) {
       const record = this.variantRegistry.get(variant);
+      // 正常重置：LLM 表现出改正行为
       if (record?.behaviorObserved === true) {
+        delete this.crossTurnFlags.behaviorViolations[variant];
+        continue;
+      }
+      // 强制重置：S→S 升级连续 6 次无改善 → 防止偏差链死锁
+      if (this.crossTurnFlags.behaviorViolations[variant] >= 6) {
         delete this.crossTurnFlags.behaviorViolations[variant];
       }
     }
@@ -2050,29 +2088,46 @@ export class TurnFlow {
   }
 
   private updatePersistentSummary(): void {
-    if (this.lastTurnStepCount < 8) return;
+    // 每轮开始时重置——确保 buildAuditEntry 读取的是本轮事实，而非上轮残留
+    this._summaryTriggered = false;
+
+    const history = this.agent.context.history;
+    if (!shouldTriggerPersistentSummary(history, this.lastTurnStepCount)) return;
+    this._summaryTriggered = true;
 
     const SUMMARY_KEY = 'summary';
     const existingSummary = this.agent.contentArchive?.recover(SUMMARY_KEY) as string | undefined;
     const existingText = typeof existingSummary === 'string' ? existingSummary : '';
     // Remove old [summary] messages from history to prevent tail decay
-    this.agent.context.removeSystemRemindersByPrefix('[summary]');
-
-    const history = this.agent.context.history;
+    const summaryPrefix = '[summary]';
+    this.agent.context.removeSystemRemindersByPrefix(summaryPrefix);
     const recentAssistantTexts: string[] = [];
-    for (let i = history.length - 1; i >= 0 && recentAssistantTexts.length < 30; i--) {
+
+    // Phase34: 收集会被 maskToolObservations 遮蔽的 tool result（keepLastN=3 之后的旧结果）
+    // mask 只改 projected 列表，history 保留原文，所以从 history 取最旧的 tool 消息
+    let toolCount = 0;
+    for (let i = 0; i < history.length && recentAssistantTexts.length < 30; i++) {
       const msg = history[i]!;
-      if (msg.role === 'assistant') {
-        const text = typeof msg.content === 'string' ? msg.content : '';
-        if (text) recentAssistantTexts.unshift(text);
+      if (msg.role === 'tool') {
+        toolCount++;
+        // 保留最后 3 条（不被遮蔽），之前的才需要摘要
+        if (toolCount > 3) {
+          let text = '';
+          const content = msg.content;
+          if (typeof content === 'string') {
+            text = (content as string).slice(0, 500);
+          } else if (Array.isArray(content)) {
+            text = content.map((p: any) => ('text' in p ? p.text : '')).join('').slice(0, 500);
+          }
+          if (text) recentAssistantTexts.push(text);
+        }
       }
     }
 
-    // 调 LLM 做摘要，不阻塞主流程
+    // 调 LLM 做摘要，不阻塞主流程（_summaryTriggered 已同步设为 true 记录触发事实）
     summarizeWithLLM(this.agent.llm, existingText, recentAssistantTexts, Math.max(0, this.currentStep - 30))
       .then((textContent: string) => {
         if (!textContent) return;
-        this._summaryTriggered = true;
         const formattedText = "[summary]\n" + textContent;
         this.inject(formattedText, { kind: 'system_trigger', name: 'summary' });
         this.agent.contentArchive?.archive("summary", formattedText, { source: 'summary' });

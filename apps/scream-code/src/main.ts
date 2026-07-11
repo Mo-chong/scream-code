@@ -20,7 +20,7 @@ const BUILD_TIME: number = __BUILD_TIMESTAMP__;
 const ageMs = Date.now() - BUILD_TIME;
 const ageHours = ageMs / 3_600_000;
 
-process.stderr.write(`[scream] bundle 构建时间: ${new Date(BUILD_TIME).toISOString()}\n`);
+process.stderr.write(`[scream] bundle 构建时间: ${new Date(BUILD_TIME).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}\n`);
 if (ageHours > 24) {
   process.stderr.write(
     `[guard] ⚠️  bundle 已构建超过 ${Math.round(ageHours)} 小时，推荐使用 ./bin/scream-dev 启动。\n`,

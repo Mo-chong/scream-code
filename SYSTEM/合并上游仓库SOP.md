@@ -287,6 +287,7 @@ git branch -D $合并分支
 | 功能异常但无冲突标记 | 语义冲突（接口兼容） | 回滚 → 按 §2.2 做功能分析，手动适配 |
 | 上游 force-push 历史不一致 | 上游 rebase 了 | 删 `$合并分支` → 从 `$上游remote/main` 重开分支 → cherry-pick 二开 commit |
 | guard 拦截 commit | pre-commit 检测到未 build | 先 `$构建命令`，再 `git add -A && git commit` |
+| scream 启动后加载的是旧代码 | 入口 `D:/reasonix/scream` 指向 npm 而非 fork 编译产物 | 已永久修复：scream shim 优先加载 `D:/AI/ScreamCode/packages/agent-core/dist/index.mjs`，不存在时自动降级 npm。`reasonix/` 不是 git 仓库，merge 影响不到该文件 |
 
 ---
 

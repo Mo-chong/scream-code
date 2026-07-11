@@ -14,6 +14,8 @@ import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
+import { SessionSummaryInjector } from './session-summary';
+import { PersistentSummaryInjector } from './persistent-summary';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -43,6 +45,8 @@ export class InjectionManager {
       ['intent_guidance', new IntentInjector(agent)],
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
+      ['session-summary', new SessionSummaryInjector(agent)],
+      ['persistent-summary', new PersistentSummaryInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);

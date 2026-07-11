@@ -116,6 +116,15 @@ export class ContextMemory {
 
   appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
+    // 合并注入：检查 _history / deferredMessages 最后一条是否也是 user role system-reminder，
+    // 是则追加到已有内容，避免连续多条 user role 违反 LLM API 交替约束。
+    const lastMsg = this.deferredMessages.length > 0
+      ? this.deferredMessages[this.deferredMessages.length - 1]
+      : this._history[this._history.length - 1];
+    if (lastMsg?.role === 'user' && lastMsg.content[0]?.type === 'text' && lastMsg.content[0].text.startsWith('<system-reminder>')) {
+      lastMsg.content[0].text += '\n' + text;
+      return;
+    }
     this.appendMessage({
       role: 'user',
       content: [{ type: 'text', text }],
@@ -299,6 +308,12 @@ export class ContextMemory {
       type: 'context.apply_compaction',
       ...summary,
     });
+    // 压缩后清理孤儿 tool 消息——它们对应的 tool_calls 已被压缩掉，
+    // 保留会导致 Anthropic API 400: "role:'tool' without preceding tool_calls"
+    let remaining = this._history.slice(summary.compactedCount);
+    while (remaining.length > 0 && remaining[0]!.role === 'tool') {
+      remaining = remaining.slice(1);
+    }
     this._history = [
       {
         role: 'assistant',
@@ -306,7 +321,7 @@ export class ContextMemory {
         toolCalls: [],
         origin: { kind: 'compaction_summary' },
       },
-      ...this._history.slice(summary.compactedCount),
+      ...remaining,
     ];
     this.openSteps.clear();
     this.flushDeferredMessagesIfToolExchangeClosed();

@@ -55,13 +55,13 @@ export async function startManualEmbeddingDownload(): Promise<{ ok: boolean; alr
 
   embeddingStatus = 'downloading';
   let ok = await embeddingEngineInstance.ensureReady();
-  let error = ok ? undefined : embeddingEngineInstance.lastError;
+  let error = ok ? undefined : (embeddingEngineInstance as any).lastError;
 
   // If the first attempt failed, wipe any partial/corrupted cache and retry once.
   if (!ok) {
     clearEmbeddingModelCache(getEmbeddingCacheDir());
     ok = await embeddingEngineInstance.ensureReady();
-    error = ok ? undefined : embeddingEngineInstance.lastError;
+    error = ok ? undefined : (embeddingEngineInstance as any).lastError;
   }
 
   embeddingStatus = ok ? 'ready' : 'failed';

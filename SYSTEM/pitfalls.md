@@ -877,7 +877,31 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
 - CRLF 环境下 `old_string` 匹配多包含周围 2-3 行上下文，缩进/换行差异更容易被包围匹配绕过
 - 如果 Edit 连续失败 2 次以上，停下来用 `git checkout -- <file>` 恢复原始文件，重读全文再修
 
+4. **混合换行符陷阱** — 文件从纯 CRLF 开始，经多次 Edit 写入 LF-only 行后变成**混合状态**（部分 CRLF + 部分 LF）。Read 工具显示纯 LF（自动转换），但 `Edit` 的精确字节匹配在混合文件上失败（`old_string not found`）：
+   - 诊断：`node -e "const fs=require('fs');const c=fs.readFileSync('文件','utf-8');console.log('CRLF:',(c.match(/\r\n/g)||[]).length,'LF:',(c.match(/\n/g)||[]).length)"` — 如果 CRLF 和 LF 数量不一致说明混合
+   - 修复：`node -e "const fs=require('fs');fs.writeFileSync('文件',fs.readFileSync('文件','utf-8').replace(/\r?\n/g,'\r\n'),'utf-8')"` 归一为纯 CRLF
+   - 预防：避免在同一个文件上交替用 Edit 和 Write；Write 写入 LF、Edit 按 Read（LF）匹配成功，但实际磁盘混入 CRLF+LF
+
 **教训**：
 1. `sed -i` 在源码文件上是灾难——注入不可见字符（Tab）、破坏缩进、不可撤销。工具规则禁止它就是因为它造成的问题比解决的还多
 2. CRLF 环境下 `Edit` 的精确匹配策略是脆弱的。Windows 开发者的 `.gitconfig` 中 `core.autocrlf = false` 可以避免这个换行符漂移问题
 3. 一次失败后的"盲修连环"比第一次失败本身更危险——第一次失败只是文件改不动，连环盲修是把文件改成一团乱麻。**连续 Edit 失败 2 次后必须 git checkout 重置，不能继续修**
+
+5. **连续 role:'user' 注入 → API 400 (`roles must alternate`)** [Phase35-P0-1a]
+   - **现象**：一轮中 `updatePersistentSummary` + `inject()` + `flushContextFacts` 同时命中时，
+     messages 中出现 7 条连续 `role:'user'` → Anthropic API 400
+   - **根因**：`appendSystemReminder()` (`context/index.ts:117-126`) 全部走 `role:'user'`，
+     无 role 交替保护；`updatePersistentSummary` 绕过 injector 管线直接注入
+   - **修复**：`appendSystemReminder` 检查最后一条是否也是 `user` system-reminder，
+     是则合并内容不创建新消息 (`context/index.ts:119-132`)
+   - **连带修复**：`turn/index.ts:833-846` 摘要注入改为 DynamicInjector 走统一管线
+   - **教训**：所有 system-reminder 注入走统一管线，不能开旁路
+
+6. **compaction 后 orphan tool → API 400 (`tool must be response to tool_calls`)** [Phase36-P0-1b]
+   - **现象**：`applyCompaction()` 压缩历史后，`role:'tool'` 消息前面没有带 `tool_calls` 的 assistant
+     → Anthropic API 400
+   - **根因**：`this._history.slice(summary.compactedCount)` 保留了 orphan tool 消息
+     (`context/index.ts:311-318`)
+   - **修复**：压缩后 `while (remaining[0]?.role === 'tool') remaining = remaining.slice(1)`
+     (`context/index.ts:311-326`)
+   - **教训**：压缩历史时必须保持 `tool_calls ↔ tool` 配对完整

@@ -50,7 +50,7 @@ updated: 2026-07-11
 
 ### 架构迁移
 ```
-路径 A (DynamicInjector) ← 14 个注入器（原 11 + 4 迁移 + GuardInjector 迁移）
+路径 A (DynamicInjector) ← 17 个注入器（原 14 + SessionSummaryInjector + PersistentSummaryInjector + GuardInjector 迁移）
 路径 B (硬编码) ← 已清零（4 文件删除）
 路径 C (GuardInjector) ← ✅ 已注册并走统一注入管线（Phase33，2026-07-10）
 ```
@@ -603,3 +603,66 @@ updated: 2026-07-11
 - BATCH_SIZE 优化是错误方向：审计日志证实影响 < 1%，白花几天
 - 所有性能优化必须先查审计日志数据，否则是拍脑袋
 - maskToolObservations 不是缓存破坏者，是缓存保护者——标准化旧工具结果为固定占位符让前缀更稳定，97.41% 命中率
+
+### Phase34: FAA Regeneration — ErrorAuditInjector 2-Pillar 趋势检测 [2026-07-10]
+
+#### 新功能
+- **ErrorAuditInjector 废弃→再生**（`error-audit-injector.ts` 165 行完整替换）：
+  - 废弃旧功能：马后炮罗列最近失败记录（与 guard/偏差链完全重叠）
+  - 支柱一（P0）：**超时死循环** — Bash 连续 ≥2 次失败且 `durationMs > 30_000ms` → `FATAL|TIMEOUT`
+  - 支柱一（P0）：**耗时膨胀** — 同工具类型最新耗时 > 均值 ×1.5（仅超时未命中时检查） → `WARN|INFLATE`
+  - 支柱二（P0）：**分析瘫痪** — Read+Grep ≥5 且 Edit+Write === 0 → `WARN|ANALYSIS`
+  - 注入格式：AI 原生 3 行定长 `PREFIX|CAT|key=val\nROOT|cause\nACT|opt1|opt2|opt3`（50ms 解析）
+  - `recordFact('error-audit', ...)` 记录事实供 Context Facts 聚合
+- **冷却调优**：`minStepGap: 3→2`，超时死循环需要更快响应
+
+#### 修复
+- **耗时膨胀跨工具误报**：原实现对比全部工具 → 改为同工具类型内比较（`e.action === latest.action`）
+- **超时 vs 快速失败区分**：原 `durationMs > 0` → 加 `> 30_000ms` 门限，快速错误（196ms/487ms）不触发
+- **连续计数器重置**：中间有非超时条目即重置，保证真正连续
+- **分析瘫痪工具名精确匹配**：正则 → 精确 `=== 'Read'/'Grep'/'Edit'/'Write'`
+
+#### 数据验证
+- 基准：2026-07-10 FAA 日志 3630 条真实操作记录
+- 快速错误（196ms/487ms）< 30_000 → 门限排除 ✅
+- 真实超时（135s/306s/307s）> 30_000 → 正确捕获 ✅
+- 同工具数据不足（<3 条）→ 膨胀检测跳过 ✅
+- 当前 getRecentEntries(10)：reads=6 greps=0 → 分析瘫痪触发 ✅
+
+#### 文档
+- `DECISIONS/分析-FAA再生-趋势检测与覆盖盲区发散风险.md`（状态 → implemented）
+- `workspace/验收-FAA再生2Pillar落地全链路报告.md`（全链路验收）
+- `SYSTEM/injection-system.md` — ErrorAuditInjector 章节同步更新
+
+#### 框架源码引用
+- `packages/agent-core/src/agent/injection/error-audit-injector.ts` — 165 行完整替换
+- `packages/agent-core/src/agent/turn/variant-registry.ts` L345 — `minStepGap: 3→2`
+
+### Phase36: 注入管线统一 — 摘要走 DynamicInjector [2026-07-11]
+
+#### 架构变更
+- **注入管线统一**：`SessionSummaryInjector` + `PersistentSummaryInjector` 新建为 DynamicInjector，
+  注册到 `InjectionManager` 的统一 `injectors[]` 数组（`manager.ts:30-49`），
+  与 15 个既有注入器共享 `maxInjectionsPerStep` 预算 + 6 道门（disabled/quota/cache/residual/budget/scheduler）
+- **废止** `turn/index.ts:833-840` 中直接 `this.inject(sessionSummary, ...)` 的调用（绕过管线入口）
+- **废止** `turn/index.ts:843-846` 中直接 `updatePersistentSummary()` 的调用
+
+#### 新增文件
+- `packages/agent-core/src/agent/injection/session-summary.ts` — SessionSummaryInjector
+- `packages/agent-core/src/agent/injection/persistent-summary.ts` — PersistentSummaryInjector（基于 ILR）
+
+#### Bug 修复
+- **P0-1a**: `appendSystemReminder` 合并连续 user role system-reminder（`context/index.ts:117-136`）
+  — 防止多条 `role:'user'` 注入违反 LLM API roles must alternate 约束
+- **P0-1b**: `applyCompaction` 压缩后清理孤儿 tool 消息（`context/index.ts:311-326`）
+  — 防止 compaction 后 `role:'tool'` 消息前面没有带 `tool_calls` 的 assistant 导致 API 400
+- **P1-1**: ILR 触发取代步数阈值（`turn/index.ts:93-118`）
+  — `shouldTriggerPersistentSummary(lastTurnStepCount >= 8)` → `computeILR(history, 3) > 0`
+
+#### 数据验证
+- 审计日志 7008 条 tool 记录：67.6% > 100 字符被 maskToolObservations 遮蔽
+- 9 会话 656 轮次 step 分布验证 ILR 触发覆盖率合理
+
+#### 文档
+- `SYSTEM/injection-system.md` — 增量摘要接入管线章节重写
+- `DECISIONS/分析-增量摘要设计与实现偏差复盘.md` — 全篇重写 §§10-12
