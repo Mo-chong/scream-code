@@ -254,7 +254,7 @@ export function extractUsage(usage: unknown): TokenUsage | null {
   }
 
   return {
-    inputOther: Math.max(0, promptTokens - cached),
+    inputOther: typeof cacheMiss === 'number' ? cacheMiss : Math.max(0, promptTokens - cached),
     output: completionTokens,
     inputCacheRead: cached,
     inputCacheCreation: 0,
