@@ -444,21 +444,41 @@ export class FooterComponent implements Component {
 
     const lines = [truncateToWidth(line1, width)];
 
-    // 第2行：左 cwd + 中缓存率
+    // 第2行：左路径 + 居中缓存率
     const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens } = state;
     const stepTotal = lastStepCacheHit + lastStepCacheMiss;
     const totalTotal = cacheHitTokens + cacheMissTokens;
-    if (stepTotal > 0 && totalTotal > 0) {
-      const rate1 = (lastStepCacheHit / stepTotal * 100).toFixed(1);
-      const rate2 = (cacheHitTokens / totalTotal * 100).toFixed(1);
-      const c1 = pickCacheColor(Number(rate1), colors);
-      const c2 = pickCacheColor(Number(rate2), colors);
+    {
       const dim = chalk.hex(colors.textDim);
-      const bolt = chalk.hex(colors.success)('⚡');
       // 启动目录（末两层）
       const cwdParts = process.cwd().replace(/\\/g, '/').split('/').filter(Boolean);
       const shortCwd = dim(cwdParts.slice(-2).join('\\'));
-      const cacheText = ` ${bolt} ${dim('单：')}${chalk.hex(c1)(rate1 + '%')} ${dim('┃')} ${dim('总：')}${chalk.hex(c2)(rate2 + '%')} `;
+      const diamond = dim('◇');
+      const bolt = chalk.hex(colors.success)('⚡');
+      let stepText: string;
+      let totalText: string;
+      let rate1Str: string;
+      let rate2Str: string;
+      let c1: string;
+      let c2: string;
+      if (stepTotal > 0 && totalTotal > 0) {
+        const rate1 = lastStepCacheHit / stepTotal * 100;
+        const rate2 = cacheHitTokens / totalTotal * 100;
+        c1 = pickCacheColor(rate1, colors);
+        c2 = pickCacheColor(rate2, colors);
+        rate1Str = rate1.toFixed(1) + '%';
+        rate2Str = rate2.toFixed(1) + '%';
+        stepText = dim((stepTotal / 1000).toFixed(2) + 'K');
+        totalText = dim((totalTotal / 1000000).toFixed(2) + 'M');
+      } else {
+        c1 = dim;
+        c2 = dim;
+        rate1Str = dim('0.0%');
+        rate2Str = dim('0.0%');
+        stepText = dim('0.0K');
+        totalText = dim('0.00M');
+      }
+      const cacheText = ` ${diamond} ${stepText}  ${bolt} ${dim('单:')}${chalk.hex(c1)(rate1Str)}  ${dim('总:')}${chalk.hex(c2)(rate2Str)}  ${diamond} ${totalText} `;
       const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText)) / 2));
       lines.push(shortCwd + ' '.repeat(pad) + cacheText);
     }
