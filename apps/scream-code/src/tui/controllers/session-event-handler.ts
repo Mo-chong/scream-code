@@ -130,9 +130,7 @@ export class SessionEventHandler {
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
-  private _prevStepTokenTotal = 0;
-  private _prevStepHit = 0;
-  private _prevStepMiss = 0;
+  // 四爷：不差值了，直接用官方原始值
 
   resetRuntimeState(): void {
     this.backgroundAgentMetadata.clear();
@@ -638,32 +636,14 @@ export class SessionEventHandler {
     if (event.contextTokens !== undefined) patch.contextTokens = event.contextTokens;
     if (event.maxContextTokens !== undefined) patch.maxContextTokens = event.maxContextTokens;
     // 缓存命中率 — currentTurn=单步, total=累计
+    // 四爷：直接用官方原始值，不做差值
     const current = event.usage?.currentTurn;
     if (current) {
       const hit = (current.inputCacheRead ?? 0) + (current.inputCacheCreation ?? 0);
       const miss = current.inputOther ?? 0;
-      const stepTotal = hit + miss;
-      const prevH = this._prevStepHit;
-      const prevM = this._prevStepMiss;
-      const prevT = this._prevStepTokenTotal;
-      // 新回合开始 → currentTurn 重置过，直接取本次值
-      if (stepTotal < prevT) {
-        patch.lastStepCacheHit = hit;
-        patch.lastStepCacheMiss = miss;
-        patch.lastStepTokenInput = stepTotal;
-      } else if (prevT > 0 && stepTotal > prevT) {
-        // 同回合增量 = 本步实际
-        patch.lastStepCacheHit = hit - prevH;
-        patch.lastStepCacheMiss = miss - prevM;
-        patch.lastStepTokenInput = stepTotal - prevT;
-      } else {
-        patch.lastStepCacheHit = hit;
-        patch.lastStepCacheMiss = miss;
-        patch.lastStepTokenInput = stepTotal;
-      }
-      this._prevStepHit = hit;
-      this._prevStepMiss = miss;
-      this._prevStepTokenTotal = stepTotal;
+      patch.lastStepCacheHit = hit;
+      patch.lastStepCacheMiss = miss;
+      patch.lastStepTokenInput = hit + miss;
     }
     const total = event.usage?.total;
     if (total) {
