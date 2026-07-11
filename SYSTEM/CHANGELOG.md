@@ -17,6 +17,29 @@ updated: 2026-07-11
 
 ---
 
+## v0.9.7 — 合并上游 v0.9.7（2026-07-08）
+
+### 重大变更
+- **删除 `migration-legacy` 包**（完整移除 package + workspace 引用 + 代码）
+- **删除 `migration` 模块**（`badge.ts` → `session-label.ts`，相关命令行和测试全部移除）
+- **`session-store.ts` 大幅精简**（-155 行）
+
+### 新功能
+- cc-connect：改进 stream-json 协议对等性 + 单通道单 session 约束
+- knowledge-web：添加 dirty flag + SSE heartbeat，移除飘浮动效
+- TUI：升级 pi-tui 0.80.2→0.80.6，修复视口跳顶问题
+- skill-center：添加 LLM 成本提示
+
+### 修复
+- 会话切换时清除 viewport + scrollback，防止内容混叠
+- 编辑器 autocomplete 调用 `requestRender()` 修复
+- 移除 alternate screen buffer，保留 scrollback
+- 清除废弃的 audio-skill、修改图标
+
+### 二开影响
+低。3 文件冲突，`migration-legacy` 删干净跟上游走。
+`system.md`: 零改动。
+
 ## v0.9.2 — 合并上游 v0.9.2（2026-07-08）
 
 ### 新功能

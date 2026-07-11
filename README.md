@@ -153,15 +153,15 @@ Open scream-code, type `/cc-connect`, and follow the prompts to select your plat
 
 Follow the steps to complete setup, then start the background daemon (scream-code can be closed while the daemon runs).
 
-**Remote chat quick commands:**
+**cc-connect remote chat quick commands (only the following are supported):**
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Create new session |
-| `/bind setup` | Enable file transfer (PDF, images, etc.) |
-| `/mode` | View available modes |
-| `/mode yolo` | Auto-approve all tools |
-| `/mode default` | Ask before each tool call |
+| `/new` | Overwrite and create new session |
+| `/current` | View current session status |
+| `/mode [name]` | Switch mode |
+| `/reasoning [level]` | View or switch reasoning effort |
+| `/stop` | Stop current execution |
 
 ---
 
@@ -344,15 +344,15 @@ npm install -g cc-connect
 
 按照步骤完成配置与链接后，输入命令启动后台守护进程（关闭 screamcode 也可在后台聊天）。
 
-**远程聊天快捷指令：**
+**cc-connect远程聊天常用快捷指令（仅支持以下指令）：**
 
 | 指令 | 说明 |
 |------|------|
-| `/new` | 创建新会话 |
-| `/bind setup` | 开启文件传送功能，支持 PDF、图片等 |
-| `/mode` | 查看可用模式 |
-| `/mode yolo` | 自动批准所有工具 |
-| `/mode default` | 每次工具调用前询问 |
+| `/new` | 覆盖并创建新会话 |
+| `/current`	| 查看当前会话状态 |
+| `/mode [名称]` | 切换模式 |
+| `/reasoning [等级]`	| 查看或切换推理强度 |
+| `/stop`	| 停止当前执行 |
 
 ---
 
