@@ -453,10 +453,7 @@ export class FooterComponent implements Component {
       // 启动目录（末两层）
       const cwdParts = process.cwd().replace(/\\/g, '/').split('/').filter(Boolean);
       const shortCwd = dim(cwdParts.slice(-2).join('\\'));
-      const diamond = dim('◇');
       const bolt = chalk.hex(colors.success)('⚡');
-      let stepText: string;
-      let totalText: string;
       let rate1Str: string;
       let rate2Str: string;
       let c1: string;
@@ -468,17 +465,13 @@ export class FooterComponent implements Component {
         c2 = pickCacheColor(rate2, colors);
         rate1Str = rate1.toFixed(1) + '%';
         rate2Str = rate2.toFixed(1) + '%';
-        stepText = dim((stepTotal / 1000).toFixed(2) + 'K');
-        totalText = dim((totalTotal / 1000000).toFixed(2) + 'M');
       } else {
         c1 = dim;
         c2 = dim;
-        rate1Str = dim('0.0%');
-        rate2Str = dim('0.0%');
-        stepText = dim('0.0K');
-        totalText = dim('0.00M');
+        rate1Str = dim('—');
+        rate2Str = dim('—');
       }
-      const cacheText = ` ${diamond} ${stepText}  ${bolt} ${dim('单:')}${chalk.hex(c1)(rate1Str)}  ${dim('总:')}${chalk.hex(c2)(rate2Str)}  ${diamond} ${totalText} `;
+      const cacheText = ` ${bolt} ${dim('单:')}${chalk.hex(c1)(rate1Str)}  ${dim('总:')}${chalk.hex(c2)(rate2Str)} `;
       const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText)) / 2));
       lines.push(shortCwd + ' '.repeat(pad) + cacheText);
     }
