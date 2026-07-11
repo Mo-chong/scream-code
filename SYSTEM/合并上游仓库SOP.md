@@ -386,5 +386,6 @@ system.md 同步完成后 → 更新本次 baseline 以备下次对比。
 | 2026-06 | v0.8.5 | 6 | 架构冲突上游为基底 |
 | 2026-07 | v0.8.5→v0.8.10 | 7 | system.md 同步 2 条：Knowledge Library + User Preferences 块 |
 | 2026-07 | v0.9.2 | 4 | cleanFastembedCache 别名桥接；HEAD 保留增强 |
+| 2026-07 | v0.9.7 | 3 | migration-legacy 跟上游删除；pnpm-workspace 取上游版本 |
 
 <!-- EOF -->
