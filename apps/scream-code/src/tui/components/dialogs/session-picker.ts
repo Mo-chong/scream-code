@@ -14,7 +14,7 @@ import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
 
-import { formatSessionLabel } from '#/migration/index';
+import { formatSessionLabel } from '#/tui/utils/session-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
 import { SELECT_POINTER } from '../../constant/symbols';
@@ -24,6 +24,7 @@ export interface SessionRow {
   readonly title: string | null;
   readonly last_prompt?: string | null;
   readonly work_dir: string;
+  readonly session_dir: string;
   readonly updated_at: number;
   readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
@@ -86,6 +87,7 @@ export class SessionPickerComponent extends Container implements Focusable {
   private onSelect: (sessionId: string) => void;
   private onCancel: () => void;
   private onDelete: ((sessionId: string) => void | Promise<void>) | undefined;
+  private onStatus: (message: string) => void;
   private maxVisibleSessions: number;
   private loading: boolean;
 
@@ -101,6 +103,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     onSelect: (sessionId: string) => void;
     onCancel: () => void;
     onDelete?: ((sessionId: string) => void | Promise<void>) | undefined;
+    onStatus: (message: string) => void;
     maxVisibleSessions?: number;
   }) {
     super();
@@ -111,6 +114,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     this.onSelect = opts.onSelect;
     this.onCancel = opts.onCancel;
     this.onDelete = opts.onDelete;
+    this.onStatus = opts.onStatus;
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
   }
 
@@ -128,7 +132,15 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (!session) return;
       if (this.confirmingDelete) {
         this.confirmingDelete = false;
+        if (session.metadata?.['source'] === 'cc-connect') {
+          this.onStatus(t('session_picker.cc_restricted'));
+          return;
+        }
         void this.onDelete?.(session.id);
+        return;
+      }
+      if (session.metadata?.['source'] === 'cc-connect') {
+        this.onStatus(t('session_picker.cc_restricted'));
         return;
       }
       this.onSelect(session.id);
@@ -147,7 +159,12 @@ export class SessionPickerComponent extends Container implements Focusable {
     const k = printableChar(data);
     if ((k === 'd' || k === 'D') && !this.confirmingDelete && this.sessions.length > 0) {
       const session = this.sessions[this.selectedIndex];
-      if (session && session.id !== this.currentSessionId) {
+      if (!session) return;
+      if (session.metadata?.['source'] === 'cc-connect') {
+        this.onStatus(t('session_picker.cc_restricted'));
+        return;
+      }
+      if (session.id !== this.currentSessionId) {
         this.confirmingDelete = true;
       }
     }
@@ -269,15 +286,18 @@ export class SessionPickerComponent extends Container implements Focusable {
     const metaGap = '   ';
     const metaGapWidth = visibleWidth(metaGap);
     const idLineWidth = indentWidth + idWidth;
-    const aliasedDir = homeAlias(session.work_dir);
-    const dirWidth = visibleWidth(aliasedDir);
+    // CC sessions show their storage path; normal sessions also show storage path.
+    const displayDir = session.session_dir
+      ? homeAlias(session.session_dir)
+      : homeAlias(session.work_dir);
+    const dirWidth = visibleWidth(displayDir);
 
     if (idLineWidth + metaGapWidth + dirWidth <= width) {
       card.push(
         indent +
           chalk.hex(colors.textMuted)(fullId) +
           chalk.hex(colors.textDim)(metaGap) +
-          chalk.hex(colors.textMuted)(aliasedDir),
+          chalk.hex(colors.textMuted)(displayDir),
       );
     } else {
       // Not enough room for both on one line — keep the id intact and put the
@@ -289,7 +309,7 @@ export class SessionPickerComponent extends Container implements Focusable {
           ),
       );
       const dirBudget = Math.max(8, width - indentWidth);
-      const dir = truncatePathLeft(aliasedDir, dirBudget);
+      const dir = truncatePathLeft(displayDir, dirBudget);
       card.push(indent + chalk.hex(colors.textMuted)(dir));
     }
 

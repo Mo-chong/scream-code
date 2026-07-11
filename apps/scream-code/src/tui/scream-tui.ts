@@ -755,7 +755,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   clearTranscriptAndRedraw(): void {
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
+    // Clear scrollback when switching/creating sessions so old session content
+    // doesn't linger in terminal scroll history. The viewport itself is cleared
+    // by the force render below (fullRender emits \x1b[2J\x1b[H).
+    this.state.terminal.write('\x1b[3J');
     this.transcriptController.clearAndRedraw();
+    // Force a full redraw: requestRender(true) resets previousLines so pi-tui
+    // can't skip the render by diffing against stale old content.
+    this.state.ui.requestRender(true);
   }
 
   showStatus(message: string, color?: string): void {
