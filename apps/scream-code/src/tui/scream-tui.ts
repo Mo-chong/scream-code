@@ -113,7 +113,6 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     lastStepCacheHit: 0,
     lastStepCacheMiss: 0,
     lastStepTokenInput: 0,
-    lastStepTokenInput: 0,
     isCompacting: false,
     lastCompactionFinishedAt: undefined,
     autoCompactionCount: 0,
