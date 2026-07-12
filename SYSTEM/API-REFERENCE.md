@@ -218,7 +218,8 @@ class InjectionManager {
 | WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | |
 | ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** | ✅ | Phase37 |
 | SessionSummaryInjector 🆕 | `agent/injection/session-summary.ts` | 1 | MID_CONTEXT | step=1 / compaction 后 | ✅ | Phase33 |
-| ToolResultRecoveryInjector 🆕 | `agent/injection/tool-result-recovery.ts` | 1 | MID_CONTEXT | ILR>0.3 + hasHighValue | ✅ | Phase37 |
+| ToolResultRecoveryInjector 🆕 | ~~`agent/injection/tool-result-recovery.ts`~~ **已删除** Phase39 | — | — | — | ❌ | 审计 1694 轮 0 次触发 |
+| ActiveSummaryInjector 🆕 | `agent/injection/active-summary.ts` | 1 | MID_CONTEXT | _pendingRecoveries 非空 | ✅ | Phase39b |
 | GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | |
 | TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | |
 | WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | |
@@ -231,6 +232,7 @@ class InjectionManager {
 > 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
 > `MemoryRulesInjector` 不存在（早期概念文件）。
 > Phase37（07-11）：新增 DecisionTraceInjector + ToolResultRecoveryInjector + SessionSummaryInjector。stuck weight=30→0.6。guard-injector minStepGap=0→3。error-audit 删除分析瘫痪支柱。
+> Phase39b（07-12）：ToolResultRecoveryInjector→ActiveSummaryInjector（审计确认 1694 轮 0 次触发，从 history 估算改为 _pendingRecoveries 数据源）。
 > **完整变体列表见** `variant-registry.ts:288-345`。
 
 ### 3.3 VariantScheduler（残差调度，取代旧 QUOTA_TABLE）
@@ -445,6 +447,33 @@ interface QualitySignal {
 // 4: 文档阅读过多（> 阈值）
 // 5: 工具之间切换频繁（> 阈值）
 ```
+
+### 4.6 新架构：纯函数 Detector（Phase38+）
+
+Phase38+ 起，detector 改用纯函数（`DetectorFn`）：
+
+```typescript
+type DetectorFn = (ctx: DetectorContext) => RawSignal | null;
+```
+
+**已注册的纯函数 Detector（Phase38-40）：**
+
+| Detector | 文件 | 优先级 |
+|----------|------|:------:|
+| attentionMonitorDetector | `detectors/attention-monitor.ts` | P3 |
+| qualityDegradeDetector | `detectors/quality-degrade.ts` | P2 |
+| verifyPassDetector | `detectors/verify-pass.ts` | P3 |
+| confabulationDetector | `detectors/confabulation.ts` | P0 |
+| deviationChainDetector | `detectors/deviation-chain.ts` | P1 |
+| turnLimitsDetector | `detectors/turn-limits.ts` | P1 |
+| toolDedupDetector | `detectors/tool-dedup.ts` | P3 |
+| permissionEnforcerDetector | `detectors/permission-enforcer.ts` | P1 |
+| interceptionSummaryDetector | `detectors/interception-summary.ts` | P4 |
+| toolPatternDetector | `detectors/tool-pattern.ts` | P3 |
+| sceneMemoryDetector | `detectors/scene-memory.ts` | P3 |
+| budgetNotifyDetector | `detectors/budget-notify.ts` | P4 |
+| **archiveInefficiencyDetector** 🆕 | `detectors/archive-inefficiency.ts` | P2/P3 |
+| **editRetryDetector** 🆕 | `detectors/edit-retry.ts` | P1/P2 |
 
 ---
 
@@ -1238,9 +1267,11 @@ class KnowledgeLookupTool implements StepTool
 | truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
 | error-audit | variant | weight:0.5, decay:0.85, thr:0.2, minStepGap:2（Phase37: 分析瘫痪已砍） | error-audit-injector.ts |
 | session_summary | variant | weight:0.8, decay:0.88, thr:0.3 | session-summary.ts |
-| tool_result_recovery 🆕 | variant | weight:0.6, decay:0.85, thr:0.15, minStepGap:3 + hasHighValue过滤 | tool-result-recovery.ts |
+| tool_result_recovery | variant | ❌ Phase39 已删除（1694 轮 0 次触发） | ~~tool-result-recovery.ts~~ |
+| active_summary 🆕 | variant | weight:0.6, decay:0.85, thr:0.15, minStepGap:2（_pendingRecoveries 非空） | active-summary.ts |
 | decision_trace 🆕 | variant | weight:0.5, decay:0.85, thr:0.15, minStepGap:5 | decision-trace.ts |
-| persistent_summary | variant | ❌ 已替换为 tool_result_recovery | persistent-summary.ts（保留可回退） |
+| persistent_summary | variant | ❌ 已替换为 tool_result_recovery（Phase37），后者 Phase39 已删除 | persistent-summary.ts（保留可回退） |
 
 > Phase37 (2026-07-11): stuck weight 30→0.6; guard-injector minStepGap 0→3; error-audit 删分析瘫痪支柱;
 > 新增 tool_result_recovery + decision_trace; persistent_summary 退役。
+> Phase39b (2026-07-12): tool_result_recovery→active_summary; ToolResultRecoveryInjector 文件删除; ActiveSummaryInjector 新建。

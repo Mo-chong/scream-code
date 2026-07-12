@@ -804,3 +804,50 @@ updated: 2026-07-11
 - **`turn/index.ts`** — 删除 3 个 `this.inject()` bypass（detectSceneMemory / injectInterceptionSummary / injectCrossTurnFlags）
 - **`SYSTEM/interception.md`** — detector 列表 8→12
 - **`SYSTEM/attention-system.md`** — 决策表 3 条新规则
+
+#### Phase39a: maskToolObservations 改签名 + marker 含 key [2026-07-12]
+- **`utils/mask-tool-observations.ts`** — 返回签名 `Message[]` → `{ messages: Message[]; recoverable: RecoverableRecord[] }`；marker 格式改为 `[已遮蔽·key:{hash}·{toolName}·archive_recover可取回]`；新增 `generateSummary()` 从 tool result 提取前 200 字符；新增 `inferPriority()` 按工具类型分配优先级（ERROR=0 / FILE=1 / API=2 / SEARCH=3 / STATUS=4）
+- **`agent/compaction/full.ts`** — 调用方更新（解构新返回类型）
+- **`loop/turn-step.ts`** — 调用方更新 + 回传 `recoverable` 给 deps
+- **`agent/context/index.ts`** — 新增 `_pendingRecoveries: RecoverableRecord[]` 字段
+- **`loop/run-turn.ts`** — `RunTurnInput` 新增 `storePendingRecoveries` 回调
+
+#### Phase39b: ActiveSummaryInjector 替换 ToolResultRecoveryInjector [2026-07-12]
+- **`agent/injection/active-summary.ts`** — 新建：主动工具结果摘要注入（从 `_pendingRecoveries` 读取准确记录，排序取 top 3，含 key 引导式格式）
+- **`agent/injection/tool-result-recovery.ts`** — 删除（回收站，审计确认 1694 轮 0 次触发）
+- **`agent/injection/manager.ts`** — 注册替换：active-summary → ActiveSummaryInjector
+
+#### Phase39c: 管线串联（storePendingRecoveries → ActiveSummaryInjector） [2026-07-12]
+- **`loop/turn-step.ts`** — 新增 `ExecuteLoopStepDeps.storePendingRecoveries` 回调接口
+- **`loop/run-turn.ts`** — 透传 `storePendingRecoveries` 到 executeLoopStep
+- **`agent/turn/index.ts`** — 调用 runTurn 时传入回调，将 recoverable records 写入 `this.agent.context._pendingRecoveries`
+
+#### Phase39d: attention-system.md 决策表更新 [2026-07-12]
+- **`SYSTEM/attention-system.md`** — detector 列表 12→14（增加 verifyPassDetector / qualityDegradeDetector 等 Phase38e 已注册的 2 个）；决策表新增 3 条规则（"我被遮蔽的内容已存档"→archive_recover 取回、"我连续 Read 同一文件"→P3 建议用 archive_recover、"我收到 [摘要] 注入"→可取回或直接使用）
+
+#### Phase39e: SYSTEM 文档同步 [2026-07-12]
+- **`SYSTEM/injection-system.md`** — 注入器表 17→17（tool_result_recovery→active_summary）；注册代码示例更新；Phase39 变更说明
+- **`SYSTEM/API-REFERENCE.md`** — §3.3 注入器表 ToolResultRecoveryInjector 标记删除 + ActiveSummaryInjector 新增；Phase39b 变更说明
+- **`SYSTEM/context-management.md`** — 引用 tool_result_recovery 标记 Phase39 已删除
+
+#### Phase39e-f: 审计埋点 + 2 新 detector [2026-07-12]
+- **`agent/usage/audit-log.ts`** — `AuditLogEntry` 新增 `activeSummaryCount` / `archiveRecoverCount` 字段
+- **`agent/turn/index.ts`** — 统计 `active_summary` 注入次数 + archive_recover 调用次数，写入审计日志
+- **`agent/interception/types.ts`** — `RootCause` 新增 `archive_inefficient` / `edit_retry`
+- **`agent/interception/config.ts`** — `ROOT_CAUSE_PRIORITY_ORDER` 新增 2 个根因
+- **`agent/interception/manager.ts`** — `ROOT_CAUSE_LABEL` 新增 2 个标签 + 注册 2 个新 detector
+- **`agent/interception/detectors/archive-inefficiency.ts`** — 新建：检测重复 Read / 多 Read，hint→nudge 递进引导使用 archive_recover
+- **`agent/interception/detectors/edit-retry.ts`** — 新建：检测 Edit 失败后重试，nudge→warn 递进
+- **`agent/index.ts`** — import + register 两个新 detector
+- **`SYSTEM/interception-system.md`** — 根因表 +2
+- **`SYSTEM/attention-system.md`** — 检测器表 +2 / 根因表 +2 / 决策表 +edit_retry 规则
+
+#### Phase40a: Edit 失败自动附预览 [2026-07-12]
+- **`tools/builtin/file/edit.ts`** — 新增 `autoReadPreview()` 辅助函数；`old_string not found` 时自动读当前文件附上 20 行预览，省掉 AI 一轮 Read
+
+#### Phase40b: mergeOldToolPairs — 旧 tool pair 合并为单条消息 [2026-07-12]
+- **`utils/mask-tool-observations.ts`** — 新增 `mergeOldToolPairs()` 导出函数；检测老的 assistant(toolCalls)+tool result 对，合并为单条 assistant 消息，消息数量直接减半
+- **`loop/turn-step.ts`** — 调用 `mergeOldToolPairs(maskedMsgs)` 串联到管线
+
+#### 测试
+- **`test/agent/active-summary.test.ts`** — 5 个 maskToolObservations 用例 + 3 个 mergeOldToolPairs 用例，8/8 通过

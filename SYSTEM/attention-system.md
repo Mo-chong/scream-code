@@ -53,6 +53,19 @@ AI 自主调用工具，无系统干预。
 | TurnLimitsDetector | 是否超步数/超时 | 上限是否触及 |
 | ToolPermissionDetector | 工具调用是否有权限 | 权限评估结果 |
 | ContextPressureDetector | token 是否接近上限 | 使用率 |
+| verifyPassDetector | 修复后验证通过 → 正向信号 | [恢复] 确认 |
+| qualityDegradeDetector | 回复质量递进下降 | C→B→A→S |
+| confabulationDetector | 虚构内容检测 + 证据纪律 | 0-3 置信度 |
+| deviationChainDetector | 偏差链 + Guard R1 后遗症追踪 | 偏差链计数 |
+| turnLimitsDetector | 步数≥45 预告 / ≥50 阻断 | warn/block |
+| toolDedupDetector | 连续相同工具调用（含连续 Read） | 连续次数 |
+| permissionEnforcerDetector | Guard R2/R3/R4 拦截 | 权限结果 |
+| interceptionSummaryDetector | 拦截概况（step≥30 时） | 统计数据 |
+| toolPatternDetector | 连续 Read 无 codegraph / 连续报错 | 模式匹配 |
+| sceneMemoryDetector | "上次/以前"触发 → 查记忆 | 记忆匹配 |
+| budgetNotifyDetector | 预算降级通知 | budget 使用率 |
+| archiveInefficiencyDetector 🆕 | 低效取回：重复 Read / 未用 archive_recover | 连续次数 |
+| editRetryDetector 🆕 | Edit 失败后重试 | 连续失败次数 |
 
 ### ④ 被反馈（回应）
 
@@ -104,6 +117,8 @@ AI 自主调用工具，无系统干预。
 | `quality_degrade` | P2 | QualityDetector |
 | `attention_signal` | P3 | AttentionMonitor |
 | `context_pressure` | P4 | TruncationTracker |
+| `archive_inefficient` 🆕 | P2/P3 | ArchiveInefficiencyDetector |
+| `edit_retry` 🆕 | P1/P2 | EditRetryDetector |
 | `log_info` | P4 | EventLog |
 
 ---
@@ -171,4 +186,23 @@ AI 自主调用工具，无系统干预。
 
 注入预算降级:
   └─ budget 持续下降 → **P4 通知** ✅（budgetNotifyDetector，仅知会不干预）
+
+我被遮蔽的内容已存档:
+  ├─ 需要历史工具结果 → 检查上下文中是否有 `[已遮蔽·key:xxx·archive_recover可取回]`
+  ├─ 有 → 调用 `archive_recover(key=xxx)` 取回全文 ✅
+  ├─ 有但摘要够用 → 继续工作，不额外取回
+  └─ 没有 → 正常 Read（新文件）
+
+我连续 Read 同一文件:
+  ├─ 已 Read 过且被遮蔽 → **P3 建议用 archive_recover** ✅（archiveInefficiencyDetector）
+  └─ 新文件 → 正常 Read
+
+我收到 [摘要] 注入:
+  ├─ 摘要带 key → 需要时可 archive_recover(key) 取回全文
+  └─ 摘要已足够 → 直接使用摘要内容继续工作
+
+我 Edit 失败了:
+  ├─ 第 1 次失败 → 无反馈（正常重试）
+  ├─ 第 2 次同文件失败 → **P2 建议先 Read** ✅（editRetryDetector）
+  └─ 第 3+ 次同文件失败 → **P1 必须先 Read** ✅（editRetryDetector 升级为 warn）
 ```

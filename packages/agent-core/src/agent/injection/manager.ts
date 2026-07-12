@@ -14,7 +14,7 @@ import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
 import { PersistentSummaryInjector } from './persistent-summary';
-import { ToolResultRecoveryInjector } from './tool-result-recovery';
+import { ActiveSummaryInjector } from './active-summary';
 import { DecisionTraceInjector } from './decision-trace';
 import { InjectionRouter, type InjectContext } from './router';
 
@@ -44,10 +44,11 @@ export class InjectionManager {
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
       ['session-summary', new SessionSummaryInjector(agent)],
-      // [替换 2026-07-11] PersistentSummaryInjector → ToolResultRecoveryInjector
-      // PersistentSummaryInjector 基于 ILR 恢复，见 tool-result-recovery.ts
-      // 旧文件 persistent-summary.ts 保留不动，可回退
-      ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
+      // Phase39b: ActiveSummaryInjector 替代 ToolResultRecoveryInjector
+      // ToolResultRecoveryInjector 旧设计基于 history 估算遮蔽数，
+      // 管线顺序矛盾导致 1694 轮 0 次触发（cache-audit 验证）。
+      // ActiveSummaryInjector 从 context._pendingRecoveries 读取准确记录。
+      ['active-summary', new ActiveSummaryInjector(agent)],
       ['decision-trace', new DecisionTraceInjector(agent)],
     ];
     for (const [id, injector] of injectors) {

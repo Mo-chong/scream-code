@@ -126,6 +126,14 @@ export interface AuditLogEntry {
 
   summaryTriggered: boolean;
 
+  /** Phase39 ActiveSummaryInjector 注入的条目数（0=未触发） */
+
+  activeSummaryCount: number;
+
+  /** 本轮 AI 调用 archive_recover 工具的次数（0=AI 没取回过） */
+
+  archiveRecoverCount: number;
+
 }
 
 
@@ -381,7 +389,7 @@ export class AuditLogWriter {
 
 	  `# 查: grep '"injected":\\[' cache-audit-*.ndjson 找出有注入的轮次 | grep '"modelChanged":true' 找API切换的轮次\n` +
 
-	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched,turnStepCount,pendingRecoverKeys,summaryTriggered\n` +
+	  `# fields: turn,model,sessionId,modelChanged,ts,totalInput,cacheHit,cacheMiss,hitRatio,compacted,compactedTokens,alerts,injected,apiKeySwitched,turnStepCount,pendingRecoverKeys,summaryTriggered,activeSummaryCount,archiveRecoverCount\n` +
 
 	  `# started: ${new Date().toISOString()}
 
@@ -568,6 +576,10 @@ export function buildAuditEntry(
 
   summaryTriggered = false,
 
+  activeSummaryCount = 0,
+
+  archiveRecoverCount = 0,
+
 ): AuditLogEntry {
 
   const alerts: string[] = [];
@@ -637,6 +649,10 @@ export function buildAuditEntry(
     pendingRecoverKeys,
 
     summaryTriggered,
+
+    activeSummaryCount,
+
+    archiveRecoverCount,
 
   };
 

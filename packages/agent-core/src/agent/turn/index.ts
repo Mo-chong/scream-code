@@ -808,6 +808,11 @@ export class TurnFlow {
           log: this.agent.log,
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
+          storePendingRecoveries: (records) => {
+            // Safety: clear stale records before setting fresh ones
+            this.agent.context._pendingRecoveries = [];
+            this.agent.context._pendingRecoveries = records;
+          },
           hooks: {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
@@ -1856,7 +1861,11 @@ export class TurnFlow {
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedEvents.length);
       const archiveStats = this.agent.contentArchive?.getStats();
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered);
+      const activeSummaryCount = injectedEvents.filter(e => e.variant === 'active_summary').length;
+      const archiveRecoverCount = (this.agent.context?.messages as readonly any[])?.filter(m =>
+        m.role === 'assistant' && (m.toolCalls ?? []).some((tc: any) => tc.name === 'archive_recover')
+      ).length ?? 0;
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered, activeSummaryCount, archiveRecoverCount);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态

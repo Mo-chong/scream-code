@@ -3,6 +3,7 @@ import { createToolMessage, type ContentPart, type Message } from '@scream-code/
 import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
+import type { RecoverableRecord } from '../../utils/mask-tool-observations';
 import type { CompactionResult } from '../compaction';
 import { assertWireFormat, project } from './projector';
 import { stabilizePrefix } from './prefix-stabilizer';
@@ -52,6 +53,13 @@ export class ContextMemory {
   private _microCompactCount = 0;
   /** Number of turns where prefix stabilizer did not need to mutate the prefix. Exposed via getMetrics(). */
   private _stabilizeHitCount = 0;
+  /**
+   * Recoverable records collected during the most recent masking pass.
+   * Set by turn-step.ts (~L93) via storePendingRecoveries callback.
+   * Consumed by ActiveSummaryInjector on step 1.
+   * Overwritten each turn — stale records don't accumulate.
+   */
+  _pendingRecoveries: RecoverableRecord[] = [];
 
   constructor(protected readonly agent: Agent) {}
 

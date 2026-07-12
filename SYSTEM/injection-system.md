@@ -10,7 +10,7 @@ updated: 2026-07-11
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个：ToolResultRecovery / DecisionTrace / SessionSummary）。
+> 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个 + Phase39 替换 1 个）。
 > 路径 B 已清零（Phase22，2026-07-08）。详见 ZHU/DECISIONS/方案-注入系统三路径统一设计.md。
 > 路径 C (GuardInjector) 已完成迁移（Phase33，2026-07-10）。
 > Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化 | 注意力信号闭环 | pushHistory 过滤
@@ -83,7 +83,8 @@ export interface VariantMeta {
 | `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
 | `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
 | `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
-| `tool_result_recovery` 🆕 | 0.6 | 0.85 | 0.15 | 3 | B | 被mask的关键tool结果恢复 |
+| `tool_result_recovery` | 0.6 | 0.85 | 0.15 | 2 | B | ❌ Phase39 已替换为 active_summary |
+| `active_summary` 🆕 | 0.6 | 0.85 | 0.15 | 2 | B | 主动摘要注入（替代 tool_result_recovery） |
 | `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
 | `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
 | `prepare_*` (6变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入 |
@@ -99,6 +100,7 @@ export interface VariantMeta {
 | `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
 
 > Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
+> Phase39 (2026-07-12) 变体变更：tool_result_recovery 退役，替换为 active_summary（主动摘要注入，基于 _pendingRecoveries 数据源而非 history 估算）。
 
 ```typescript
 export function getScore(variant: string, stepDelta: number): number {
@@ -374,7 +376,8 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `goal.ts` | `goal` | MID_CONTEXT | C | 计划模式 step | ✅ |
 | `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
 | `session-summary.ts` 🆕 | `session_summary` | MID_CONTEXT | B | step=1 / compaction 后 | ✅ |
-| `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ✅ |
+| `tool-result-recovery.ts` | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ❌ Phase39 已删除 |
+| `active-summary.ts` 🆕 | `active_summary` | MID_CONTEXT | B | _pendingRecoveries 非空 | ✅ 替代 tool_result_recovery |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
 | ~~`anti_confabulation.ts`~~ 🗑️ | ~~`system_ref_anti_confabulation`~~ | — | — | — | ❌ | **已删除** Phase38c（合并入 confabulationDetector） |
@@ -384,6 +387,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 
 > **注册总数**: 17 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
 > Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
+> Phase39 (2026-07-12) 变更：ToolResultRecoveryInjector→ActiveSummaryInjector（审计确认 1694 轮 0 次触发，从 history 估算改为从 _pendingRecoveries 读取准确记录）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
 ### DynamicInjector 基类
@@ -464,14 +468,14 @@ const injectors: [string, DynamicInjector][] = [
   ['error-audit', new ErrorAuditInjector(agent)],
   ['guard-feedback', this.guardInjector],
   ['session-summary', new SessionSummaryInjector(agent)],
-  ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
+  ['active-summary', new ActiveSummaryInjector(agent)], // Phase39b 新增
   ['decision-trace', new DecisionTraceInjector(agent)],
 ];
 injectors.forEach(([id, inj]) => this.router.register(id, inj));
 ```
 
-> **注册总数**: 17 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
-> Phase37 调整：stuck weight=30→0.6 + context.history 替代 stuckContext | guard-injector minStepGap=0→3 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化。
+> **注册总数**: 17 个。替换 1 个：ToolResultRecoveryInjector→ActiveSummaryInjector（Phase39b）。
+> Phase39 (2026-07-12) 变更：ToolResultRecoveryInjector→ActiveSummaryInjector（审计确认 1694 轮 0 次触发，改为主动模式）。
 
 ### 运行时停用/启用
 

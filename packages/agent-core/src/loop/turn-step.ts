@@ -17,7 +17,7 @@ import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 import { chatWithRetry } from './retry';
 import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
 import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
-import { maskToolObservations } from '../utils/mask-tool-observations';
+import { maskToolObservations, mergeOldToolPairs, type RecoverableRecord } from '../utils/mask-tool-observations';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -36,6 +36,12 @@ export interface ExecuteLoopStepDeps {
   readonly currentStep: number;
   readonly maxRetryAttempts?: number;
   readonly recordUsage: (usage: TokenUsage) => void;
+  /**
+   * Optional callback to store RecoverableRecord[] from maskToolObservations.
+   * The caller (turn/index.ts) writes these to context._pendingRecoveries
+   * for ActiveSummaryInjector to consume on step 1.
+   */
+  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => void;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -83,7 +89,9 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       }
     }
   }
-  messages = maskToolObservations(messages, undefined, toolNameMap);
+  const { messages: maskedMsgs, recoverable } = maskToolObservations(messages, undefined, toolNameMap);
+  messages = mergeOldToolPairs(maskedMsgs, undefined);
+  deps.storePendingRecoveries?.(recoverable);
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();

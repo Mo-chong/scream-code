@@ -61,5 +61,7 @@ export const ROOT_CAUSE_PRIORITY_ORDER: readonly string[] = [
   'quality_degrade',
   'attention_signal',
   'context_pressure',
+  'archive_inefficient',
+  'edit_retry',
   'log_info',
 ];

@@ -7,6 +7,7 @@
  */
 
 import { addUsage, emptyUsage, type TokenUsage } from '@scream-code/ltod';
+import type { RecoverableRecord } from '../utils/mask-tool-observations';
 
 import type { Logger } from '#/logging/types';
 
@@ -39,6 +40,7 @@ export interface RunTurnInput {
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
+  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => void;
 }
 
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
@@ -85,6 +87,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         currentStep: steps,
         maxRetryAttempts,
         recordUsage: recordStepUsage,
+        storePendingRecoveries: input.storePendingRecoveries,
       });
       activeStep = undefined;
 

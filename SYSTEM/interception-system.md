@@ -79,6 +79,8 @@ InterceptionManager（中央调度器）
 | `quality_degrade` | 质量下降 | P2_quality |
 | `attention_signal` | [DONE]/[NEED] 等 | P3_signal |
 | `context_pressure` | token 压力 | P4_info |
+| `archive_inefficient` 🆕 | 低效取回：重复 Read / 未用 archive_recover | P2_quality / P3_signal |
+| `edit_retry` 🆕 | Edit 失败后重试 | P1_discipline / P2_quality |
 | `log_info` | 纯日志 | P4_info |
 
 ---

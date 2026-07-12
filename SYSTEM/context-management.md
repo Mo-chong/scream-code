@@ -49,6 +49,13 @@ ContentArchive (纯内存 LRU) ──→ key 前缀 + toolCallId     无日志
 maskToolObservations (每轮)  ──→ 每轮对话前自动执行        无日志
      │                          保留最近 keepLastN(3) 条
      │                          旧 tool result → 占位符
+     │                          生成 RecoverableRecord[]
+     │
+     ▼
+mergeOldToolPairs (每轮)    ──→ maskToolObservations 之后    无日志
+     │                          保留最近 keepLastNPairs(3) 对
+     │                          旧 tool pair → 合并为单条 assistant
+     │                          (仅全部已遮蔽)
      │
      ▼
 MicroCompaction (自动/无感)  ──→ 3 道关卡触发               micro_compaction.apply
@@ -98,6 +105,7 @@ FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compac
 | `content-archive` | `SCREAM_CODE_EXPERIMENTAL_CONTENT_ARCHIVE` | `true` | 功能开关 |
 | `contentArchive.ttlMs` | `SCREAM_CODE_CONTENT_ARCHIVE_TTL_MS` | `14400000` | TTL 可配置覆盖（毫秒） |
 | `mask.keepLastN` | `SCREAM_CODE_MASK_KEEP_LAST_N` | `3` | maskToolObservations 保留条数 |
+| `mergePairs.keepLastN` | `SCREAM_CODE_MERGE_PAIRS_KEEP_LAST_N` | `3` | mergeOldToolPairs 保留的最新 pair 数 |
 
 ### 2.2 Point A 存档（每步写入存档）
 

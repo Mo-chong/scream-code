@@ -30,6 +30,38 @@ import {
 } from './noop-loop-guard';
 import EDIT_DESCRIPTION from './edit.md';
 
+/**
+ * When old_string is not found, auto-read current file content so AI can
+ * immediately re-edit without a separate Read round-trip.
+ * Returns a formatted string with file length + first N lines preview.
+ */
+/**
+ * Preview line count — tuned to give enough context for the AI to identify
+ * the right location, without bloating the error message.
+ */
+const AUTO_PREVIEW_LINES = 30;
+
+async function autoReadPreview(jian: Jian, safePath: string, focusLine?: number): Promise<string> {
+  try {
+    const raw = await jian.readText(safePath);
+    const lines = raw.split('\n');
+
+    if (focusLine !== undefined && focusLine > 0 && focusLine <= lines.length) {
+      // Show context around the target line
+      const halfWindow = Math.floor(AUTO_PREVIEW_LINES / 2);
+      const start = Math.max(0, focusLine - halfWindow - 1);
+      const end = Math.min(lines.length, focusLine + halfWindow);
+      const pre = lines.slice(start, end).join('\n');
+      return `\n\n当前文件 (${lines.length} 行，自动预览第 ${start + 1}-${end} 行，聚焦行 ${focusLine}):\n${pre}`;
+    }
+
+    const pre = lines.slice(0, AUTO_PREVIEW_LINES).join('\n');
+    return `\n\n当前文件 (${lines.length} 行，自动预览前 ${AUTO_PREVIEW_LINES} 行):\n${pre}${lines.length > AUTO_PREVIEW_LINES ? '\n...' : ''}`;
+  } catch {
+    return '\n(自动读取文件失败)';
+  }
+}
+
 // `old_string` must be non-empty: the non-replace_all branch walks
 // occurrences with `content.indexOf("", pos)`, which would loop forever
 // on an empty search string.
@@ -227,23 +259,28 @@ export class EditTool implements BuiltinTool<EditInput> {
 
         if (count === 0) {
           const lineCount = content.split('\n').length;
+          // Show context around top of file to help AI identify discrepancies
+          const preview = await autoReadPreview(this.jian, safePath, 1);
           return {
             isError: true,
             output:
               `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ` +
               'The file contents may be out of date — re-read with the Read tool. ' +
-              'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.',
+              'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.' +
+              preview,
           };
         }
         if (count > 1) {
           const truncatedNote =
             count > matchLineNumbers.length ? ` (showing first ${String(matchLineNumbers.length)})` : '';
+          const preview = await autoReadPreview(this.jian, safePath, matchLineNumbers[0]);
           return {
             isError: true,
             output:
               `old_string is not unique in ${args.path} (found ${String(count)} occurrences at lines: ${matchLineNumbers.join(', ')}${truncatedNote}). ` +
               'To replace every occurrence, set replace_all=true. ' +
-              'To target a specific one, include more surrounding context lines from one of those line ranges in old_string.',
+              'To target a specific one, include more surrounding context lines from one of those line ranges in old_string.' +
+              preview,
           };
         }
 
@@ -261,12 +298,14 @@ export class EditTool implements BuiltinTool<EditInput> {
       const replacementCount = parts.length - 1;
       if (replacementCount === 0) {
         const lineCount = content.split('\n').length;
+        const preview = await autoReadPreview(this.jian, safePath);
         return {
           isError: true,
           output:
             `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ` +
             'The file contents may be out of date — re-read with the Read tool. ' +
-            'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.',
+            'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.' +
+            preview,
         };
       }
 

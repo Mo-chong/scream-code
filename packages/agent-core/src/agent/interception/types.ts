@@ -39,7 +39,9 @@ export type RootCause =
   | 'tool_permission'     // 工具权限
   | 'turn_limit'          // 回合上限
   | 'context_pressure'    // 上下文压力
-  | 'log_info';           // 纯日志
+  | 'log_info'            // 纯日志
+  | 'archive_inefficient' // 低效取回：重复 Read / 未用 archive_recover
+  | 'edit_retry';         // Edit 失败后重试：连续 Edit 同文件失败
 
 /** 拦截阶段 */
 export type InterceptionPhase = 'pre_step' | 'post_step' | 'pre_tool' | 'post_tool';

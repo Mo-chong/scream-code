@@ -46,6 +46,8 @@ import { interceptionSummaryDetector } from './interception/detectors/intercepti
 import { toolPatternDetector } from './interception/detectors/tool-pattern';
 import { sceneMemoryDetector } from './interception/detectors/scene-memory';
 import { budgetNotifyDetector } from './interception/detectors/budget-notify';
+import { archiveInefficiencyDetector } from './interception/detectors/archive-inefficiency';
+import { editRetryDetector } from './interception/detectors/edit-retry';
 import { turnLimitsDetector } from './interception/detectors/turn-limits';
 import { toolDedupDetector } from './interception/detectors/tool-dedup';
 import { permissionEnforcerDetector } from './interception/detectors/permission-enforcer';
@@ -210,6 +212,8 @@ readonly contentArchive: ContentArchive;
     this.interception.registerDetector(toolPatternDetector);
     this.interception.registerDetector(sceneMemoryDetector);
     this.interception.registerDetector(budgetNotifyDetector);
+    this.interception.registerDetector(archiveInefficiencyDetector);
+    this.interception.registerDetector(editRetryDetector);
     this.planMode = new PlanMode(this);
     this.wolfpackMode = new WolfPackMode(this);
     this.permission = new PermissionManager(this, options.permission);

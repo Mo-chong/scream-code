@@ -64,13 +64,16 @@ v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销*
 | OpenAI | 隐式前缀匹配 | ✅ 大幅提升 | ⚠️ 轻微（消息结构变化影响匹配） |
 | Gemini | 隐式前缀匹配 | ✅ 大幅提升 | ⚠️ 轻微 |
 
-### B. Observation Masking（P1 — 省 attention 省 token）
+### B. Observation Masking + Tool Pair Merge（P1 — 省 attention 省 token）
 
 **位置**：
-- 正常路径：`turn-step.ts:73-77` — `buildMessages()` → `maskToolObservations()` → `llm.chat()`
+- 正常路径：`turn-step.ts:73-77` — `buildMessages()` → `maskToolObservations()` → `mergeOldToolPairs()` → `llm.chat()`
 - 压缩路径：`full.ts:compactionWorker` — project() → `maskToolObservations(projected, 1)` → LLM
 
-**原理**：旧工具输出（read_file 返回的几百行代码）对当前轮次的推理几乎无用，但仍占据 attention 窗口。将旧 tool result 替换为固定占位符 `[Old tool output: obscured — tool may be re-invoked if needed]`。
+**两步流水线**：
+
+1. **maskToolObservations**：旧 tool result 替换为占位符 `[已遮蔽·key:xxx·toolName·archive_recover可取回]`，同时生成 `RecoverableRecord[]`（含摘要、key、优先级）供 ActiveSummaryInjector 使用。
+2. **mergeOldToolPairs**：旧 assistant(toolCalls) + tool result 对合并为单条 assistant 消息（仅当所有 tool result 已被遮蔽时）。消息数量直接减半。
 
 **两种路径的行为差异**：
 

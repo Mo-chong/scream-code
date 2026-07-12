@@ -39,6 +39,8 @@ const ROOT_CAUSE_LABEL: Record<RootCause, string> = {
   tool_permission: '工具权限',
   turn_limit: '回合上限',
   context_pressure: '上下文压力',
+  archive_inefficient: '低效取回',
+  edit_retry: '编辑重试',
   log_info: '日志信息',
 };
 
