@@ -736,3 +736,52 @@ updated: 2026-07-11
 - `SYSTEM/injection-system.md` — 全篇：17 注入器表格 + 注册码 + 版本号
 - `SYSTEM/architecture-overview.md` — §6.2 更新为 17 注入器表
 - `DECISIONS/分析-增量摘要设计与实现偏差复盘.md` — 更新所有计划为已完成
+
+### Phase38 — 拦截管理系统统一架构 [2026-07-12]
+
+#### Phase38a: 基础设施
+- **`interception/types.ts`** — 接口定义（AttentionPriority/RootCause/RawSignal/InterceptionMessage/DetectorFn）
+- **`interception/config.ts`** — 统一配置（5层优先级 P0-P4，递进阈值，单步上限3条）
+- **`interception/manager.ts`** — InterceptionManager 中央调度器（mergeByRootCause / calcEscalation / sortByPriority / budgetCap / formatMessage）
+- **`agent/index.ts`** — Agent 类注册 `agent.interception` 实例
+
+#### Phase38b: 互联通道
+- **`injection/router.ts`** — `InjectContext` 新增 `extraInterceptions: readonly InterceptionMessage[]`
+- **`injection/manager.ts`** — `inject()` Step 0：拦截消息预批准优先占 budget 槽，走后门直入 `appendSystemReminder()`
+- **`turn/index.ts`** — 管线串联：`interception.execute(ctx)` → `messages[]` → `inject({extraInterceptions})`
+
+#### Phase38c: bypass 消除 + 清理
+- **`variant-registry.ts`** — 删除 `system_trigger` 死代码
+- **`anti_confabulation.ts`** — 删除（合并入 InterceptionManager confabulation detector）
+- **`quality.ts`** — QualityInjector bypass 消除（`getResidualConfig` → 标准残差参数 0.6/0.85/3/0.20）
+
+#### Phase38e/f: AI 体验提升
+- **`detectors/attention-monitor.ts`** — [DONE]+已验证→智能跳过，[NEED]/[CONFIRM] 走 P3 统一管道
+- **`detectors/quality-degrade.ts`** — C→B→A→S 质量衰退走递进（不再 bypass budget）
+- **`detectors/verify-pass.ts`** — 修复后 `[恢复]` 正向确认
+- **`detectors/confabulation.ts`** — 防幻核心：confidence≥3→P0_block 阻断，≥2→P1_discipline 证据提醒
+- **`detectors/deviation-chain.ts`** — 偏差链消息走 extraInterceptions 通道（替代旧 `this.inject()` bypass）
+- **`manager.ts`** — 正向信号算法：修复恢复检测 + triggerHistory 衰减（未触发根因每轮-1)
+
+#### Phase38g: 代码整洁
+- **`detectors/turn-limits.ts`** — 回合步数上限检测
+- **`detectors/tool-dedup.ts`** — 连续相同工具调用检测
+- **`detectors/permission-enforcer.ts`** — Guard 规则 1-4 检测
+
+#### 文档
+- **`SYSTEM/attention-system.md`** — 新建：统一大脑（AI 读这个就够了）
+- **`SYSTEM/interception-system.md`** — 新建：执行层参考
+- **`SYSTEM/interception.md`** — 扩展：全链路架构图（8 detectors→InterceptionManager→InjectionRouter→event-log）
+- **`SYSTEM/architecture-overview.md`** — 引用更新（`attention-system` 替换 `attention-management`）
+- **`SYSTEM/injection-system.md`** — 引用更新
+- **`SYSTEM/MAP.md`** — 描述更新（`attention-system`+`interception-system` Phase38 标记）
+- **`SYSTEM/API-REFERENCE.md`** — §3.1 新增拦截预批准通道，变体表清理 `system_trigger`
+- **`SYSTEM/系统说明书维护SOP.md`** — §T5 规则：改前先读 `attention-system.md`
+- **`SYSTEM/turn-control.md`** — 引用更新
+- **删除** `attention-management.md`（回收站），`guard-engine.md`（回收站）
+
+#### 数据
+- bypass: 5→1（保留 TruncationTracker 合理例外）
+- AI 每步消息上限: 6→3条
+- SYSTEM 文档: 6碎片→1统一大脑（`attention-system.md`）
+- 8 detectors 全部注册运行

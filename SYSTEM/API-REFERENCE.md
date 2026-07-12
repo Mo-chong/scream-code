@@ -199,6 +199,11 @@ class InjectionManager {
 }
 ```
 
+**Phase38b 新增：拦截预批准通道**
+`InjectContext` 新增 `extraInterceptions?: readonly InterceptionMessage[]`。
+`turn/index.ts` → `interception.execute(ctx)` → `InterceptionMessage[]` → `manager.ts inject()` Step 0 预批准优先占 budget 槽。
+拦截消息跳过残差（递进替代），共享 `maxInjectionsPerStep` 上限。
+
 ### 3.2 17 个注入器（全部注册，统一管线 Phase37）
 <!-- ref: injectors -->
 
@@ -1203,8 +1208,8 @@ class KnowledgeLookupTool implements StepTool
 
 | 键 | 类型 | 参数说明 | 源文件 |
 |----|------|---------|--------|
-| system_trigger | variant | weight:1.0, decay:0.99, thr:0.1 | variant-registry.ts |
-| deviation_chain_intercept | variant | weight:1.0, decay:0.99, thr:0.1 | variant-registry.ts |
+| deviation_chain_intercept | variant | weight:1.0, decay:0.99, thr:0.1 | variant-registry.ts（Phase38c: system_trigger 死代码已删） |
+| intercept_confabulation | variant | Phase38e: P0_block 防幻 | interception/detectors/confabulation.ts |
 | intent_fix_bug | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
 | intent_refactor | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
 | intent_add_feature | variant | weight:0.9, decay:0.92, thr:0.3 | variant-registry.ts |
