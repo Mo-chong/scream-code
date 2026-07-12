@@ -875,6 +875,23 @@ export class TurnFlow {
                       behaviorViolations: {},
                       eventLog: null as any,
                       triggerHistory: {},
+                      lastAIResponse: (() => {
+                        const h = this.agent.context.history;
+                        for (let i = h.length - 1; i >= 0; i--) {
+                          const m = h[i];
+                          if (m?.role === 'assistant') {
+                            const text = typeof m.content === 'string' ? m.content
+                              : Array.isArray(m.content) ? m.content.map((p: any) => p.text ?? '').join('') : '';
+                            if (text) return text;
+                          }
+                        }
+                        return undefined;
+                      })(),
+                      attentionSignals: this.crossTurnFlags.attentionSignals
+                        ? { done: this.crossTurnFlags.attentionSignals.done ?? false,
+                            need: this.crossTurnFlags.attentionSignals.need ?? false,
+                            confirm: this.crossTurnFlags.attentionSignals.confirm ?? false }
+                        : undefined,
                     };
                     const result = this.agent.interception.execute(ctx);
                     return result.messages;
@@ -2321,28 +2338,9 @@ export class TurnFlow {
         { kind: 'system_trigger', name: 'behavior_rule' },
       );
     }
-    // 注意力信号消费 — AI 回复中的 [DONE]/[NEED]/[CONFIRM]
-    if (this.crossTurnFlags.attentionSignals?.done) {
-      this.inject(
-        '你报告了 [DONE]，请先用构建/测试/检查工具验证后再确认完成，不要凭空声称。',
-        { kind: 'system_trigger', name: 'attention_done' },
-      );
-    }
-    if (this.crossTurnFlags.attentionSignals?.need) {
-      this.inject(
-        '你报告了 [NEED]，请说明：当前目标、已尝试的方法、具体卡在哪一步。我会给你针对性引导。',
-        { kind: 'system_trigger', name: 'attention_need' },
-      );
-    }
-    if (this.crossTurnFlags.attentionSignals?.confirm) {
-      this.inject(
-        '你报告了 [CONFIRM]，请根据已有信息自行判断并继续推进。不确定时直接用工具验证假设，不必等用户确认。',
-        { kind: 'system_trigger', name: 'attention_confirm' },
-      );
-    }
     this.crossTurnFlags.lastTurnHadGuardRule1 = false;
     this.crossTurnFlags.lastTurnHadDeviation = false;
-    // 复位注意力信号（parseAttentionSignals 已在下轮 LLM 回复后重新提取）
+    // 复位注意力信号（由 AttentionMonitorDetector + InterceptionManager 消费）
     this.crossTurnFlags.attentionSignals = { done: false, need: false, confirm: false };
   }
 

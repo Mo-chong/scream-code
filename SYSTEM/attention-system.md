@@ -137,13 +137,16 @@ AI 自主调用工具，无系统干预。
   └─ 写前没读 + 连续 3 次 → 编辑纪律 P1 warn
 
 我声明完成:
-  ├─ 验证通过了 → 正向确认
-  ├─ 验证失败 → 验证纪律 P1 hint
-  └─ 跳过验证直接说完成 → 验证纪律 P1 nudge
+  ├─ 验证通过了 → 无反馈（普通通过，旧代码仍用 this.inject()）
+  ├─ 验证失败 → 验证纪律 P1 hint（旧代码处理）
+  └─ 之前反复失败后本轮通过 → **P3 [恢复] 正向确认** ✅（verifyPassDetector）
 
 我报告 [DONE]:
-  ├─ 之前验证过 → 无反馈
-  └─ 之前没验证 → 注意力信号 P3 hint
+  ├─ 之前已验证过 → **无反馈** ✅（attentionMonitorDetector 智能跳过）
+  └─ 之前没验证 → 注意力信号 P3 hint（attentionMonitorDetector）
+
+我质量下降:
+  └─ C→B→A→S 升级 → **P2→P1 递进** ✅（qualityDegradeDetector）
 
 我在失败循环:
   ├─ stuck_loop 检测 → 一条合并消息，不是 5 条

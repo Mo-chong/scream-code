@@ -101,6 +101,8 @@ export interface InterceptionContext {
   eventLog: TurnEventLog;
   /** 历史触发计数器（key = rootCause，value = 累计次数） */
   triggerHistory: Record<string, number>;
+  /** AI 注意力信号 [DONE]/[NEED]/[CONFIRM] */
+  attentionSignals?: { done?: boolean; need?: boolean; confirm?: boolean };
 }
 
 /* ──────────────── Detector 接口 ──────────────── */

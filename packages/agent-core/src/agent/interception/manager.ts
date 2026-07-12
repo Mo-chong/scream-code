@@ -87,29 +87,78 @@ export class InterceptionManager {
       if (signal) signals.push(signal);
     }
 
-    if (signals.length === 0) return { blocked: false, messages: [] };
+    // Step 2: 检测"修复恢复"——先前活跃的根因本轮不再触发（正向信号）
+    const currentRootCauses = new Set(signals.map((s) => s.rootCause));
+    const resolvedCauses: { rootCause: string; prevCount: number }[] = [];
+    for (const [cause, count] of this.triggerHistory) {
+      if (count > 0 && !currentRootCauses.has(cause as any)) {
+        resolvedCauses.push({ rootCause: cause, prevCount: count });
+      }
+    }
 
-    // Step 2: 按根因合并
-    const merged = this.mergeByRootCause(signals);
+    // 最多 1 条正向信号/步（避免刷屏）
+    let resolutionSignal: RawSignal | null = null;
+    const firstResolved = resolvedCauses[0];
+    if (firstResolved) {
+      resolutionSignal = {
+        rootCause: firstResolved.rootCause as any,
+        priority: 'P3_signal',
+        confidence: 0.7,
+        message: `[恢复] 你已修复/摆脱了「${firstResolved.rootCause}」问题，已连续触发 ${firstResolved.prevCount} 次后在本轮消除。正向行为确认。`,
+        escalation: 'hint',
+        phase: 'post_step',
+      };
+    }
 
-    // Step 3: 计算递进等级
+    if (signals.length === 0 && !resolutionSignal) {
+      // 无信号也无恢复 → 清理过时历史（15步无触发清0）
+      for (const [cause] of this.triggerHistory) {
+        const key = cause;
+        const prev = this.triggerHistory.get(key) ?? 0;
+        // 逐步衰减，不直接清零
+        if (prev > 0) this.triggerHistory.set(key, Math.max(0, prev - 1));
+      }
+      return { blocked: false, messages: [] };
+    }
+
+    const allSignals = resolutionSignal ? [...signals, resolutionSignal] : signals;
+
+    // Step 3: 按根因合并
+    const merged = this.mergeByRootCause(allSignals);
+
+    // Step 4: 计算递进等级
     const escalated = merged.map((m) => ({
       ...m,
       escalation: this.calcEscalation(m.rootCause, ctx),
       isPositive: this.checkPositiveSignal(m, ctx),
     }));
 
-    // Step 4: 按优先级排序，取 top N
+    // Step 5: 按优先级排序，取 top N
     const sorted = this.sortByPriority(escalated);
     const capped = sorted.slice(0, this.config.maxMessagesPerStep);
 
-    // Step 5: 更新 triggerHistory
+    // Step 6: 对未触发的根因做衰减，对已触发的做递增/重置
+    // 先衰减本轮未出现的根因
+    const activeCauses = new Set(capped.filter((m) => !m.isPositive).map((m) => m.rootCause));
+    for (const [cause] of this.triggerHistory) {
+      if (!activeCauses.has(cause as any)) {
+        const prev = this.triggerHistory.get(cause as string) ?? 0;
+        if (prev > 0) this.triggerHistory.set(cause as string, Math.max(0, prev - 1));
+      }
+    }
+    // 再处理本轮活跃的根因
     for (const m of capped) {
-      const key = m.rootCause;
-      this.triggerHistory.set(key, (this.triggerHistory.get(key) ?? 0) + 1);
+      if (m.isPositive) {
+        // 正向信号 → 已修复，计数器归零
+        this.triggerHistory.delete(m.rootCause);
+      } else {
+        // 普通信号 → 递增
+        const key = m.rootCause;
+        this.triggerHistory.set(key, (this.triggerHistory.get(key) ?? 0) + 1);
+      }
     }
 
-    // Step 6: 阻断检查
+    // Step 7: 阻断检查
     const blocked = capped.some((m) => m.priority === 'P0_block');
 
     return {
@@ -214,14 +263,16 @@ export class InterceptionManager {
 
   /**
    * 判断是否为正向信号
-   * 正向信号 = 同一根因在前一轮出现后，本轮缓解或消失
+   * 正向信号 = AI 修复了之前的问题或改善了行为
    */
   private checkPositiveSignal(merged: MergedSignal, _ctx: InterceptionContext): boolean {
-    // 简单策略：如果该根因之前触发过但本轮是 hint 级别，可能意味着行为在改善
+    // 1. "修复恢复"消息 → 确定正向
+    if (merged.message.includes('[恢复]')) return true;
+    // 2. 该根因之前触发过，本轮递进等级较低 → 弱改善
     const key = merged.rootCause;
     const prevCount = this.triggerHistory.get(key) ?? 0;
     if (prevCount > 0 && merged.escalation === 'hint' && merged.mergedCount <= 1) {
-      return true; // 弱改善信号
+      return true;
     }
     return false;
   }
@@ -242,9 +293,11 @@ export class InterceptionManager {
   /** 格式化消息为 AI 接收的最终格式 */
   private formatMessage(merged: MergedSignal): InterceptionMessage {
     const causeLabel = ROOT_CAUSE_LABEL[merged.rootCause] || merged.rootCause;
-    const priLabel = PRIORITY_LABEL[merged.priority] || '?';
 
-    const header = `[拦截/${priLabel}] ${causeLabel}`;
+    // 正向信号使用不同 header
+    const header = merged.isPositive
+      ? `[注意/恢复] ${causeLabel}`
+      : `[拦截/${PRIORITY_LABEL[merged.priority] || '?'}] ${causeLabel}`;
     const body = merged.message;
 
     return {
