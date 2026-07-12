@@ -1,75 +1,73 @@
-import type { Agent } from '..';
+/**
+ * GuardInjector — 守卫规则注入器（R1 阻断 + R2/R3/R4 备用）
+ *
+ * Phase38 精简版：R2/R3/R4 由 permissionEnforcerDetector 接管，
+ * 但 guard-injector 保留对 R2/R3/R4 的注入能力（fallback）。
+ * R1 (confabulation blocking) 是此注入器的核心职责。
+ *
+ * setGuardData() 由 turn/index.ts 在 runGuardDetection 后调用。
+ */
+
 import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
+import type { Agent } from '..';
 
-interface GuardData {
-  rule: number;     // 2/3/4 only — Rule 1 (blocking) 不走注入管线
-  feedback: string;
+export interface GuardData {
+  rule: 0 | 1 | 2 | 3 | 4;
+  block: boolean;
+  feedback?: string;
 }
 
-/**
- * GuardInjector — 守卫反馈注入器
- *
- * 职责:
- *   将 checkGuard() 的观察结果（Rule 2/3/4）通过统一注入管线注入。
- *
- * 数据流:
- *   1. turn/index.ts:runGuardDetection() 调用 checkGuard()
- *   2. Rule 2/3/4 → setGuardData(rule, enrichedFeedback) 写入
- *   3. 下一轮 beforeStep → injection.inject() → router.dispatch()
- *   4. canInject() 检查变体残差 → getInjection() 返回反馈
- *   5. 拼接为系统提醒
- *
- * Rule 1 (阻断) 不走此注入器 — 它设 confabulationBlocked 标记控制流程。
- */
+const GUARD_VARIANT = 'guard-feedback';
+
 export class GuardInjector extends DynamicInjector {
-  injectionVariant = 'guard-feedback';
+  override readonly injectionVariant = GUARD_VARIANT;
 
-  constructor(protected override readonly agent: Agent) {
-    super(agent);
+  get name(): string { return GUARD_VARIANT; }
+  get description(): string { return '守卫规则 R1 阻断 + R2/R3/R4 fallback'; }
+  get priority(): number { return 80; }
+
+  private lastRule: number = 0;
+  private lastFeedback: string | null = null;
+  private lastBlock: boolean = false;
+
+  setGuardData(rule: number, block: boolean, feedback?: string): void {
+    this.lastRule = rule;
+    this.lastBlock = block;
+    this.lastFeedback = feedback ?? null;
   }
 
-  private guardData: GuardData | null = null;
-
-  /** runGuardDetection 调用，设置本轮守卫数据供下一轮注入 */
-  setGuardData(rule: number, feedback: string): void {
-    this.guardData = { rule, feedback };
-  }
-
-  /** 每轮检测前调用，清除上一轮残留 */
   clearGuardData(): void {
-    this.guardData = null;
+    this.lastRule = 0;
+    this.lastBlock = false;
+    this.lastFeedback = null;
   }
 
-  /** 供 shouldContinueAfterStop 读取最近的 feedback（不限于注入） */
-  get lastFeedback(): string | null {
-    return this.guardData?.feedback ?? null;
+  getLastFeedback(): string | null {
+    return this.lastFeedback;
+  }
+
+  override getResidualConfig(): ResidualConfig {
+    return { weight: 0.7, decayPerStep: 0.90, threshold: 0.20, minStepGap: 3 };
   }
 
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.AFTER_TOOL_CALL;
+    return InsertPosition.AFTER_SYSTEM;
   }
 
-  override getResidualConfig(): ResidualConfig | undefined {
-    // scheduler 用 variant-registry 的 guard-feedback 配置
-    return { weight: 0.7, decayPerStep: 0.85, minStepGap: 3, threshold: 0.25 };
+  protected shouldInject(): boolean {
+    // Phase38: R1 阻断走此注入器，R2/R3/R4 由 permissionEnforcerDetector 处理
+    return this.lastRule === 1;
   }
 
-  protected override getInjection(): string | undefined {
-    if (!this.guardData || this.guardData.rule <= 1) return undefined;
-
-    // Phase B': record as context fact for aggregated [Context Facts] block
-    const ruleLabel = `Rule ${this.guardData.rule}`;
-    const feedbackShort =
-      this.guardData.feedback.length > 80
-        ? this.guardData.feedback.slice(0, 80) + '…'
-        : this.guardData.feedback;
-    this.agent.context.recordFact?.(
-      'guard-rules',
-      `${ruleLabel}: ${feedbackShort}`,
-      'warn',
-    );
-
-    return this.guardData.feedback;
+  protected getInjection(): string | undefined {
+    if (this.lastRule === 1) {
+      // R1: confabulation block
+      return this.lastFeedback || '检测到内容编造，当前步已阻断。';
+    }
+    // Phase38: R2/R3/R4 主要由 permissionEnforcerDetector 处理
+    // guard-injector 保留 fallback（如果 detector 未触发）
+    if (!this.lastFeedback) return undefined;
+    return this.lastFeedback;
   }
 }

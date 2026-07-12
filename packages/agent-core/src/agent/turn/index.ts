@@ -245,6 +245,7 @@ export class TurnFlow {
   private _confabResult: any = null;
   private _qualitySignals: any = null;
   private _stuckContext: any = null;
+  private _guardResult: any = null;
   /** 本轮 Edit 的文件路径（用于 stuck 检测） */
   private editFileThisStep: string | undefined;
   /** 本轮工具报错（用于 stuck 检测） */
@@ -894,6 +895,7 @@ export class TurnFlow {
                         : undefined,
                       lastTurnHadDeviation: this.crossTurnFlags.lastTurnHadDeviation ?? false,
                       lastTurnHadGuardRule1: this.crossTurnFlags.lastTurnHadGuardRule1 ?? false,
+                      guardResult: this._guardResult,
                     };
                     const result = this.agent.interception.execute(ctx);
                     return result.messages;
@@ -2089,6 +2091,7 @@ export class TurnFlow {
       hasMemoryLookup: this.lastStepCalledMemoryLookup,
       hasCurrentCodeTools: this.hasCurrentCodeToolsThisStep,
     });
+    this._guardResult = guardResult;
 	    if (guardResult.rule > 0) {
 	      if (this.agent.memoStore) {
 	        const memQuery = guardResult.rule === 1 ? '测试 验证 谎报 通过'
@@ -2106,7 +2109,7 @@ export class TurnFlow {
 	        this.eventLog.record({ kind: "confabulation", variant: "guard_rule_1", action: "detected", step: this.currentStep, turnId: this.currentTurnId, reason: guardResult.reason });
 	      } else {
 	        this.eventLog.record({ kind: "guard_observe", variant: "guard_rule_${guardResult.rule}", action: "detected", step: this.currentStep, turnId: this.currentTurnId, reason: guardResult.reason });
-	        this.agent.injection.guardInjector.setGuardData(guardResult.rule, guardResult.feedback);
+	        this.agent.injection.guardInjector.setGuardData(guardResult.rule, true, guardResult.feedback);
 	      }
 	    }
   }
@@ -2300,7 +2303,7 @@ export class TurnFlow {
       this.confabulationBlocked = false;
       return;
     }
-    const guardFeedback = this.agent.injection.guardInjector.lastFeedback;
+    const guardFeedback = this.agent.injection.guardInjector.getLastFeedback();
     if (guardFeedback) {
       reasons.push(guardFeedback);
     } else {

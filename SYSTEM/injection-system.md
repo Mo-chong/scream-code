@@ -28,7 +28,7 @@ updated: 2026-07-11
 | **S** | System | 系统级约束，必须始终呈现 | ✅ 绝对 | ✅ 永不压缩 | `intent_fix_bug`, `session_memory`, `feedback_positive`, `feedback_negative` |
 | **A** | Advanced | 高级行为规则 | ✅ 绝对（除非预算耗尽） | ✅ 永不压缩 | `prepare_bash_file`, `post_edit` |
 | **B** | Behavioral | 中级行为规则 | ❌ 残差衰减后可跳过 | ❌ | `guard_rule_3`, `guard_feedback_rule_3` |
-| **C** | Common | 普通信息提示 | ❌ 残差衰减后可跳过 | ❌ | `anti_confabulation`, `intent_summarize` |
+| **C** | Common | 普通信息提示 | ❌ 残差衰减后可跳过 | ❌ | `intent_summarize`（~~anti_confabulation~~已删≈Phase38c） |
 | **D** | Debug | 低级调试信息 | ❌ 受 budget 控制 | ❌ | `system_ref_stuck`, `session_memory`(某些场景) |
 
 ### 等级行为规则
@@ -79,7 +79,7 @@ export interface VariantMeta {
 |--------|--------|-------------|-----------|-----------|------|------|
 | `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: ctx.history替代stuckContext） |
 | ~~`system_ref_anti_confabulation`~~ | — | — | — | — | — | **已删除** Phase38c（合并入 confabulationDetector） |
-| `quality_escalate` | 0.6 | 0.85 | 0.20 | 3 | C | 质量偏差检测（Phase38c bypass消除→标准残差） |
+| ~~`quality_escalate`~~ 🗑️ | — | — | — | — | — | **已删除** Phase38j（由 qualityDegradeDetector 替代，走 InterceptionManager 统一管道） |
 | `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
 | `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
 | `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
@@ -236,7 +236,7 @@ InjectionRouter.dispatch(context)
   ├─ 遍历所有注册 injectors（按 priority 排序）
   │   ├─ 跳过 disabled 注入器
   │   ├─ getResidualConfig() 获取残差配置
-  │   ├─ residualCfg === undefined → 跳过残差检查 + 预算过滤（如 QualityInjector）
+  │   ├─ residualCfg === undefined → 跳过残差检查 + 预算过滤（Phase38j 已消除全部 bypass）
   │   ├─ residualCfg !== undefined → scheduler.shouldInject(id, context) → 残差过滤
   │   ├─ getCacheGroup(id) → 分组缓存管理
   │   ├─ injector.inject(context) → 实际生成注入内容（存入 _lastInjectContext）
@@ -248,7 +248,7 @@ InjectionRouter.dispatch(context)
 
 **缓存诊断**: `dispatch()` 末尾保存本轮注入结果到 `_lastInjectResults`，通过 `getLastInjectResults(): InjectResult[]` 暴露。`turn/index.ts:afterStep` 读取后传入 `buildAuditEntry` 写入审计日志。
 
-**路径 B 迁移**: `turn/injectors/{stuck,anti_confabulation,quality,intent}.ts` 已删除。四个功能均包装为 DynamicInjector 子类注册于 `injection/` 目录。getResidualConfig() 返回 undefined 的注入器（QualityInjector）绕过预算检查。详见 `ZHU/DECISIONS/方案-注入系统三路径统一设计.md`。
+**路径 B 迁移**: `turn/injectors/{stuck,anti_confabulation,quality,intent}.ts` 已删除。四个功能均包装为 DynamicInjector 子类注册于 `injection/` 目录。Phase38c/e/j 逐步消除 bypass：QualityInjector 已删除（由 qualityDegradeDetector 替代），anti_confabulation 已删除（由 confabulationDetector 替代）。详见 `ZHU/DECISIONS/方案-注入系统三路径统一设计.md`。
 
 ### 4.2 InjectionManager 接口
 
@@ -331,7 +331,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
   ├─ detectConfabulation()  ← 反事实检测（拦截仍在收敛门）
   ├─ runQualityDetection() → qualityIssue  ← 质量偏差检测（返回 QDetectionResult | null）
   ├─ injection.inject({stuckContext, confabulationResult, qualitySignals})  ← Step 6：统一注入管线
-  │    └─ 通过 _lastInjectContext 传递给 StuckInjector / AntiConfabulationInjector / QualityInjector
+  │    └─ 通过 _lastInjectContext 传递给 StuckInjector / IntentInjector
   ├─ shouldContinueAfterStop()  ← 收敛门（含 confaBlocked 硬拦截）
   └─ 重置 step 级计数器
 ```
@@ -378,9 +378,9 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
 | ~~`anti_confabulation.ts`~~ 🗑️ | ~~`system_ref_anti_confabulation`~~ | — | — | — | ❌ | **已删除** Phase38c（合并入 confabulationDetector） |
-| `quality.ts` | `quality_escalate` | AFTER_TOOL_CALL | C | QualityDetector 信号（Phase38c：跳过残差→标准残差0.6/0.85/3/0.20） | ✅ |
+| ~~`quality.ts`~~ 🗑️ | ~~`quality_escalate`~~ | ~~AFTER_TOOL_CALL~~ | — | — | ❌ | **已删除** Phase38j（由 qualityDegradeDetector 替代） |
 | `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
-| `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ |
+| `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | **Phase38j 精简为仅 R1 阻断**（R2/R3/R4 由 permissionEnforcerDetector 接管） | ✅ |
 
 > **注册总数**: 17 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
 > Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
@@ -458,8 +458,8 @@ const injectors: [string, DynamicInjector][] = [
   ['working-set', new WorkingSetInjector(agent)],
   ['user-prefs', new UserPrefsInjector(agent)],
   ['system_ref_stuck', new StuckInjector()],
-  ['anti_confabulation', new AntiConfabulationInjector()],
-  ['quality_escalate', new QualityInjector()],
+  ['anti_confabulation', new AntiConfabulationInjector()], // Phase38c 已删除；由 confabulationDetector 替代
+  ['quality_escalate', new QualityInjector()], // Phase38j 已删除；此处为历史参考
   ['intent_guidance', new IntentGuidanceInjector(agent)],
   ['error-audit', new ErrorAuditInjector(agent)],
   ['guard-feedback', this.guardInjector],

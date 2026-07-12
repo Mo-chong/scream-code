@@ -224,7 +224,7 @@ class InjectionManager {
 | WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | |
 | PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | |
 | AntiConfabulationInjector | ~~`agent/injection/anti_confabulation.ts`~~ **已删除** Phase38c | — | — | — | ❌ | — |
-| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ | Phase38c bypass消除改为标准残差 |
+| QualityInjector | ~~`agent/injection/quality.ts`~~ 🗑️ **已删除** Phase38j | — | — | — | ❌ | 由 qualityDegradeDetector 替代 |
 | StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步（weight 30→0.6） | ✅ | Phase37 |
 | GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ | Phase37 |
 

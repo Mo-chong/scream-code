@@ -156,7 +156,7 @@ W=1.0 → 60%,  W=0.8 → 50%,  W=0.5 → 35%,  未配置 → 100%
   · 第3步: [session_memory] Budget denies session_memory (t≈179, lv=D)
   · 第7步: [post_edit] Budget denies post_edit (t≈12, lv=C)
 - injection_delivered/injected: 1 次
-  · 第5步: [anti_confabulation] Injected anti_confabulation (lv=S)
+  · 第5步: [confabulation_detector] Injected confabulation_detector (lv=S)
 ---
 ```
 
@@ -185,7 +185,7 @@ session.close()
   "globalStats": {
     "totalEvents": 42,
     "byKind": { "injection_skipped": 30, "injection_delivered": 8, "convergence_gate": 4 },
-    "byVariant": { "post_edit": 12, "session_memory": 5, "anti_confabulation": 8 },
+    "byVariant": { "post_edit": 12, "session_memory": 5, "confabulation_detector": 8 },
     "lastUpdated": "2026-06-23T11:48:16.515Z"
   }
 }
