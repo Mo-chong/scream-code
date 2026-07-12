@@ -424,8 +424,7 @@ Cross:   VariantScheduler (variant-registry.ts)   ← 34 变体残差调度
 | `todo-list.ts` | `todo_list` | C | todo 列表变化 |
 | `wolfpack.ts` | `wolfpack` | C | WolfPack 调用 |
 | `plugin-session-start.ts` | `plugin_session_start` | C | 插件会话启动 |
-| `anti_confabulation.ts` | `system_ref_anti_confabulation` | C | ConfabulationDetector ≥2 |
-| `quality.ts` | `quality_escalate` | —(跳过预算) | QualityDetector 信号 |
+| `quality.ts` | `quality_escalate` | C | QualityDetector 信号（Phase38c bypass消除改为标准残差） |
 | `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） |
 | `guard-injector.ts` | `guard-feedback` | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） |
 

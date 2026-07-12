@@ -785,3 +785,10 @@ updated: 2026-07-11
 - AI 每步消息上限: 6→3条
 - SYSTEM 文档: 6碎片→1统一大脑（`attention-system.md`）
 - 8 detectors 全部注册运行
+
+#### Phase38i: 拦截日志系统 3 层结构升级 [2026-07-12]
+- **`interception/event-types.ts`** — 新建：3 层事件类型体系（DetectorResult / InterceptionDecision / DeliveryResult）+ 聚合查询类型（RootCauseTrend / DetectorStats / TurnInterceptionReport）
+- **`interception/manager.ts`** — `recordStep()` 自动记录本轮拦截事件全链路（检测→决策→投递）
+- **`turn/event-log.ts`** — `recordReport()` 结构化记录 + 3 个聚合查询 API（`getRootCauseTrend` / `getAllDetectorStats` / `getInterceptionSummary`）
+- **`SYSTEM/API-REFERENCE.md`** — §3.4 新增拦截事件类型体系 + 聚合查询 API 表；§3.2 AntiConfabulationInjector 标记已删除
+- **`SYSTEM/interception.md`** — 架构图增加 3 层日志层 + 聚合查询 API

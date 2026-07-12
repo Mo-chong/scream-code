@@ -425,13 +425,13 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 **教训**：合并前逐个文件检查上游是否已做了 fork 里改动的事。context.ts/resolve.ts 取 --theirs 即可。
 
-### system_trigger 穿透预算
+### extraInterceptions 替代 system_trigger bypass
 
-**现象**：`system_trigger` 注入不受 budget 限制。
+**现象**：`system_trigger` 变体在 Phase38c 已删除（`variant-registry.ts`），由 `extraInterceptions` 预批准通道替代。
 
-**根因**：`turn/index.ts:1356-1359` 的收敛门注入不经过 `InjectionManager` 的预算检查。
+**根因**：Phase38c 消除了 system_trigger 死代码；Phase38b 增加了 `InjectionManager.inject()` Step 0 拦截消息预批准。
 
-**教训**：system_trigger 优先级最高，可用于必须注入的场景，但不可滥用。
+**教训**：拦截消息走 `extraInterceptions` 通道，占 budget 槽但跳过残差（由递进替代频率控制），不再无条件穿透一切。
 
 ### sendNormalUserInput ≠ inject
 

@@ -56,7 +56,8 @@ convergenceGate:
   - 检测 confabulation（编造事实）
   - 检测收敛条件（工具使用频率/代码文件比例/错误率）
   - 最多注入 3 次，超过后放弃
-  - system_trigger 穿透预算（turn/index.ts:1356-1359）
+  - extraInterceptions 预批准通道（Phase38b，替换旧 system_trigger bypass）
+  - 拦截消息跳过残差（递进替代），共享 maxInjectionsPerStep 上限
 ```
 
 ### 1.4 inject() 注入链路
@@ -222,8 +223,8 @@ class InjectionManager {
 | TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | |
 | WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | |
 | PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | |
-| AntiConfabulationInjector | `agent/injection/anti_confabulation.ts` | 1 | AFTER_TOOL_CALL | ConfabulationDetector ≥2 | ✅ | |
-| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ | |
+| AntiConfabulationInjector | ~~`agent/injection/anti_confabulation.ts`~~ **已删除** Phase38c | — | — | — | ❌ | — |
+| QualityInjector | `agent/injection/quality.ts` | 1 | AFTER_TOOL_CALL | QualityDetector 信号 | ✅ | Phase38c bypass消除改为标准残差 |
 | StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步（weight 30→0.6） | ✅ | Phase37 |
 | GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ | Phase37 |
 

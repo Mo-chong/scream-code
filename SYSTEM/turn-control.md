@@ -74,9 +74,8 @@ runOneTurn()
 
 注入中枢。优先级从高到低：
 
-1. `system_trigger` → 直接 `appendSystemReminder()`，穿透一切（line 1356-1359）
-2. `quality_escalate_` → 穿透预算（line 1362-1365）
-3. 普通 `injection` → 经过 5 重过滤：
+1. `extraInterceptions` → 拦截系统预批准消息（Phase38b），优先占 budget 槽（line 1356-1359）
+2. 普通 `injection` → 经过 5 重过滤：
    - 重复衰减（line 1369-1372）
    - 残差注意力（line 1375-1392）
    - 步级去重（line 1395-1403）
@@ -104,7 +103,7 @@ runOneTurn()
 ## 注入预算 (injectBudget)
 
 - 每个回合有 token 预算上限
-- system_trigger 和 quality_escalate_ 穿透预算
+- extraInterceptions 优先占 budget 槽（Phase38b，拦截消息跳过残差由递进替代）
 - 偏差链激活时 bypassBudget()
 - 预算不足 → eventLog.record('skipped_budget')
 

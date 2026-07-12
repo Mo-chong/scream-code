@@ -78,8 +78,8 @@ export interface VariantMeta {
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
 | `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: ctx.history替代stuckContext） |
-| `system_ref_anti_confabulation` | 0.6 | 0.85 | 0.25 | 3 | C | 反事实检测 ≥2 步 |
-| `quality_escalate` | — | — | — | — | C | 质量偏差检测（跳过残差） |
+| ~~`system_ref_anti_confabulation`~~ | — | — | — | — | — | **已删除** Phase38c（合并入 confabulationDetector） |
+| `quality_escalate` | 0.6 | 0.85 | 0.20 | 3 | C | 质量偏差检测（Phase38c bypass消除→标准残差） |
 | `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
 | `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
 | `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
@@ -95,7 +95,7 @@ export interface VariantMeta {
 | `step_code_ref_quality` | 0.5 | 0.85 | 0.4 | 2 | C | 代码质量参考 |
 | `code_quality_feedback` | 0.7 | 0.85 | 0.35 | 2 | C | 代码质量反馈 |
 | `truncation_recover_guard` | 0.7 | 0.85 | 0.35 | 2 | C | 截断恢复守卫 |
-| `system_trigger` (1变体) | 0.15 | 0.95 | 0.1 | 1 | S | 系统触发（bypass，不走残差） |
+| ~~`system_trigger`~~ | — | — | — | — | — | **已删除** Phase38c（死代码，interception extraInterceptions通道替代） |
 | `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
 
 > Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
@@ -148,7 +148,7 @@ VariantMeta.weight ← 基础权重
 
 | 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
 |--------|------------|-------------|-------------------|-----------|
-| `system_trigger` | 1 | 0.15 | 0.95 | 系统触发 |
+| ~~`system_trigger`~~🗑️ | — | — | — | **已删除** Phase38c（extraInterceptions 通道替代） |
 | `deviation_chain_intercept` | 1 | 1.20 | 0.90 | 偏差链检测 |
 | `intent_*` | 6 | 0.50 | 0.50 | intent-injector.ts |
 | `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
@@ -377,8 +377,8 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ✅ |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
-| `anti_confabulation.ts` | `system_ref_anti_confabulation` | AFTER_TOOL_CALL | C | ConfabulationDetector ≥2 | ✅ |
-| `quality.ts` | `quality_escalate` | AFTER_TOOL_CALL | —(跳过 budget) | QualityDetector 信号 | ✅ |
+| ~~`anti_confabulation.ts`~~ 🗑️ | ~~`system_ref_anti_confabulation`~~ | — | — | — | ❌ | **已删除** Phase38c（合并入 confabulationDetector） |
+| `quality.ts` | `quality_escalate` | AFTER_TOOL_CALL | C | QualityDetector 信号（Phase38c：跳过残差→标准残差0.6/0.85/3/0.20） | ✅ |
 | `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
 | `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ |
 
