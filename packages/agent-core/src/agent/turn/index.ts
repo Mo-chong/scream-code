@@ -39,7 +39,6 @@ import { InjectBudget } from './injectors/budget';
 import { checkGuard, type StepToolSummary } from './guard-engine';
 import { TruncationTracker } from './truncation-tracker';
 import { searchBehaviorRules, formatBehaviorRule, detectSceneQuery, searchPendingDoc, formatPendingDocInject } from './memory-rules';
-import { detectSceneMemory } from './detectors/scene-memory';
 import { detectCodeRefQuality } from './detectors/code-ref';
 import { scanCodeQuality, formatCodeQualityFeedback, type CodeQualityViolation } from './detectors/code-quality';
 import { AttentionPositionStrategy, InsertPosition } from '../injection/position-strategy';
@@ -896,6 +895,8 @@ export class TurnFlow {
                       lastTurnHadDeviation: this.crossTurnFlags.lastTurnHadDeviation ?? false,
                       lastTurnHadGuardRule1: this.crossTurnFlags.lastTurnHadGuardRule1 ?? false,
                       guardResult: this._guardResult,
+                      userInputText: this.lastUserInputText || undefined,
+                      calledMemoryLookup: this.lastStepCalledMemoryLookup,
                     };
                     const result = this.agent.interception.execute(ctx);
                     return result.messages;
@@ -1797,12 +1798,11 @@ export class TurnFlow {
     if (this.hasCalledLspReferencesThisStep) this.turnHasCalledAnyLsp = true;
     if (this.editCalledSuccessThisStep) this.totalStepsWithEditsThisTurn++;
 
-    // Step 4: 拦截日志增量 + 健康检查
-    this.injectInterceptionSummary();
+    // Step 4: 健康检查（拦截摘要由 interceptionSummaryDetector 接管；场景记忆由 sceneMemoryDetector 接管）
     this.checkEventLogHealth();
 
-    // Step 5: 检测器序列（scene, guard, behavior rules, stuck）
-    this.detectSceneMemoryIssue();
+    // Step 5: 检测器序列（guard, behavior rules, stuck）
+    // sceneMemoryDetector 由 InterceptionManager 接管（Phase38l）
     this._stuckContext = { currentStep: this.currentStep, editFileThisStep: this.editFileThisStep, toolErrorThisStep: this.toolErrorThisStep };
     await this.runGuardDetection();
     await this.injectBehaviorRulesAfterStep();
@@ -2022,14 +2022,6 @@ export class TurnFlow {
     }
   }
 
-  /** 拦截日志增量注入 */
-  private injectInterceptionSummary(): void {
-    const eventSummary = this.eventLog.getNewTurnSummary(this.currentTurnId);
-    if (eventSummary.length > 0) {
-      this.inject(eventSummary, { kind: 'injection', variant: 'interception_log' });
-    }
-  }
-
   /** 元日志健康检查 */
   private checkEventLogHealth(): void {
     if (this.currentStep > 10 && this.eventLog.getTurnEvents(this.currentTurnId).length === 0) {
@@ -2073,14 +2065,7 @@ export class TurnFlow {
     this.crossTurnFlags.attentionSignals.confirm = /\[CONFIRM\]|\[confirm\]/i.test(text);
   }
 
-  /** SceneMemoryDetector — 用户说了"上次/以前"但 AI 没查记忆 */
-  private detectSceneMemoryIssue(): void {
-    if (!this.lastUserInputText || this.currentStep !== 1) return;
-    const sceneMemoryIssue = detectSceneMemory(this.lastUserInputText, this.lastStepCalledMemoryLookup);
-    if (sceneMemoryIssue.needsReminder) {
-      this.inject('用户提到了"上次/以前"——先用 MemoryLookup 查历史记录，不要靠猜。', { kind: 'injection', variant: 'scene_memory_recall' });
-    }
-  }
+  /** SceneMemoryDetector — 由 interception/detectors/scene-memory.ts 接管（Phase38l） */
 
   /** Guard 规则引擎检测 + 记忆关联 */
   private async runGuardDetection(): Promise<void> {
@@ -2330,16 +2315,12 @@ export class TurnFlow {
 
   /** Phase 14: 跨回合标记注入 — 上回合有拦截事件时下回合预防性提醒 */
   private injectCrossTurnFlags(): void {
-    // 消费旧值后立即复位（避免 runOneTurn 提前清零导致永不起效）
-    if (this.crossTurnFlags.lastTurnHadGuardRule1) {
-      this.inject(
-        '上回合检测到测试结果矛盾或高置信度无依据声明。本回合请真实运行工具验证后再报告。',
-        { kind: 'system_trigger', name: 'behavior_rule' },
-      );
-    }
+    // 消费旧值后立即复位
+    // Phase38f: lastTurnHadDeviation 由 deviationChainDetector 接管
+    // Phase38l: lastTurnHadGuardRule1 由 deviationChainDetector 接管
     this.crossTurnFlags.lastTurnHadGuardRule1 = false;
     this.crossTurnFlags.lastTurnHadDeviation = false;
-    // 复位注意力信号（由 AttentionMonitorDetector 和 DeviationChainDetector 接管）
+    // 复位注意力信号（由 AttentionMonitorDetector 接管）
     this.crossTurnFlags.attentionSignals = { done: false, need: false, confirm: false };
   }
 

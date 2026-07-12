@@ -107,6 +107,10 @@ export interface InterceptionContext {
   lastTurnHadDeviation?: boolean;
   /** 上回合 Guard Rule 1 触发状态 */
   lastTurnHadGuardRule1?: boolean;
+  /** 用户本轮输入文本（用于检测"上次/以前"关键词） */
+  userInputText?: string;
+  /** 本步是否调用了 MemoryLookup */
+  calledMemoryLookup?: boolean;
 }
 
 /* ──────────────── Detector 接口 ──────────────── */

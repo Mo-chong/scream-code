@@ -5,6 +5,7 @@
  * 消费 ctx.step（当前步数）。
  *
  * 纯函数 — 只检测，不输出。
+ * Phase38l: step≥45 时注入收尾警告，避免 AI 突然被停。
  */
 
 import type { DetectorFn, RawSignal } from '../types';
@@ -27,6 +28,16 @@ export const turnLimitsDetector: DetectorFn = (ctx): RawSignal | null => {
   }
 
   if (step >= MAX_STEPS_WARN) {
+    if (step >= 45) {
+      return {
+        rootCause: 'turn_limit',
+        priority: 'P4_info',
+        confidence: 0.8,
+        message: `已达 ${step}/${MAX_STEPS_PER_TURN} 步，回合即将终止。请在剩余步数内完成收尾——验证+提交。`,
+        escalation: 'warn',
+        phase: 'post_step',
+      };
+    }
     return {
       rootCause: 'turn_limit',
       priority: 'P4_info',
