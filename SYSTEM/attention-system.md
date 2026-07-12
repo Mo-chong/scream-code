@@ -160,4 +160,15 @@ AI 自主调用工具，无系统干预。
 
 我编造了:
   └─ confabulation + 证据纪律记忆 → P0 block
+
+用户说"上次/以前":
+  ├─ 我调了 MemoryLookup → 无反馈
+  └─ 我没调记忆 → **P3 hint** ✅（sceneMemoryDetector，不用 async memory recall）
+
+我连续 Read/Grep 探索:
+  ├─ 连续 3 次无 codegraph → **P3 建议用 codegraph** ✅（toolPatternDetector）
+  └─ 同一工具连续报错 → **P3 建议换方法** ✅（toolPatternDetector）
+
+注入预算降级:
+  └─ budget 持续下降 → **P4 通知** ✅（budgetNotifyDetector，仅知会不干预）
 ```

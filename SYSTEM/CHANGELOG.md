@@ -792,3 +792,15 @@ updated: 2026-07-11
 - **`turn/event-log.ts`** — `recordReport()` 结构化记录 + 3 个聚合查询 API（`getRootCauseTrend` / `getAllDetectorStats` / `getInterceptionSummary`）
 - **`SYSTEM/API-REFERENCE.md`** — §3.4 新增拦截事件类型体系 + 聚合查询 API 表；§3.2 AntiConfabulationInjector 标记已删除
 - **`SYSTEM/interception.md`** — 架构图增加 3 层日志层 + 聚合查询 API
+
+#### Phase38l: sceneMemory + budgetNotify + toolPattern + interceptionSummary detectors [2026-07-12]
+- **`detectors/scene-memory.ts`** — 新建：用户说"上次/以前"时提醒查 MemoryLookup（替代旧 `detectSceneMemoryIssue()`）
+- **`detectors/budget-notify.ts`** — 新建：预算降级时通知 AI
+- **`detectors/tool-pattern.ts`** — 新建：连续 Read/Grep 无 codegraph + 连续报错检测
+- **`detectors/interception-summary.ts`** — 新建：拦截运行概况（step≥30 时注入）
+- **`detectors/turn-limits.ts`** — 改进：step≥45 收尾警告
+- **`detectors/deviation-chain.ts`** — 改进：接管 Guard R1 阻断后遗症
+- **`interception/types.ts`** — `InterceptionContext` 新增 `userInputText` + `calledMemoryLookup`
+- **`turn/index.ts`** — 删除 3 个 `this.inject()` bypass（detectSceneMemory / injectInterceptionSummary / injectCrossTurnFlags）
+- **`SYSTEM/interception.md`** — detector 列表 8→12
+- **`SYSTEM/attention-system.md`** — 决策表 3 条新规则
