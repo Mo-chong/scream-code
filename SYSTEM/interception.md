@@ -37,6 +37,42 @@ Guard 引擎 + 收敛门 + 偏差链 + 反事实检测 —— 这些拦截系统
               interception-logs/INDEX.json
 ```
 
+### 3.1 拦截系统整体架构
+
+```
+detectors/（8 个纯函数检测器）
+  ├── attention-monitor      — [DONE]/[NEED]/[CONFIRM] 信号检测
+  ├── quality-degrade        — C→B→A→S 质量衰退检测
+  ├── verify-pass            — 验证通过正向信号
+  ├── confabulation          — 虚构内容检测（防幻核心）
+  ├── deviation-chain        — 偏差链状态检测
+  ├── turn-limits            — 回合步数上限检测
+  ├── tool-dedup             — 连续相同工具调用检测
+  └── permission-enforcer    — Guard 规则 1-4 检测
+           │
+           │ RawSignal
+           ▼
+InterceptionManager（决策层）
+  ├── mergeByRootCause       — 同根因合并为 1 条
+  ├── calcEscalation         — hint→nudge→warn→block
+  ├── sortByPriority         — P0 > P1 > P2 > P3 > P4
+  ├── budgetCap(3)           — 最多 3 条/步
+  └── formatMessage          — 统一 "[拦截/Px]" 格式
+           │
+           ▼
+InjectionRouter（注入层）
+  ├── Step 0: extraInterceptions 预批准（占 budget 槽）
+  ├── Step 1-7: 正常注入器
+           │
+           ▼
+appendSystemReminder → AI 收到 ≤3 条消息
+           │
+           ▼
+TurnEventLog（日志层，本文件 ⬇）
+```
+
+> **决策与日志分离：** InterceptionManager 决定"要不要做"，event-log 记录"做了什么"。
+
 ---
 
 ## TurnEventLog — 内存日志（event-log.ts）
