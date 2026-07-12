@@ -1,14 +1,14 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5]
-updated: 2026-07-08
+updated: 2026-07-12
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 
 # 系统说明书维护SOP [P0]
 
-> **参见：** [`MAP.md`](MAP.md)（目录结构 T0） | [`INDEX.md`](INDEX.md)（索引同步） | [`CHANGELOG.md`](CHANGELOG.md)（变更记录） | [`SYSTEM-INDEX.md`](../SYSTEM-INDEX.md)（根索引表）
+> **参见：** [`attention-system.md`](attention-system.md)（AI 全流程起点） | [`MAP.md`](MAP.md)（目录结构 T0） | [`INDEX.md`](INDEX.md)（索引同步） | [`CHANGELOG.md`](CHANGELOG.md)（变更记录） | [`SYSTEM-INDEX.md`](../SYSTEM-INDEX.md)（根索引表）
 
 > 用户说"更新文档" → Read 本文件 → 按流程执行。
 
@@ -22,6 +22,7 @@ updated: 2026-07-08
 | 2 | **文件独立规则优先** | 文件自身标头的维护规则 > 本文档 SOP。写入前必须 Read 目标文件头部直到第一个 `##` 或正文开始，确认 `maintain` / `更新规则` / 格式声明完整可见 |
 | 3 | **写入前读标头** | 每写一个文件前 → Read 其头部至正文分界，确认维护规则和现存格式。禁止凭记忆盲写 |
 | 4 | **无规则 → 遵循现有格式** | 文件标头和 SOP 均无规则 → 以文件已有内容和格式为准，模式对齐最近 5 行同类上下文，不发明新格式 |
+| 5 | **改前先读 attention-system.md** | 任何涉及注意力/拦截/注入/回合的改动 → 先读 [`attention-system.md`](attention-system.md) 理解 AI 完整 5 步流程，确认改动不与其他模块冲突后才能动手 |
 
 ## 1. 决策树 [P0]
 

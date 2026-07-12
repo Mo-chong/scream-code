@@ -7,7 +7,7 @@ updated: 2026-07-08
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 回合控制系统 — TurnController
 
-> **参见：** [`injection-system.md`](injection-system.md)（注入管线） | [`guard-engine.md`](guard-engine.md)（行为矫正） | [`interception.md`](interception.md)（拦截日志） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`API-REFERENCE.md`](API-REFERENCE.md)（API 签名）
+> **参见：** [`injection-system.md`](injection-system.md)（注入管线） | [`interception-system.md`](interception-system.md)（行为矫正） | [`interception.md`](interception.md)（拦截日志） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`API-REFERENCE.md`](API-REFERENCE.md)（API 签名）
 >
 > 源码: `packages/agent-core/src/agent/turn/index.ts` (1737 行)
 

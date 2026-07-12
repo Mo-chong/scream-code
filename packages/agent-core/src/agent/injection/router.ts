@@ -13,6 +13,7 @@ import type { Agent } from '..';
 import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
 import { VariantScheduler, _getVariantLevel } from '../turn/variant-registry';
+import type { InterceptionMessage } from '../interception/types';
 
 // ─── Step 11a: CacheGroup ──────────────────────────────────────────
 
@@ -100,6 +101,8 @@ export interface InjectContext {
   readonly qualitySignals?: readonly QualityDeviationSignal[];
   /** 意图检测结果 */
   readonly intentPhase?: string;
+  /** Phase38b: 拦截系统预批准消息 — InterceptionManager 的输出，优先占 budget 槽位 */
+  readonly extraInterceptions?: readonly InterceptionMessage[];
 }
 
 /**
@@ -215,6 +218,9 @@ export class InjectionRouter {
   async dispatch(context: InjectContext): Promise<InjectResult[]> {
     const results: InjectResult[] = [];
     let injectionCount = 0;
+
+    // Step 0: 拦截系统预批准消息（已在 manager.ts inject() 中预处.理）
+    // 此处 dispatch() 仅处理注入器列表
 
     for (const [id, injector] of this.injectors) {
       if (injectionCount >= this.config.maxInjectionsPerStep) break;

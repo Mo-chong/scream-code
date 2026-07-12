@@ -1,13 +1,15 @@
 ---
 tags: [type/reference, domain/interception, status/final]
 keywords: [拦截, interception, 日志, event-log, audit]
-updated: 2026-07-08
+updated: 2026-07-12
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 拦截日志系统 — Interception
 
-> **参见：** [`turn-control.md`](turn-control.md)（回合控制权威） | [`guard-engine.md`](guard-engine.md)（行为矫正）
+> **定位：日志层** — [`attention-system.md`](attention-system.md)（统一大脑）定义 AI 完整流程。本文件只负责拦截事件的**记录 + 持久化 + 可查阅**。
+>
+> **参见：** [`attention-system.md`](attention-system.md)（统一大脑） | [`interception-system.md`](interception-system.md)（执行层） | [`turn-control.md`](turn-control.md)（回合层）
 >
 > 源码: `packages/agent-core/src/agent/turn/event-log.ts` (181 行)
 > 持久化: `packages/agent-core/src/agent/turn/event-snapshot.ts` (283 行)

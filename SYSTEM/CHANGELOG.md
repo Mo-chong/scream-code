@@ -586,7 +586,7 @@ updated: 2026-07-11
 #### 未实现
 - evictOne 加权淘汰的 `lastAccessedAt` 同步虽然 TTL 判据已改，但 sharedStore 不直接参与加权淘汰（由 local store 负责，sharedStore 是超集）
 
-### Phase33 续章：mask 增强 + 增量摘要 + BATCH_SIZE 纠正 + GuardInjector 迁移 + 审计升级 + ContextManager API [2026-07-10→07-11]
+### Phase33 续章：mask 增强 + 增量摘要 + BATCH_SIZE 纠正 + GuardInjector 迁移 + 审计升级 + ContextBuilder API [2026-07-10→07-11]
 
 #### 新功能
 - **maskToolObservations 增强**（`mask-tool-observations.ts`）：

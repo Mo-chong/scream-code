@@ -24,8 +24,8 @@ updated: 2026-07-11
 ├─ 执行架构
 │   ├─ turn-control.md            — 回合生命周期/收敛门/工具优先级
 │   ├─ injection-system.md        — ☑ 注入系统：14个注入器/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
-│   ├─ attention-management.md    — 注意力管理
-│   ├─ guard-engine.md            — Guard触发时机/反事实检测
+│   ├─ attention-system.md    — 注意力管理
+│   ├─ interception-system.md            — Guard触发时机/反事实检测
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
 
 ├─ AGENTS 架构

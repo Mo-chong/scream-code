@@ -21,9 +21,9 @@ export class QualityInjector extends DynamicInjector {
   get description(): string { return '基于 QualityDetector 信号升级注入语气'; }
   get priority(): number { return 50; }
 
-  /** 返回 null 表示不参与 budget 控制（绕过预算） */
   override getResidualConfig(): ResidualConfig | undefined {
-    return undefined;
+    // 质量偏差由递进策略控制频率，不走残差
+    return { weight: 0.6, decayPerStep: 0.85, minStepGap: 3, threshold: 0.20 };
   }
 
   override onContextClear(): void {

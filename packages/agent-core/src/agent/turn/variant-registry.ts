@@ -286,8 +286,6 @@ export function getScore(variant: string, stepDelta: number): number {
 }
 
 export const VARIANT_META: Record<string, VariantMeta> = {
-  // system_trigger / 紧急 → 永不跳过（死代码保留行，万一 inject() 前移逻辑需要；当前 system_trigger 在 inject() 顶部提前返回）
-  system_trigger:              { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
   deviation_chain_intercept:   { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
 
   // intent — 回合开始时注入，不跨步衰减

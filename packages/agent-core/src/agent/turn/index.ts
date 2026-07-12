@@ -864,6 +864,24 @@ export class TurnFlow {
                 confabulationResult: this._confabResult,
                 qualitySignals: this._qualitySignals,
                 stuckContext: this._stuckContext,
+                extraInterceptions: (() => {
+                  try {
+                    const ctx = {
+                      step: this.currentStep,
+                      turnId: 0,
+                      lastToolCalls: [],
+                      confabulationConfidence: this._confabResult?.confidence ?? 0,
+                      qualitySignals: (this._qualitySignals ?? []).map((s: any) => String(s?.name ?? s ?? '')),
+                      behaviorViolations: {},
+                      eventLog: null as any,
+                      triggerHistory: {},
+                    };
+                    const result = this.agent.interception.execute(ctx);
+                    return result.messages;
+                  } catch {
+                    return [];
+                  }
+                })(),
               });
               deduper.beginStep();
               return;
@@ -2303,8 +2321,29 @@ export class TurnFlow {
         { kind: 'system_trigger', name: 'behavior_rule' },
       );
     }
+    // 注意力信号消费 — AI 回复中的 [DONE]/[NEED]/[CONFIRM]
+    if (this.crossTurnFlags.attentionSignals?.done) {
+      this.inject(
+        '你报告了 [DONE]，请先用构建/测试/检查工具验证后再确认完成，不要凭空声称。',
+        { kind: 'system_trigger', name: 'attention_done' },
+      );
+    }
+    if (this.crossTurnFlags.attentionSignals?.need) {
+      this.inject(
+        '你报告了 [NEED]，请说明：当前目标、已尝试的方法、具体卡在哪一步。我会给你针对性引导。',
+        { kind: 'system_trigger', name: 'attention_need' },
+      );
+    }
+    if (this.crossTurnFlags.attentionSignals?.confirm) {
+      this.inject(
+        '你报告了 [CONFIRM]，请根据已有信息自行判断并继续推进。不确定时直接用工具验证假设，不必等用户确认。',
+        { kind: 'system_trigger', name: 'attention_confirm' },
+      );
+    }
     this.crossTurnFlags.lastTurnHadGuardRule1 = false;
     this.crossTurnFlags.lastTurnHadDeviation = false;
+    // 复位注意力信号（parseAttentionSignals 已在下轮 LLM 回复后重新提取）
+    this.crossTurnFlags.attentionSignals = { done: false, need: false, confirm: false };
   }
 
   /** Reset per-step injection tracking state (called at runOneTurn and afterStep). */

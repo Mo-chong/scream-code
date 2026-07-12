@@ -7,7 +7,7 @@ updated: 2026-07-11
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 注入系统 / Injection System [P0]
 
-> **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-management.md`](attention-management.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
+> **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
 > 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个：ToolResultRecovery / DecisionTrace / SessionSummary）。

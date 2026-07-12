@@ -462,6 +462,10 @@ ArchiveRecoverInput {
   │     ├─ turnStepCount / pendingRecoverKeys / summaryTriggered
   │     └─ 写入 cache-audit-YYYY-MM-DD.ndjson
   │
+  ├─→ pushHistory(): 工具结果入库（context/index.ts L498-508）
+  │     ├─ injection / system_trigger → continue（不进 replayBuilder）
+  │     └─ 正常工具结果 → replayBuilder.push() → TUI 重渲染
+  │
   └─→ records: 所有事件写 wire.jsonl
 ```
 
@@ -510,7 +514,78 @@ ArchiveRecoverInput {
 
 ---
 
-## 九、相关文件索引
+## 九、偏差链（DeviationChain）
+
+偏差链子系统检测 AI 连续偏离指令的行为模式，并尝试自动修复。实现在 `turn/index.ts` 内联方法，非独立注入器。
+
+### §9.1 触发条件
+
+`detectDeviationChain()`（`turn/index.ts` L1862-1894）检测三种模式：
+
+| 模式 | 条件 | 计数器 |
+|------|------|--------|
+| 连续 Edit 未查 LSP | Edit 后未调用 LSP.references/definition | `editWithoutReference++` |
+| 验证持续失败 | tool 返回 `verification` 且失败 | `consecutiveVerificationFailures++` |
+| 行为规则累积 | system 回复含"行为规则"引用 | `behaviorRuleViolations++` |
+
+任一类目连续 ≥3 次触发偏差链激活。
+
+### §9.2 自动解析路径
+
+`tryResolveDeviationChain()`（L1962-1984）按顺序尝试：
+
+1. LSP 引用查询 → 修复遗漏的调用方
+2. 调用验证工具 → 检查代码正确性
+3. 代码质量计数器清零（`codeQualityResetCount`）
+4. 行为变体标记为 `hasVerification=true` → 下次必须验证
+
+偏差链激活时，`injectBudget.bypassBudget()`（L1672）绕开预算限制，确保修复提示一定被注入。
+
+### §9.3 数据流位置
+
+```
+post-turn 检查:
+  ├─ detectDeviationChain()     ← 3种触发条件
+  ├─ tryResolveDeviationChain() ← 4种解析路径
+  └─ activate → bypassBudget()  ← 绕过预算
+```
+
+---
+
+## 十、注意力信号（AttentionSignals）
+
+从 AI 回复文本中提取结构化指令完成状态信号。实现在 `turn/index.ts` `parseAttentionSignals()`（L2020-2034）。
+
+### §10.1 信号类型
+
+| 标记 | 字段 | 含义 |
+|------|------|------|
+| `[DONE]` | `signals.done = true` | 任务完成 |
+| `[NEED]` | `signals.need = true` | 需要帮助 |
+| `[CONFIRM]` | `signals.confirm = true` | 需要确认 |
+
+存入 `crossTurnFlags.attentionSignals`，跨轮次持久化。
+
+### §10.2 注入消费
+
+`injectCrossTurnFlags()`（L2295-2320）读取信号注入对应提示：
+
+| 信号 | 检测到 AI 行为 | 注入内容 |
+|------|---------------|----------|
+| `[DONE]` | 可能虚构完成 | "请先用构建/测试/检查工具验证后再确认完成" |
+| `[NEED]` | 可能卡住走偏 | "请说明当前目标、已尝试的方法、具体卡在哪一步" |
+| `[CONFIRM]` | 可能不敢决策 | "请根据已有信息自行判断并继续推进" |
+
+三个注入均以 `system_trigger` 类型穿透 budget 限制，确保信号被及时响应。注入后自动复位 `attentionSignals = { done: false, need: false, confirm: false }`。
+
+作为对比，同类注意力增强机制还包括：
+- **DeviationChain**（§9）：检测连续 Edit 未查 LSP / 验证持续失败等行为偏差，bypassBudget 注入修复提示
+- **GuardInjector**：行为规则注入，按残差公式调度
+- **StuckInjector**：检测同一文件连续编辑 ≥3 次或同工具连续报错 ≥2 次
+
+---
+
+## 相关文件索引
 
 | 文件 | 作用 |
 |------|------|
@@ -545,7 +620,7 @@ ArchiveRecoverInput {
 
 ---
 
-## 十、依赖关系图
+## 十一、依赖关系图
 
 ```
 agent/index.ts
@@ -606,9 +681,9 @@ agent/audit/file-action-audit.ts
 
 ---
 
-## 十一、2025-06-29 新功能新增
+## 十二、2025-06-29 新功能新增
 
-### §11.1 ContentArchive 跨 agent 共享（sharedStore）
+### §12.1 ContentArchive 跨 agent 共享（sharedStore）
 
 - `ContentArchive.sharedStore` 静态 `Map<string, ContentArchiveEntry>`
 - `archive()` 同步写入共享存储
@@ -616,18 +691,18 @@ agent/audit/file-action-audit.ts
 - 不破坏子 agent 隔离：本地 store 独立，共享只作 fallback
 - 生命周期：进程级，不持久化
 
-### §11.2 FAA 查错注入
+### §12.2 FAA 查错注入
 
 - `FileActionAudit.getRecentEntries(n)` — 环状缓冲区，最近 50 条审计记录
 - `turn/index.ts` L1882-1889 — `lastToolFailure` 提示自动附上最近 5 条 FAA 记录
 - 未来优化：按 toolName 过滤注入，当前为全量最近 5 条
 
-### §11.3 ArchiveRecover 放开全部 agent
+### §12.3 ArchiveRecover 放开全部 agent
 
 - `tool/index.ts L639` 注册条件从 `type === 'main' && contentArchive` 改为仅 `contentArchive`
 - Agent 构造函数已无条件初始化 `ContentArchive`，所有 agent 均可使用 ArchiveRecover
 
-### §11.4 Phase20 Bash 输出智能降噪
+### §12.4 Phase20 Bash 输出智能降噪
 
 - `result-builder.ts` — `ToolResultBuilderOptions` 新增 `sanitize?: boolean`，`write()` 内自动调用 `sanitizeOutput()`（`stripAnsi` + `collapseCarriageReturnLines`）
 - `bash.ts` — `new ToolResultBuilder({ sanitize: true })` 激活 builder 级自动洗白，`readStreamIntoBuilder` 恢复原始简洁形态

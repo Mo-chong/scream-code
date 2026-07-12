@@ -54,7 +54,7 @@ L0 入口层
 L1 核心执行层 —— 同一执行引擎的 4 个视图
   turn-control.md
   └─ 回合调度：runOneTurn → afterStep → convergenceGate
-     ├── attention-management.md — 注意力决策（残差→预算→位置→检测）
+     ├── attention-system.md — 注意力决策（残差→预算→位置→检测）
      ├── injection-system.md — 内容执行（17 injector + router + manager）
      └── context-management.md — 数据管理（存档·审计·截断恢复）
 
@@ -75,10 +75,10 @@ L4 独立层 —— 不参与执行，独立参考
 | SYSTEM 文档 | 代码目录 |
 |:-----------|---------|
 | turn-control.md | `turn/` (+`detectors/` +`injection/`) |
-| attention-management.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
+| attention-system.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
 | injection-system.md | `injection/` (17 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
-| guard-engine.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
+| interception-system.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
 
 阅读顺序（AI 首次接入按此顺序）：
 
@@ -87,8 +87,8 @@ L4 独立层 —— 不参与执行，独立参考
 ② SYSTEM/injection-system.md —— 核心创新：注入系统
 ③ SYSTEM/turn-control.md —— 回合调度
 ④ SYSTEM/context-management.md —— 上下文管理
-⑤ SYSTEM/guard-engine.md —— AI 行为 Guard
-⑥ SYSTEM/attention-management.md —— 注意力决策
+⑤ SYSTEM/interception-system.md —— AI 行为 Guard
+⑥ SYSTEM/attention-system.md —— 注意力决策
 ⑦ SYSTEM/prompt-assembly.md —— Prompt 组装
 ⑧ SYSTEM/agents-hierarchy.md —— Agent 层级
 ```
@@ -139,7 +139,7 @@ runOneTurn()
 
 ### 2.4 Guard 引擎 (Guard Engine)
 
-**文件**: `packages/agent-core/src/agent/turn/guard-engine.ts` | **系统说明书**: `SYSTEM/guard-engine.md`
+**文件**: `packages/agent-core/src/agent/turn/guard-engine.ts` | **系统说明书**: `SYSTEM/interception-system.md`
 
 4 条 AI 行为 Guard 规则 + 反事实检测：
 
@@ -154,7 +154,7 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 
 ### 2.5 注意力管理 (Attention Management)
 
-**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-management.md`
+**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-system.md`
 
 - **34 个变体**，分级 S/A/B/C/D（S 最高优先级）
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差

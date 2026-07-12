@@ -9,7 +9,6 @@ import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
 import { WorkingSetInjector } from './working-set';
 import { StuckInjector } from './stuck';
-import { AntiConfabulationInjector } from './anti_confabulation';
 import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
@@ -40,9 +39,8 @@ export class InjectionManager {
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],
       ['user-prefs', new UserPrefsInjector(agent)],
-      // 路径 B 迁移：原 turn/injectors/{stuck,anti_confabulation,quality,intent}.ts
+      // 路径 B 迁移：原 turn/injectors/{stuck,quality,intent}.ts
       ['system_ref_stuck', new StuckInjector(agent)],
-      ['anti_confabulation', new AntiConfabulationInjector(agent)],
       ['quality_escalate', new QualityInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
       ['error-audit', new ErrorAuditInjector(agent)],
@@ -69,6 +67,21 @@ export class InjectionManager {
       ...ctx,
       predictedHitRatio: ctx.predictedHitRatio ?? this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
     };
+
+    // Step 0: 拦截系统预批准消息 — 优先占 budget 槽
+    let preApprovedCount = 0;
+    if (context.extraInterceptions?.length) {
+      const maxPerStep = 5; // 同 RouterConfig DEFAULT.maxInjectionsPerStep
+      for (const msg of context.extraInterceptions) {
+        if (preApprovedCount >= maxPerStep) break;
+        this.agent.context.appendSystemReminder(msg.body, {
+          kind: 'injection',
+          variant: `intercept_${msg.rootCause}`,
+        }, false);
+        preApprovedCount++;
+      }
+    }
+
     try {
       await this.router.dispatch(context);
     } finally {
