@@ -161,6 +161,9 @@ export class InterceptionManager {
     // Step 7: 阻断检查
     const blocked = capped.some((m) => m.priority === 'P0_block');
 
+    // Step 8: 结构化日志记录 — 记录本轮拦截事件（供 AI 自助查询）
+    this.recordStep(ctx, allSignals, capped, blocked);
+
     return {
       blocked,
       messages: capped.map((m) => this.formatMessage(m)),
@@ -259,6 +262,62 @@ export class InterceptionManager {
     if (count >= nudgeToWarn) return 'warn';
     if (count >= hintToNudge) return 'nudge';
     return 'hint';
+  }
+
+  /** 记录本轮结构化拦截日志 */
+  private recordStep(
+    ctx: InterceptionContext,
+    allSignals: RawSignal[],
+    capped: MergedSignal[],
+    blocked: boolean,
+  ): void {
+    try {
+      const log = (this.agent as any).eventLog;
+      if (!log || typeof log.recordReport !== 'function') return;
+
+      const report = {
+        turnId: ctx.turnId,
+        stepCount: ctx.step,
+        detectors: allSignals.map((s) => ({
+          detector: '',
+          rootCause: s.rootCause,
+          priority: s.priority,
+          confidence: s.confidence,
+          escalation: s.escalation,
+          message: s.message,
+          suppressed: false,
+          isPositive: false,
+          mergeCount: 1,
+        })),
+        decisions: capped.map((m) => ({
+          step: ctx.step,
+          rootCause: m.rootCause,
+          priority: m.priority,
+          escalation: m.escalation,
+          triggerCount: this.triggerHistory.get(m.rootCause) ?? 0,
+          blocked,
+          isPositive: m.isPositive,
+          mergedCount: m.mergedCount,
+          message: m.message,
+          timestamp: Date.now(),
+          contributors: [],
+        })),
+        deliveries: capped.map((m) => ({
+          step: ctx.step,
+          rootCause: m.rootCause,
+          outcome: blocked ? 'blocked_step' as const : 'delivered' as const,
+          budgetUsed: true,
+          position: m.priority === 'P0_block' ? 'EARLY'
+            : m.priority === 'P1_discipline' ? 'AFTER_SYSTEM' : 'NEAR_END',
+          tokenEstimate: Math.round(m.message.length / 4),
+        })),
+        wasBlocked: blocked,
+        messageCount: capped.length,
+      };
+      log.recordReport(report);
+    } catch {
+      // 日志记录失败不影响主流程
+    }
   }
 
   /**

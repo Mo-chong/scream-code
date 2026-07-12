@@ -9,6 +9,7 @@
  */
 
 import { VARIANT_META } from './variant-registry';
+import type { DetectorResult, InterceptionDecision, DeliveryResult, RootCauseTrend, DetectorStats, TurnInterceptionReport } from '../interception/event-types';
 
 export interface InterceptionEvent {
   /** 全局序列号。单调递增。 */
@@ -184,6 +185,157 @@ export class TurnEventLog {
       }
     }
 
+    return lines.join('\n');
+  }
+
+  // ── Phase38 新增：结构化拦截事件记录 ─────────────────────────
+
+  /** 记录一轮拦截检测的完整报告（detectors + 决策 + 投递） */
+  recordReport(report: TurnInterceptionReport): void {
+    if (report.detectors.length === 0 && report.decisions.length === 0) return;
+
+    // 记录每一条 detector 输出
+    for (const d of report.detectors) {
+      this.record({
+        kind: 'detector_fired',
+        variant: d.detector,
+        step: report.stepCount,
+        turnId: report.turnId,
+        action: d.suppressed ? 'suppressed' : 'active',
+        reason: `[${d.rootCause}] ${d.message.slice(0, 60)}`,
+        level: d.isPositive ? '1' : '0',
+        tokenEstimate: 0,
+        agentType: 'main',
+      });
+    }
+
+    // 记录每一条决策
+    for (const d of report.decisions) {
+      this.record({
+        kind: 'interception_decision',
+        variant: `intercept_${d.rootCause}`,
+        step: d.step,
+        turnId: report.turnId,
+        action: d.blocked ? 'blocked' : d.isPositive ? 'positive' : 'injected',
+        reason: `[${d.priority}] ${d.escalation} x${d.triggerCount}: ${d.message.slice(0, 60)}`,
+        level: d.priority === 'P0_block' ? '3' : d.priority === 'P1_discipline' ? '2' : d.priority === 'P2_quality' ? '1' : '0',
+        tokenEstimate: d.message.length / 4,
+        agentType: 'main',
+      });
+    }
+
+    // 记录投递结果
+    for (const d of report.deliveries) {
+      this.record({
+        kind: 'interception_delivery',
+        variant: `intercept_${d.rootCause}`,
+        step: d.step,
+        turnId: report.turnId,
+        action: d.outcome,
+        reason: d.outcome === 'delivered' ? `位置: ${d.position || '?'}` : '超budget',
+        level: d.outcome === 'delivered' ? '1' : '0',
+        tokenEstimate: d.tokenEstimate ?? 0,
+        agentType: 'main',
+      });
+    }
+  }
+
+  // ── Phase38 新增：AI 可查询的聚合方法 ─────────────────────────
+
+  /** 获取指定根因的触发趋势（最近 N 步内） */
+  getRootCauseTrend(rootCause: string, recentSteps: number = 30): RootCauseTrend {
+    const all = this.events.filter(e => e.variant === `intercept_${rootCause}`);
+    const recent = all.filter(e => e.step >= (this.events.at(-1)?.step ?? 0) - recentSteps);
+
+    const escalationMap: Record<string, number> = { hint: 1, nudge: 2, warn: 3, block: 4 };
+    let sumEsc = 0;
+    let escCount = 0;
+    for (const e of recent) {
+      const match = e.reason.match(/\[(\w+)\]\s+(\w+)\s+x(\d+)/);
+      if (match) {
+        sumEsc += escalationMap[match[2]!] || 1;
+        escCount++;
+      }
+    }
+
+    const lastEvent = all.at(-1);
+    const currentEsc: 'hint' | 'nudge' | 'warn' | 'block' = lastEvent
+      ? (lastEvent.reason.includes('blocked') ? 'block'
+        : lastEvent.reason.includes('warn') ? 'warn'
+        : lastEvent.reason.includes('nudge') ? 'nudge' : 'hint')
+      : 'hint';
+
+    return {
+      rootCause: rootCause as any,
+      label: rootCause,
+      recentCount: recent.length,
+      totalCount: all.length,
+      avgEscalation: escCount > 0 ? sumEsc / escCount : 1,
+      active: recent.length > 0,
+      currentEscalation: currentEsc,
+    };
+  }
+
+  /** 获取所有 detector 的效果分析 */
+  getAllDetectorStats(): DetectorStats[] {
+    const detectorMap = new Map<string, { total: number; delivered: number; suppressed: number; block: number; lastStep: number }>();
+
+    for (const e of this.events) {
+      if (e.kind === 'detector_fired' && e.variant) {
+        const stat = detectorMap.get(e.variant) ?? { total: 0, delivered: 0, suppressed: 0, block: 0, lastStep: 0 };
+        stat.total++;
+        if (e.action === 'suppressed') stat.suppressed++;
+        if (e.action === 'active') stat.delivered++;
+        if (e.reason.includes('blocked')) stat.block++;
+        if (e.step > stat.lastStep) stat.lastStep = e.step;
+        detectorMap.set(e.variant, stat);
+      }
+    }
+
+    return Array.from(detectorMap.entries()).map(([detector, s]) => ({
+      detector,
+      totalTriggers: s.total,
+      delivered: s.delivered,
+      suppressed: s.suppressed,
+      suppressionRate: s.total > 0 ? s.suppressed / s.total : 0,
+      blockCount: s.block,
+      lastTriggerStep: s.lastStep,
+    }));
+  }
+
+  /** 获取整体拦截概况摘要（AI 一眼看懂的文本） */
+  getInterceptionSummary(): string {
+    const stats = this.getAllDetectorStats();
+    if (stats.length === 0) return '无拦截事件。';
+
+    const lines: string[] = ['## 拦截系统运行概况', ''];
+
+    // 总触发
+    const total = stats.reduce((s, d) => s + d.totalTriggers, 0);
+    lines.push(`总拦截事件: ${total} 次`);
+
+    // 按活跃度排序
+    const active = stats.filter(d => d.totalTriggers > 0).sort((a, b) => b.totalTriggers - a.totalTriggers);
+    lines.push('');
+    lines.push('### Detector 触发频率');
+    for (const d of active.slice(0, 10)) {
+      const bar = '█'.repeat(Math.min(d.totalTriggers, 20));
+      const pct = (d.suppressionRate * 100).toFixed(0);
+      lines.push(`- ${d.detector.padEnd(30)} ${d.totalTriggers}次 ${bar} (禁言率 ${pct}%)`);
+    }
+
+    // 频繁升级到 block 的根因
+    const blockers = stats.filter(d => d.blockCount > 0).sort((a, b) => b.blockCount - a.blockCount);
+    if (blockers.length > 0) {
+      lines.push('');
+      lines.push('### 高频阻断源');
+      for (const d of blockers.slice(0, 5)) {
+        lines.push(`- ${d.detector}: ${d.blockCount} 次阻断`);
+      }
+    }
+
+    lines.push('');
+    lines.push('> 趋势数据自动更新。需要深度分析请调用 getRootCauseTrend() 或 getAllDetectorStats()。');
     return lines.join('\n');
   }
 }

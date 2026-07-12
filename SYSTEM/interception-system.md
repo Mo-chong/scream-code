@@ -120,18 +120,4 @@ const config = {
 };
 ```
 
-## 执行计划
-
-```
-Phase38a (当前 ✅): 基础设施
-  → interception/types.ts（接口定义）
-  → interception/config.ts（统一配置）
-  → interception/manager.ts（InterceptionManager 类）
-  → 注册到 Agent 类
-
-Phase38b (待执行): Detector 迁移
-  → 从 guard-engine / turn内联 / detectors 迁移 13 个 detector
-
-Phase38c (待执行): bypass 消除 + 清理
-Phase38d (待执行): 文档完善 + 验证
-```
+> **完整策略说明见** [`attention-system.md`](attention-system.md)（决策表、AI 行为→系统响应映射、等价关系）。本文件仅记录 `interception/` 目录源码的实现细节。

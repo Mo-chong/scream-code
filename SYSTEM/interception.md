@@ -68,10 +68,26 @@ InjectionRouter（注入层）
 appendSystemReminder → AI 收到 ≤3 条消息
            │
            ▼
-TurnEventLog（日志层，本文件 ⬇）
+TurnEventLog（日志层—3层结构化记录）
+  │
+  ▼
+拦截事件池（3 层分层结构）
+  L1: DetectorResult        — 原始检测信号（谁触发了什么）
+  L2: InterceptionDecision  — 合并/递进/排序后的决策
+  L3: DeliveryResult        — 最终注入/阻断的实际情况
+  │
+  ▼
+聚合查询 API（AI 可自助调用）
+  ├── getRootCauseTrend()     — 特定根因的触发趋势
+  ├── getAllDetectorStats()   — 各 detector 效果分析
+  └── getInterceptionSummary()— 整体运行概况（一行读懂）
 ```
 
-> **决策与日志分离：** InterceptionManager 决定"要不要做"，event-log 记录"做了什么"。
+> **3 层分离原则：**
+> - DetectorResult：每轮有哪些检测器被触发
+> - InterceptionDecision：合并后的决策（为什么发这条消息）
+> - DeliveryResult：实际投递结果（发了/被预算卡了/阻断步了）
+> - AI 可通过 `eventLog.getInterceptionSummary()` 快速了解拦截系统运行状况
 
 ---
 
