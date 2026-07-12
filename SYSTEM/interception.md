@@ -11,7 +11,7 @@ updated: 2026-07-12
 >
 > **参见：** [`attention-system.md`](attention-system.md)（统一大脑） | [`interception-system.md`](interception-system.md)（执行层） | [`turn-control.md`](turn-control.md)（回合层）
 >
-> 源码: `packages/agent-core/src/agent/turn/event-log.ts` (181 行)
+> 源码: `packages/agent-core/src/agent/interception/event-log.ts`（核心）+ `turn/event-log.ts`（委托层）
 > 持久化: `packages/agent-core/src/agent/turn/event-snapshot.ts` (283 行)
 
 ---
@@ -88,6 +88,8 @@ TurnEventLog（日志层—3层结构化记录）
 > - InterceptionDecision：合并后的决策（为什么发这条消息）
 > - DeliveryResult：实际投递结果（发了/被预算卡了/阻断步了）
 > - AI 可通过 `eventLog.getInterceptionSummary()` 快速了解拦截系统运行状况
+
+> **Phase38i 目录重构：** 拦截日志实现代码已从 `turn/event-log.ts` 迁移到 [`interception/event-log.ts`](interception/event-log.ts)。`turn/event-log.ts` 保留为委托层（向后兼容）。新增代码直接在 `interception/` 下，不再散落在 `turn/` 中。
 
 ---
 

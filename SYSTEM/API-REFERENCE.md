@@ -629,16 +629,25 @@ class VariantRegistry {
 function getScore(variant: string, stepDelta: number): number  // 恢复导出
 ```
 
-### 6.6 拦截事件日志
-<!-- ref: InterceptionEventLog -->
+### 6.6 拦截事件查询 API（Phase38i）
+<!-- ref: recordInterceptionEvents, getRootCauseTrend, getDetectorStats, getInterceptionSummary -->
 
-**文件**: `agent/interception/event-log.ts`
+**文件**: `agent/interception/event-log.ts`（Phase38i 从 `turn/event-log.ts` 迁入）
 
 ```typescript
-class InterceptionEventLog {
-  // 环形缓冲区 + W 驱动采样 + 磁盘持久化
-  // 每回合刷盘到 wire.jsonl
-}
+// 模块级函数（非类），接收 InterceptionEvent[] 数组
+function recordInterceptionEvents(record, report): void    // 记录一轮拦截事件
+function getRootCauseTrend(events, rootCause, recentSteps): RootCauseTrend   // 根因趋势
+function getDetectorStats(events): DetectorStats[]          // detector 效果统计
+function getInterceptionSummary(events): string            // 运行概况文本
+```
+
+**委托层**：`turn/event-log.ts` 中 `TurnEventLog` 类的方法委托到以上函数。
+
+- `recordReport()` → `recordInterceptionEvents()`
+- `getRootCauseTrend()` → `_getRootCauseTrend()`
+- `getAllDetectorStats()` → `_getDetectorStats()`
+- `getInterceptionSummary()` → `_getInterceptionSummary()`
 ```
 
 ### 6.7 TokenUsage（Phase26）

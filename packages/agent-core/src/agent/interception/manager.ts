@@ -121,8 +121,7 @@ export class InterceptionManager {
       return { blocked: false, messages: [] };
     }
 
-    const allSignals = resolutionSignal ? [...signals, resolutionSignal] : signals;
-
+    const allSignals = (resolutionSignal ? [...signals, resolutionSignal] : signals) as RawSignal[];
     // Step 3: 按根因合并
     const merged = this.mergeByRootCause(allSignals);
 
@@ -161,12 +160,39 @@ export class InterceptionManager {
     // Step 7: 阻断检查
     const blocked = capped.some((m) => m.priority === 'P0_block');
 
-    // Step 8: 结构化日志记录 — 记录本轮拦截事件（供 AI 自助查询）
-    this.recordStep(ctx, allSignals, capped, blocked);
+    // Step 8: 高频异常检测 — 当某个根因触发次数 ≥5 时自动注入趋势
+    const anomalySignals: RawSignal[] = [];
+    for (const [cause, count] of this.triggerHistory) {
+      if (count >= 5) {
+        const label = ROOT_CAUSE_LABEL[cause as RootCause] || cause;
+        anomalySignals.push({
+          rootCause: cause as RootCause,
+          priority: 'P1_discipline' as const,
+          confidence: 0.9,
+          message: `高频异常：检测到「${label}」已触发 ${count} 次。请检查是否陷入重复模式——系统会自动记录，但需要你来打破循环。`,
+          escalation: count >= 10 ? 'warn' as const : 'hint' as const,
+          phase: 'post_step' as const,
+        });
+      }
+    }
+    const extendedSignals: RawSignal[] = anomalySignals.length > 0
+      ? [...allSignals, anomalySignals[0]!] : allSignals;
+    const reMerged = this.mergeByRootCause(extendedSignals);
+    const reEscalated = reMerged.map((m) => ({
+      ...m, escalation: this.calcEscalation(m.rootCause, ctx),
+      isPositive: this.checkPositiveSignal(m, ctx),
+    }));
+    const reSorted = this.sortByPriority(reEscalated);
+    const reCapped = reSorted.slice(0, this.config.maxMessagesPerStep);
+    const finalCapped = anomalySignals.length > 0 ? reCapped : capped;
+    const finalBlocked = finalCapped.some((m) => m.priority === 'P0_block');
+
+    // Step 9: 结构化日志记录 — 记录本轮拦截事件（供 AI 自助查询）
+    this.recordStep(ctx, extendedSignals, finalCapped, finalBlocked);
 
     return {
-      blocked,
-      messages: capped.map((m) => this.formatMessage(m)),
+      blocked: finalBlocked,
+      messages: finalCapped.map((m) => this.formatMessage(m)),
     };
   }
 

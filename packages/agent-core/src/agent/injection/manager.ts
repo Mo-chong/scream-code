@@ -9,7 +9,6 @@ import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
 import { WorkingSetInjector } from './working-set';
 import { StuckInjector } from './stuck';
-import { QualityInjector } from './quality';
 import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
@@ -41,7 +40,6 @@ export class InjectionManager {
       ['user-prefs', new UserPrefsInjector(agent)],
       // 路径 B 迁移：原 turn/injectors/{stuck,quality,intent}.ts
       ['system_ref_stuck', new StuckInjector(agent)],
-      ['quality_escalate', new QualityInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
