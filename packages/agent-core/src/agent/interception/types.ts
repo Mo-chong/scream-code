@@ -103,6 +103,10 @@ export interface InterceptionContext {
   triggerHistory: Record<string, number>;
   /** AI 注意力信号 [DONE]/[NEED]/[CONFIRM] */
   attentionSignals?: { done?: boolean; need?: boolean; confirm?: boolean };
+  /** 上回合偏差链状态（由 handleAfterStep 设置，下回合 beforeStep 消费） */
+  lastTurnHadDeviation?: boolean;
+  /** 上回合 Guard Rule 1 触发状态 */
+  lastTurnHadGuardRule1?: boolean;
 }
 
 /* ──────────────── Detector 接口 ──────────────── */

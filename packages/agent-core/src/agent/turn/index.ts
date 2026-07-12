@@ -892,6 +892,8 @@ export class TurnFlow {
                             need: this.crossTurnFlags.attentionSignals.need ?? false,
                             confirm: this.crossTurnFlags.attentionSignals.confirm ?? false }
                         : undefined,
+                      lastTurnHadDeviation: this.crossTurnFlags.lastTurnHadDeviation ?? false,
+                      lastTurnHadGuardRule1: this.crossTurnFlags.lastTurnHadGuardRule1 ?? false,
                     };
                     const result = this.agent.interception.execute(ctx);
                     return result.messages;
@@ -2332,15 +2334,9 @@ export class TurnFlow {
         { kind: 'system_trigger', name: 'behavior_rule' },
       );
     }
-    if (this.crossTurnFlags.lastTurnHadDeviation) {
-      this.inject(
-        '上回合因偏差链被拦截。本回合如涉及修改代码，请先查 LSP.references。',
-        { kind: 'system_trigger', name: 'behavior_rule' },
-      );
-    }
     this.crossTurnFlags.lastTurnHadGuardRule1 = false;
     this.crossTurnFlags.lastTurnHadDeviation = false;
-    // 复位注意力信号（由 AttentionMonitorDetector + InterceptionManager 消费）
+    // 复位注意力信号（由 AttentionMonitorDetector 和 DeviationChainDetector 接管）
     this.crossTurnFlags.attentionSignals = { done: false, need: false, confirm: false };
   }
 
