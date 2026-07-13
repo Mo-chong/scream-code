@@ -8,6 +8,7 @@ import { TruncationTracker } from '../../../agent/turn/truncation-tracker';
 
 const ArchiveRecoverInputSchema = z.object({
   key: z.string().optional().describe('精确匹配 ContentArchive key，返回单条内容'),
+  keys: z.array(z.string()).optional().describe('批量取回：传一组 key，返回对应内容的数组'),
   query: z.string().optional().describe('模糊搜索 key（key.includes(query)），返回所有匹配'),
 }).strict();
 
@@ -20,7 +21,7 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
   readonly description =
     '从内容存档中按 key 或关键词恢复之前截断/存档的内容。' +
     'key 格式为 tool:{callId}（如 tool:call_00_abc），遮蔽消息中会提示具体 key。' +
-    '不传参数则列出所有可用 key（仅索引，不含内容）。传 key 精确匹配单条，传 query 模糊搜索全部匹配。';
+    '支持批量取回（传 keys 数组）。不传参数则列出所有可用 key（仅索引，不含内容）。';
 
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ArchiveRecoverInputSchema);
 
@@ -49,6 +50,22 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
           }
           // 统一用 JSON.stringify 返回以确保 UTF-8/Unicode 正确编码
           return { output: JSON.stringify({ key: args.key, content }) };
+        }
+
+        if (args.keys && args.keys.length > 0) {
+          const results: Array<{ key: string; content: unknown } | { key: string; error: string }> = [];
+          for (const k of args.keys) {
+            const c = this.contentArchive.recover(k);
+            if (c && TruncationTracker.current) {
+              TruncationTracker.current.markRecovered(k);
+            }
+            if (c === null) {
+              results.push({ key: k, error: 'key 不存在' });
+            } else {
+              results.push({ key: k, content: c });
+            }
+          }
+          return { output: JSON.stringify({ count: results.length, results }) };
         }
 
         if (args.query) {

@@ -2176,27 +2176,36 @@ export class TurnFlow {
     }
   }
 
-  /** 正反馈注入 — 每回合一次 */
+  /** 正反馈注入 — 每回合一次（覆盖多种成就场景） */
   private injectPositiveFeedbackThisTurn(): void {
     if (this.positiveFeedbackGivenThisTurn) return;
 
-    // 行为正反馈（原逻辑）
+    // ── 场景 A：行为合规 + 代码质量（原有逻辑） ──
     const behaviorClean =
       !this.confabulationBlocked &&
       !this.deviationChainActive &&
       !this.verifyFailedThisStep;
 
     const hasGoodBehavior =
-      this.hasCalledLspReferencesThisStep ||   // 查了引用
-      this.editWithoutLookupCount === 0;        // 没跳步编辑
+      this.hasCalledLspReferencesThisStep ||
+      this.editWithoutLookupCount === 0;
 
-    // 代码质量正反馈（Phase 18 新增）
     const codeQualityClean = this.codeQualityViolationsThisTurn === 0;
     const hasNonEmptyTurn = this.currentStep >= 1;
 
     if (behaviorClean && hasGoodBehavior && codeQualityClean && hasNonEmptyTurn) {
       this.positiveFeedbackGivenThisTurn = true;
       this.inject('【行为确认】本轮验证流程完整且代码质量合规。继续。', { kind: 'injection', variant: 'feedback_positive' });
+      return;
+    }
+
+    // ── 场景 B：简单任务一次过（无错误、无偏差链、无阻力） ──
+    // 覆盖：Read/Grep/Bash 一次成功、步骤少且没出岔子
+    const noErrors = !this.toolErrorThisStep;
+    const fewSteps = this.currentStep <= 3;
+    if (behaviorClean && noErrors && fewSteps && hasNonEmptyTurn && !this.positiveFeedbackGivenThisTurn) {
+      this.positiveFeedbackGivenThisTurn = true;
+      this.inject('✅ 本步执行顺利，继续。', { kind: 'injection', variant: 'feedback_positive' });
     }
   }
 

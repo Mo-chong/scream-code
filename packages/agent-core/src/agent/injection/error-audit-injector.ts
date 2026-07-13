@@ -6,7 +6,7 @@
  *
  *   支柱一（P0）：超时死循环+耗时膨胀
  *     - 连续≥2次 Bash 超时 → FATAL|TIMEOUT
- *     - 最新工具耗时 > 滚动均值×1.5 → WARN|INFLATE
+ *     - 最新工具耗时 > 滚动均值×2.0 → WARN|INFLATE
  *
  * 注入格式：AI 原生 3 行定长（AI 50ms 解析）
  *   PREFIX|CAT|key=value
@@ -35,7 +35,7 @@ export class ErrorAuditInjector extends DynamicInjector {
 
   /** 残差控制：降低每轮注入频率 */
   override getResidualConfig(): ResidualConfig | undefined {
-    return { weight: 0.5, decayPerStep: 0.85, minStepGap: 2, threshold: 0.2 };
+    return { weight: 0.4, decayPerStep: 0.9, minStepGap: 3, threshold: 0.15 };
   }
 
   protected getInjection(): string | undefined {
@@ -128,7 +128,7 @@ export class ErrorAuditInjector extends DynamicInjector {
     const avg =
       sameTool.reduce((s, e) => s + e.durationMs, 0) / sameTool.length;
 
-    if (latest.durationMs > avg * 1.5) {
+    if (latest.durationMs > avg * 2.0) {
       const ratio = (latest.durationMs / avg).toFixed(1);
       return [
         `WARN|INFLATE|tool=${latest.action} ratio=${ratio} avg=${Math.round(avg)}ms cur=${latest.durationMs}ms`,
