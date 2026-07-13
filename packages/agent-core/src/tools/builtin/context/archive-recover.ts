@@ -19,6 +19,7 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
   readonly name = 'ArchiveRecover' as const;
   readonly description =
     '从内容存档中按 key 或关键词恢复之前截断/存档的内容。' +
+    'key 格式为 tool:{callId}（如 tool:call_00_abc），遮蔽消息中会提示具体 key。' +
     '不传参数则列出所有可用 key（仅索引，不含内容）。传 key 精确匹配单条，传 query 模糊搜索全部匹配。';
 
   readonly parameters: Record<string, unknown> = toInputJsonSchema(ArchiveRecoverInputSchema);
@@ -36,6 +37,15 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
           const content = this.contentArchive.recover(args.key);
           if (content && TruncationTracker.current) {
             TruncationTracker.current.markRecovered(args.key);
+          }
+          if (content === null) {
+            return {
+              output: JSON.stringify({
+                key: args.key,
+                error: 'key 不存在',
+                hint: 'key 可能已过期（TTL 4 小时）或被 LRU 淘汰，请尝试重新调工具获取最新内容',
+              }),
+            };
           }
           // 统一用 JSON.stringify 返回以确保 UTF-8/Unicode 正确编码
           return { output: JSON.stringify({ key: args.key, content }) };
