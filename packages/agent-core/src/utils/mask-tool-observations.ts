@@ -83,19 +83,61 @@ function getContentText(msg: Message): string {
 }
 
 /**
- * Generate a concise human-readable summary of a tool result.
- * Takes first 5 lines, normalizes whitespace, caps at 400 chars.
+ * Generate a semantic summary of a tool result, prioritizing high-value lines.
+ *
+ * Strategy: find lines containing function/export/class/route definitions
+ * and their surrounding context. Falls back to first lines when no semantic
+ * pattern is found. Caps at 400 chars.
+ *
  * Short results (< 100 chars) are not masked elsewhere, so this only
  * runs on longer content that genuinely needs summarisation.
  */
 function generateSummary(msg: Message): string {
   const raw = getContentText(msg);
-  const text = raw.replace(/\s+/g, ' ').trim();
-  if (text.length <= 400) return text;
-  // Take first ~5 lines worth of content for a meaningful preview
-  const lines = text.slice(0, 400).split('.');
-  const preview = lines.slice(0, 5).join('.').trim();
-  return preview.length > 0 ? preview.slice(0, 397) + '...' : text.slice(0, 397) + '...';
+  if (raw.length <= 400) return raw.replace(/\s+/g, ' ').trim();
+
+  // Split into lines for semantic analysis (preserve original line structure)
+  const lines = raw.split('\n');
+
+  // Priority patterns: lines that carry semantic weight in code/text
+  const KEY_PATTERN = /^\s*(export\s+|function\s+|const\s+|let\s+|var\s+|class\s+|interface\s+|type\s+|def\s+|return\s+|import\s+.*from\s|@\w+\s|app\.\w+|router\.\w+|async\s+|await\s+)/;
+
+  const selectedLines: string[] = [];
+  const addedIndices = new Set<number>();
+
+  for (let i = 0; i < lines.length && selectedLines.length < 15; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    if (KEY_PATTERN.test(line)) {
+      // Add preceding non-empty line if it's context (comment or annotation)
+      const prev = i > 0 ? lines[i - 1] : undefined;
+      if (prev && !addedIndices.has(i - 1) && prev.trim().length > 0) {
+        selectedLines.push(prev.trim().slice(0, 80));
+        addedIndices.add(i - 1);
+      }
+      // Add the key line itself
+      selectedLines.push(line.trim().slice(0, 120));
+      addedIndices.add(i);
+      // Add next line if it's not blank (code continuation)
+      const next = i + 1 < lines.length ? lines[i + 1] : undefined;
+      if (next && next.trim() && !addedIndices.has(i + 1)) {
+        selectedLines.push(next.trim().slice(0, 100));
+        addedIndices.add(i + 1);
+      }
+    }
+  }
+
+  // If we found semantic content, build summary from it
+  if (selectedLines.length > 0) {
+    let summary = selectedLines.join(' | ').trim();
+    if (summary.length > 400) summary = summary.slice(0, 397) + '...';
+    return summary;
+  }
+
+  // Fallback: first non-empty lines (current behavior)
+  const firstLines = lines.map(l => l.trim()).filter(Boolean).slice(0, 5);
+  const fallback = firstLines.join(' ').replace(/\s+/g, ' ').trim();
+  return fallback.length <= 400 ? fallback : fallback.slice(0, 397) + '...';
 }
 
 /**
@@ -122,8 +164,9 @@ export function maskToolObservations(
 ): { messages: Message[]; recoverable: RecoverableRecord[] } {
   const k = keepLastN ?? flags.asNumber('mask.keepLastN') ?? 3;
 
-  // ── 找"当前轮"边界：最后一条 assistant(toolCalls) 之后的所有 tool result 永不遮蔽 ──
-  // 跨步骤场景：AI 上一步执行的 tool result 在当前步骤必须可见
+  // ── 找"当前轮"边界 + 步数感知保护 ──
+  // 最后一条 assistant(toolCalls) 之后的结果默认不遮蔽，
+  // 但最多只保护最后 PROTECTED_TOOLS_COUNT 个，防止大任务中较早结果不释放
   let currentRoundStart = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -132,7 +175,6 @@ export function maskToolObservations(
       break;
     }
   }
-
   // ── 收集所有 tool result 索引（短输出保护） ──
   const allIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
@@ -140,20 +182,25 @@ export function maskToolObservations(
     if (m !== undefined && m.role === 'tool') {
       if (m.content) {
         const text = getContentText(m);
-        if (text.length < 100) continue; // 短输出保留
+        if (text.length < 100) continue;
       }
       allIndices.push(i);
     }
   }
-
-  // 划分：当前轮（boundary 之后） vs 历史轮（boundary 及之前）
+  // 步数感知：当前轮结果超过 5 时，较早的降级给历史轮遮蔽
+  const currentRoundAll = currentRoundStart >= 0
+    ? allIndices.filter((i) => i > currentRoundStart)
+    : [];
+  const PROTECTED_TOOLS_COUNT = 5;
+  const deferredToOld = currentRoundAll.length > PROTECTED_TOOLS_COUNT
+    ? currentRoundAll.slice(0, currentRoundAll.length - PROTECTED_TOOLS_COUNT)
+    : [];
   const currentRoundSet = new Set(
-    currentRoundStart >= 0
-      ? allIndices.filter((i) => i > currentRoundStart)
-      : [],
+    currentRoundAll.slice(deferredToOld.length),
   );
+  // 降级的当前轮结果加入历史轮，受 keepLastN 遮蔽
   const oldIndices = currentRoundStart >= 0
-    ? allIndices.filter((i) => i <= currentRoundStart)
+    ? allIndices.filter((i) => i <= currentRoundStart || deferredToOld.includes(i))
     : allIndices;
 
   // 只对历史轮应用 keepLastN

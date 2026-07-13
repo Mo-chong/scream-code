@@ -866,6 +866,24 @@ export class TurnFlow {
             // Safety: clear stale records before setting fresh ones
             this.agent.context._pendingRecoveries = [];
             this.agent.context._pendingRecoveries = records;
+            // P1: auto batch recover — >=3 high-priority records auto-fetch
+            if (records.length >= 3) {
+              const highValue = records.filter(r => r.priority <= 2);
+              if (highValue.length >= 3) {
+                const recoveredLines: string[] = ['<system-reminder>', '[auto-recover] Detected high-priority archived items, batch fetched:'];
+                for (const r of highValue) {
+                  const c = this.agent.contentArchive?.recover(r.key);
+                  if (c && typeof c === 'string') {
+                    recoveredLines.push('[' + r.toolName + ' (key: ' + r.key + ')]');
+                    recoveredLines.push(c.slice(0, 2000));
+                  }
+                }
+                if (recoveredLines.length > 3) {
+                  recoveredLines.push('</system-reminder>');
+                  this.inject(recoveredLines.join('\n'), { kind: 'system_trigger', name: 'auto_recover' });
+                }
+              }
+            }
           },
           hooks: {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
