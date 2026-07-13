@@ -84,7 +84,7 @@ export interface VariantMeta {
 | `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
 | `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
 | `tool_result_recovery` | 0.6 | 0.85 | 0.15 | 2 | B | ❌ Phase39 已替换为 active_summary |
-| `active_summary` 🆕 | 0.6 | 0.85 | 0.15 | 2 | B | 主动摘要注入（替代 tool_result_recovery） |
+| `active_summary` 🆕 | 0.3 | 0.90 | 0.20 | 5 | B | 主动摘要注入（替代 tool_result_recovery），按优先级≤2 显示具体记录 |
 | `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
 | `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
 | `prepare_*` (6变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入 |
@@ -100,7 +100,7 @@ export interface VariantMeta {
 | `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
 
 > Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
-> Phase39 (2026-07-12) 变体变更：tool_result_recovery 退役，替换为 active_summary（主动摘要注入，基于 _pendingRecoveries 数据源而非 history 估算）。
+> Phase39-40c-f (2026-07-13) 变更：active_summary 增强 — weight 0.6→0.3, minStepGap 2→5，从泛提醒改为按优先级（≤2）显示具体记录+取回 key。Phase40b mergeOldToolPairs 已删除。
 
 ```typescript
 export function getScore(variant: string, stepDelta: number): number {

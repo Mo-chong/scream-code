@@ -58,14 +58,8 @@ maskToolObservations (每轮)  ──→ 每轮对话前自动执行        无�
      │                          生成 RecoverableRecord[]
      │
      ▼
-mergeOldToolPairs (每轮)    ──→ maskToolObservations 之后    无日志
-     │                          保留最近 keepLastNPairs(3) 对
-     │                          旧 tool pair → 合并为单条 assistant
-     │                          (仅全部已遮蔽的进行合并)
-     │
-     ▼
-ActiveSummaryInjector (每轮) ──→ step=1 读取 _pendingRecoveries   audit.activeSummaryCount
-     │                          排序 ERROR>FILE>API>SEARCH>STATUS
+ActiveSummaryInjector (每轮) ──→ _pendingRecoveries 非空     audit.activeSummaryCount
+     │                          仅高优先级（≤2 交互/文件/API）记录
      │                          最多 3 条摘要 → system-reminder
      │
      ▼
@@ -132,7 +126,7 @@ this.contentArchive?.archive('tool:' + msg.toolCallId, textContent, {
 
 **存档时机**：
 - Point A：`context/index.ts` — 每步 tool result 写入 history 后即时 archive（key: `tool:${callId}`）
-- Point B：`micro.ts` — MicroCompaction 截断前 archive（key: `micro:${callId}`）
+- Point B：`micro.ts` — MicroCompaction 截断前 archive（key: `tool:${callId}`）
 
 **两者互补**：Point A 保证每步数据都有备份，Point B 保证截断数据不丢失。
 
@@ -663,7 +657,7 @@ agent/context/index.ts
   └─ Predictor.record()               ← compaction/predictor.ts
 
 agent/compaction/micro.ts
-  ├─ Point B: archive('micro:'+callId) → content-archive.ts (L223)
+  ├─ Point B: archive('tool:'+callId) → content-archive.ts (L223)
   ├─ compact(messages)                 → context/index.ts (L235)
   │    ├─ findSupersededPaths()
   │    ├─ minContentTokens=100 小结果保留

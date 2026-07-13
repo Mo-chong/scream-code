@@ -810,17 +810,18 @@ function stabilizePrefix(history: ContextMessage[]): ContextMessage[]
 **文件**: `utils/mask-tool-observations.ts`
 
 ```typescript
-const MASK_TEXT_WITH_TOOL = '[已遮蔽·{toolName}·已存档·ArchiveRecover可恢复]'
-const MASK_TEXT_DEFAULT  = '[已遮蔽·已存档·ArchiveRecover可恢复]'
-
 function maskToolObservations(
   messages: readonly Message[],
-  keepLastN?: number,                          // flag mask.keepLastN (默认 3)，< 100 chars 不遮蔽
+  keepLastN?: number,                          // flag mask.keepLastN (默认 3)
   toolNameMap?: ReadonlyMap<string, string>   // {toolCallId → toolName}
-): Message[]
-  // 遮蔽旧 tool result，保留最近 keepLastN 条原文
+): { messages: Message[]; recoverable: RecoverableRecord[] }
+  // 遮蔽旧 tool result 为自然语言摘要，保留最近 keepLastN 条 + 当前轮结果
+  // 当前轮检测：最后一条 assistant(toolCalls) 之后的 tool result 永不遮蔽
+  // 短输出保护：< 100 chars 跳过遮蔽
   // 纯函数，不修改 context.history
-  // 工具结果 < 100 chars 跳过遮蔽（短输出保护）
+  // 遮蔽格式：`{toolName} 返回 {summary}。完整内容已存档，可调用 archive_recover("{key}") 取回全文。`
+  // key 前缀 `tool:${callId}`（与 context/index.ts 存储 key 一致）
+  // 同时返回 recoverable[] 供 ActiveSummaryInjector 消费
 ```
 
 **无接口变更**（新增可选参数，向下兼容）。
