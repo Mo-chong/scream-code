@@ -75,23 +75,38 @@ export class PersistentSummaryInjector extends DynamicInjector {
   }
 
   private extractFacts(history: readonly any[]): string[] {
+    // Use same positional logic as computeILR: find current round boundary,
+    // then collect tool results beyond keepLastN (those that get masked).
+    const keepLastN = flags.asNumber('mask.keepLastN') ?? 3;
+
+    let currentRoundStart = -1;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+        currentRoundStart = i;
+        break;
+      }
+    }
+
+    // Collect old tool result indices (before boundary)
+    const oldToolIndices: number[] = [];
+    for (let i = 0; i < history.length; i++) {
+      const m = history[i];
+      if (m?.role !== 'tool') continue;
+      if (currentRoundStart >= 0 && i > currentRoundStart) continue;
+      oldToolIndices.push(i);
+    }
+
+    // Only entries beyond keepLastN AND not short get masked
+    const maskThreshold = Math.max(0, oldToolIndices.length - keepLastN);
     const facts: string[] = [];
-    for (const msg of history) {
-      if (msg?.role !== 'tool') continue;
+    for (let i = maskThreshold; i < oldToolIndices.length; i++) {
+      const msg = history[oldToolIndices[i]!]!;
       const text = typeof msg.content === 'string' ? msg.content
         : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
-      if (this.isMaskedContent(msg)) {
-        // New format: "Read 返回 xxx。完整内容已存档..."
-        if (text.includes('可调用 archive_recover')) {
-          // Extract tool name from text (first word before " 返回" or " 已执行")
-          const toolName = text.split(/ [返回已]/)[0] ?? '工具';
-          const charLen = text.length;
-          facts.push(`(${toolName} 结果已存档摘要，共 ${charLen} 字符，可 archive_recover 取回全文)`);
-        } else {
-          // Old format: [tool output masked] or [已遮蔽·key:...]
-          facts.push(`(工具结果已遮蔽，共 ${text.length} 字符)`);
-        }
-      }
+      if (text.length < 100) continue; // short output, never masked
+      const toolCallId = (msg as any).toolCallId ?? (msg as any).toolUseId ?? '';
+      facts.push(`(工具${i+1} 结果过长，可用 archive_recover("tool:${toolCallId}") 取回全文，共 ${text.length} 字符)`);
     }
     return facts;
   }

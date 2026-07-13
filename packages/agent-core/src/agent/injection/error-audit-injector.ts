@@ -108,7 +108,7 @@ export class ErrorAuditInjector extends DynamicInjector {
   }
 
   /**
-   * 耗时膨胀检测 — 同工具类型内最新耗时 > 滚动均值×1.5
+   * 耗时膨胀检测 — 同工具类型内最新耗时 > 滚动均值×2.0
    *
    * 只对比相同 action 的条目，避免跨工具误报
    * （如 Bash 构建耗时 > Read 均值不触发）
