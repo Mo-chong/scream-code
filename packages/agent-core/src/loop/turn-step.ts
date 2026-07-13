@@ -100,7 +100,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   const autoRecoverText = deps.storePendingRecoveries?.(recoverable) ?? undefined;
   if (autoRecoverText) {
     messages = [
-      { role: 'system', content: [{ type: 'text' as const, text: autoRecoverText }] } as unknown as Message,
+      { role: 'system', content: [{ type: 'text' as const, text: autoRecoverText }], toolCalls: [] } as unknown as Message,
       ...messages,
     ];
   }
