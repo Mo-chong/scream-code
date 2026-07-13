@@ -166,7 +166,7 @@ export function maskToolObservations(
 
   // ── 找"当前轮"边界 + 步数感知保护 ──
   // 最后一条 assistant(toolCalls) 之后的结果默认不遮蔽，
-  // 但最多只保护最后 PROTECTED_TOOLS_COUNT 个，防止大任务中较早结果不释放
+  // 但最多只保护最后 protectedLimit 个，防止大任务中较早结果不释放
   let currentRoundStart = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -191,9 +191,9 @@ export function maskToolObservations(
   const currentRoundAll = currentRoundStart >= 0
     ? allIndices.filter((i) => i > currentRoundStart)
     : [];
-  const PROTECTED_TOOLS_COUNT = 5;
-  const deferredToOld = currentRoundAll.length > PROTECTED_TOOLS_COUNT
-    ? currentRoundAll.slice(0, currentRoundAll.length - PROTECTED_TOOLS_COUNT)
+  const protectedLimit = k + 2; // keepLastN + 2, auto-adjusts with flag
+  const deferredToOld = currentRoundAll.length > protectedLimit
+    ? currentRoundAll.slice(0, currentRoundAll.length - protectedLimit)
     : [];
   const currentRoundSet = new Set(
     currentRoundAll.slice(deferredToOld.length),
