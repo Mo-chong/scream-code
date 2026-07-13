@@ -877,3 +877,21 @@ updated: 2026-07-13
 - **`agent/turn/index.ts`** — computeILR 短输出保护排除已遮蔽标记文本（占位符 46 字符不被误判为短内容）
 - **`agent/injection/persistent-summary.ts`** — extractFacts 重写：currentRoundStart+keepLastN+短输出保护判断被遮条目，附带 `tool:{callId}` 取回指引
 - **`SYSTEM/`** — attention-system/compaction/injection-system/API-REFERENCE/pitfalls/CHANGELOG 全部同步
+
+#### Phase40g: 全链路扫描 — auto-recover去重 + 死代码清理 + 空 key 守卫 [2026-07-13]
+- **`agent/turn/index.ts`** — P1 auto-recover 无去重，每步重复触发；新增 `_autoRecoveredKeys: Set<string>` 字段 + `_seen` 局部 set，每轮 turn start 时 `.clear()`
+- **`agent/injection/persistent-summary.ts`** — 删除死代码 `isMaskedContent()` 方法（已被位置检测 `extractFacts` 替代）；`extractFacts` 空 `toolCallId` 生成 `tool:` 无意义 key 的守卫：`if (!rawId) continue`
+- **验证**：tsc 0 errors | 45/45 tests
+
+#### Phase40h: P0-P2 优化 — 语义摘要 + 自动批量取回 + 步数感知保护 [2026-07-13]
+- **`utils/mask-tool-observations.ts`** — P0 `generateSummary` 重写：正则检测 `function/export/const/class/interface/def/return` 等关键行优先保留，最多 15 行+上下文；无匹配时回退到首个非空行；P2 `PROTECTED_TOOLS_COUNT=5` 硬编码改为 `protectedLimit = k + 2`（与 `mask.keepLastN` 配置联动，`k=3` 则保护 5，`k=5` 则保护 7），当前轮结果超额部分降级给历史轮遮蔽
+- **`agent/turn/index.ts`** — P1 ≥3 条高优先级记录时自动 `contentArchive.recover()` 批量取回注入上下文（省掉 AI 日均近千次"取不取"决策）；`storePendingRecoveries` 回调改为返回 `string | undefined`，内容通过 turn-step.ts 注入到当前步 messages
+- **`loop/turn-step.ts`** — 捕获 `storePendingRecoveries` 返回值，非空时 prepend 到当前步 `messages` 头部；回调类型签名 `void`→`string | undefined`
+- **`loop/run-turn.ts`** — 类型签名同步
+- **验证**：tsc 0 errors | 21/21 tests | bundle bundle 重建
+
+#### Phase40i: auto-recover system 消息字段遗漏 → provider 崩溃修复 [2026-07-13]
+- **`loop/turn-step.ts`** — auto-recover 新建的 `role: 'system'` 消息缺少 `toolCalls: []` 字段，provider（scream.ts/anthropic.ts/google-genai.ts）裸调 `message.toolCalls.length`，`undefined.length` 导致崩溃。修复：`{ role: 'system', content: [...], toolCalls: [] }`
+- **根因**：`as unknown as Message` 绕过了类型检查，其他两处 system 消息（`summary.ts:60`、`ltod-llm.ts:375`）都有 `toolCalls: []`，只有这处漏了
+- **审计影响**：此前 `pendingRecoverKeys=0、summaryTriggered=false` 都是因为 auto-recover 逻辑走到此前就崩了——不是功能没运行，是每次跑到注入就崩溃
+- **验证**：tsc 0 errors | 21/21 tests | bundle 重建 | guard 最新

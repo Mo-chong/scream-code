@@ -672,6 +672,8 @@ turn/index.ts beforeStep
 1. `as SomeType[]` 是红牌——类型断言等于告诉 TypeScript "不用你检查了"，后续所有类型安全全部失效。**禁止用 `as` 跳过类型检查。** 要么补全字段，要么用 `satisfies` 约束而非 `as` 强转。
 2. 对 `message.toolCalls` 这种可选数组字段，访问其 `length` 或 `for...of` 前必须加 `?? []` 防御。这是 TypeScript 项目的通用防御模式，不是特定 bug 的补丁。
 3. 异常触发时机（"停一段时间后首次消息"）和 bug 触发条件（"超 8 步触发摘要"）不直观。调试时**难以复现的崩往往在特定条件路径上**，查日志确认触发条件比瞎猜更快。
+4. **重复实例**（2026-07-13, Phase40i）— `turn-step.ts:103` auto-recover system 消息也漏了 `toolCalls: []`，`as unknown as Message` 绕过类型检查，provider（scream.ts/anthropic.ts/google-genai.ts）裸调 `message.toolCalls.length` → `undefined.length` 崩溃。审计数据中 `pendingRecoverKeys=0` 就是因为 auto-recover 走到注入就崩了——不是没运行，是每次跑到注入就炸。
+   - **教训 4**：只要用 `as ... as Message` 就有漏字段风险。构造 system 消息时对照其他已知正确的 system 消息（`summary.ts:60`、`ltod-llm.ts:375` 都有 `toolCalls: []`）逐字段对齐。
 
 ---
 
