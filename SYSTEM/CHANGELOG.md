@@ -1,7 +1,7 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
-updated: 2026-07-11
+updated: 2026-07-13
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -859,3 +859,21 @@ updated: 2026-07-11
 
 #### 测试
 - **`test/agent/active-summary.test.ts`** — 5 个 maskToolObservations 用例，5/5 通过。mergeOldToolPairs 3 个用例已随 Phase40c 删除
+
+#### Phase40d: 遮蔽系统 key 前缀统一 + 4 个 Bug 修复 [2026-07-13]
+- **`utils/mask-tool-observations.ts`** — key 前缀 `micro:`→`tool:`（与 context/index.ts 存储 key 对齐）；注释同步
+- **`agent/compaction/micro.ts`** — 备份存储前缀 `micro:`→`tool:`；LRU 淘汰后 AI 也能取回
+- **`agent/turn/index.ts`** — `computeILR` 从内容检测改为位置检测（解决 ILR 永远为 0 问题）；`shouldTriggerPersistentSummary` 从 flags 读 keepLastN；`updatePersistentSummary` 从 flags 读 keepLastN+currentRoundStart 边界对齐
+- **`agent/injection/persistent-summary.ts`** — `computeILR(history, 3)` 硬编码→flags；`extractFacts` 从内容检测改为位置检测（解决事实列表永远空）；新增 `flags` import
+- **`agent/injection/active-summary.ts`** — 从泛提醒改为按优先级显示具体记录+key；去重；排序
+- **`test/agent/active-summary.test.ts`** — `micro:call_`→`tool:call_` 断言同步
+
+#### Phase40e: error-audit 敏感度+正向反馈+archive-recover 批量 [2026-07-13]
+- **`agent/injection/error-audit-injector.ts`** — minStepGap 2→3、weight 0.5→0.4、耗时膨胀阈值 avg×1.5→avg×2.0；注释同步
+- **`agent/turn/index.ts`** — `injectPositiveFeedbackThisTurn` 新增场景 B（简单任务一次过：无错误、≤3 步、无偏差链→`✅ 本步执行顺利，继续。`）
+- **`tools/builtin/context/archive-recover.ts`** — 新增 `keys: string[]` 批量取回参数；description 增加 `tool:` 格式提示+批量提示；null 返回友好错误（TTL/hint）
+
+#### Phase40f: computeILR 位置检测补丁 + extractFacts 实测摘要 [2026-07-13]
+- **`agent/turn/index.ts`** — computeILR 短输出保护排除已遮蔽标记文本（占位符 46 字符不被误判为短内容）
+- **`agent/injection/persistent-summary.ts`** — extractFacts 重写：currentRoundStart+keepLastN+短输出保护判断被遮条目，附带 `tool:{callId}` 取回指引
+- **`SYSTEM/`** — attention-system/compaction/injection-system/API-REFERENCE/pitfalls/CHANGELOG 全部同步

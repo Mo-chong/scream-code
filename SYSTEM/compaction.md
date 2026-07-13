@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/compaction, status/final]
 keywords: [压缩, compaction, 前缀稳定, 批次门控, 裁切]
-updated: 2026-07-08
+updated: 2026-07-13
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->

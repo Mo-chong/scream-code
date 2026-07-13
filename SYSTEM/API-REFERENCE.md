@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-11
+updated: 2026-07-13
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -1081,12 +1081,14 @@ afterStep: clearStepRecovered(currentStep) → prune(currentStep)
 **文件**: `packages/agent-core/src/tools/builtin/context/archive-recover.ts`
 
 ```typescript
-// 输入: { key?: string, query?: string }
-// 输出: 按 key 精确匹配 / 按 query 模糊搜索 / 不传参返回所有可用 key 索引
+// 输入: { key?: string, keys?: string[], query?: string }
+// 输出: 按 key 精确匹配 / keys 批量取回 / query 模糊搜索 / 不传参返回所有可用 key 索引
+// key 格式: tool:{callId}（如 tool:call_00_abc）
 
 class ArchiveRecoverTool implements BuiltinTool {
   readonly name = 'ArchiveRecover'
-  readonly description = '从内容存档中按 key 或关键词恢复之前截断/存档的内容。'
+  readonly description = '从内容存档中按 key 或关键词恢复之前截断/存档的内容。' +
+    'key 格式为 tool:{callId}，遮蔽消息中会提示。支持批量取回（传 keys 数组）。'
   // resolveExecution 模式，非 execute
   resolveExecution(args): ToolExecution { ... }
 }

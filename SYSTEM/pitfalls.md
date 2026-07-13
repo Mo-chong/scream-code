@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/pitfalls, status/final]
 keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
-updated: 2026-07-11
+updated: 2026-07-13
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -922,3 +922,9 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
    - **根因**：`bin/scream` shim 写的是 `node packages/agent-core/dist/index.mjs`（库入口）。这个文件加载完就静静退出，不认识 `--version`。正确的 CLI 入口是 `apps/scream-code/dist/main.mjs`（CLI bundle，package.json 中 `bin` 字段指定的）
    - **修复**：3 个 shim（bash/cmd/ps1）全改为指向 `apps/scream-code/dist/main.mjs`
    - **教训**：写 shim 前查 `package.json#bin` 字段——它告诉你真正的 CLI 入口在哪。别猜。另：排查无输出时第一时间重定向 stdout/stderr 到文件，而不是猜 PowerShell 策略、猜 CWD、猜代理
+
+### 遮蔽系统 key 前缀不匹配 → AI 无法 archive_recover 取回 [Phase40d, 2026-07-13]
+   - **现象**：AI 看到 `可调用 archive_recover("micro:call_00_abc")` 但调 archive_recover 返回 null
+   - **根因**：`mask-tool-observations.ts` 生成 key 时用 `micro:`，但 `context/index.ts` 存储用 `tool:`。ContentArchive 查不到
+   - **修复**：3 处 `micro:`→`tool:`（mask-tool-observations.ts ×2、test 断言 ×1）；micro.ts 备份存储统一为 `tool:`；archive-recover.ts description 增加 `tool:` 格式提示；null 输出友好错误
+   - **教训**：ContentArchive key 前缀必须全链路统一。生成 key → 存储 key → 取回 key 三处串联用同一前缀
