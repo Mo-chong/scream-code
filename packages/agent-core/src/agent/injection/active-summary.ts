@@ -3,16 +3,13 @@ import { InsertPosition } from './position-strategy';
 import type { RecoverableRecord } from '../../utils/mask-tool-observations';
 
 /**
- * ActiveSummaryInjector — 主动工具结果摘要注入
+ * ActiveSummaryInjector — 工具结果 archive_recover 可用提醒
  *
- * Phase39 替代 ToolResultRecoveryInjector（旧版 129 行，审计确认 1694 轮 0 次触发）。
+ * 当 maskToolObservations 遮蔽了旧工具结果时，注入一句简短的提醒，
+ * 告诉 AI 可以通过 archive_recover(key) 取回完整内容。
  *
- * 关键区别：
- *   旧版: 从 history 估算被遮蔽消息 → 管线顺序矛盾 → 永不触发
- *   新版: 从 context._pendingRecoveries 读取 maskToolObservations 返回的准确记录
- *
- * 注入格式：含 key 的引导式摘要，AI 看到后可调用 archive_recover(key) 取回全文。
- * 优先级：ERROR > FILE > API > SEARCH > STATUS，每轮最多 3 条摘要。
+ * 注意：工具结果的摘要已直接在 tool message content 中内联显示，
+ * 因此本注入器只做纯提醒，不再重复携带每条摘要数据。
  */
 export class ActiveSummaryInjector extends DynamicInjector {
   constructor(protected override readonly agent: any) {
@@ -26,62 +23,22 @@ export class ActiveSummaryInjector extends DynamicInjector {
   }
 
   override getResidualConfig(): ResidualConfig | undefined {
-    // Light residual: inject every 2 steps max, but not on every step.
-    return { weight: 0.6, decayPerStep: 0.85, threshold: 0.15, minStepGap: 2 };
-  }
-
-  /** Track which record keys we have already injected to avoid duplicates. */
-  private _injectedKeys = new Set<string>();
-
-  override onContextClear(): void {
-    super.onContextClear();
-    this._injectedKeys.clear();
-  }
-
-  override onContextCompacted(compactedCount: number): void {
-    super.onContextCompacted(compactedCount);
-    // On compaction the history changes — clear injected key tracking
-    // to re-evaluate which records still make sense.
-    this._injectedKeys.clear();
+    // Light touch: only inject when genuinely needed, with wide spacing.
+    return { weight: 0.3, decayPerStep: 0.9, threshold: 0.2, minStepGap: 5 };
   }
 
   protected override getInjection(): string | undefined {
-    if (this._lastInjectContext?.currentStep !== 1) return undefined;
-
-    // Read pending recoveries left by maskToolObservations.
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const pending: RecoverableRecord[] = this.agent.context?._pendingRecoveries;
     if (!pending || pending.length === 0) return undefined;
 
-    // Filter to records not yet injected
-    const fresh = pending.filter(r => !this._injectedKeys.has(r.key));
-    if (fresh.length === 0) return undefined;
-
-    // Sort by priority (lower = more important)
-    fresh.sort((a, b) => a.priority - b.priority);
-
-    // Take top 3
-    const top = fresh.slice(0, 3);
-
-    // Mark injected keys
-    for (const r of top) {
-      this._injectedKeys.add(r.key);
-    }
-
-    const lines: string[] = [];
-    lines.push(`<system-reminder>`);
-    lines.push(`[摘要] 以下内容已被遮蔽存档，需要时可调用 archive_recover(key) 取回全文：`);
-
-    const PRIORITY_LABEL: Record<number, string> = {
-      0: '交互', 1: '文件', 2: 'API', 3: '搜索', 4: '状态',
-    };
-
-    for (const r of top) {
-      const label = PRIORITY_LABEL[r.priority] ?? '其他';
-      lines.push(`  [${label}] ${r.summary} (key: ${r.key})`);
-    }
-
-    lines.push(`</system-reminder>`);
-    return lines.join('\n');
+    // Summary is already inline in masked tool messages; just remind
+    // that archive_recover is available for full content retrieval.
+    return [
+      '<system-reminder>',
+      '[提示] 部分旧工具结果的内容摘要已内联显示。',
+      '如需完整原文，可调用 archive_recover(key) 取回。',
+      '</system-reminder>',
+    ].join('\n');
   }
 }

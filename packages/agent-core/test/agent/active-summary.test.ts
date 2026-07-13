@@ -20,6 +20,7 @@ function makeAssistantMessage(toolIds: string[]): Message {
 }
 
 const toolNameMap = new Map<string, string>([
+  ['call_0', 'Read'],
   ['call_1', 'Read'],
   ['call_2', 'Bash'],
   ['call_3', 'Grep'],
@@ -37,10 +38,11 @@ describe('Phase39 — maskToolObservations pipeline', () => {
     ];
 
     const result = maskToolObservations(messages, 1, toolNameMap);
-    // keepLastN=1 → last tool is unmasked, first 2 are masked
+    // keepLastN=1 → last OLD tool result (call_2) is unmasked, first OLD (call_1) is masked
+    // Current round (call_3 after assistant[tc]) is never masked
     assert.ok(result.messages, 'should return messages');
     assert.ok(result.recoverable, 'should return recoverable array');
-    assert.strictEqual(result.recoverable.length, 2, '2 old tool results should have records');
+    assert.strictEqual(result.recoverable.length, 1, '1 old tool result should have a record');
   });
 
   it('masks old tool results and keeps the last N', () => {
@@ -85,6 +87,10 @@ describe('Phase39 — maskToolObservations pipeline', () => {
 
   it('RecoverableRecord has correct fields', () => {
     const messages: Message[] = [
+      // Old tool result before assistant(tc) — will be masked
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_0', name: 'Read', args: {} }] } as unknown as Message,
+      { role: 'tool', toolCallId: 'call_0', content: [{ type: 'text', text: 'X'.repeat(300) }], toolUseId: 'call_0' } as unknown as Message,
+      // Current round — not masked
       makeAssistantMessage(['call_1']),
       makeToolMessage(1, 300),
     ];
@@ -93,7 +99,7 @@ describe('Phase39 — maskToolObservations pipeline', () => {
     const rec = result.recoverable[0];
     assert.ok(rec, 'should have a record');
     assert.ok(rec.key.startsWith('micro:call_'), 'key should start with micro:');
-    assert.strictEqual(rec.toolCallId, 'call_1', 'toolCallId should match');
+    assert.strictEqual(rec.toolCallId, 'call_0', 'toolCallId should match');
     assert.strictEqual(rec.toolName, 'Read', 'toolName should be Read');
     assert.strictEqual(rec.priority, 1, 'Read should have priority 1 (FILE_OPS)');
     assert.ok(rec.summary.length <= 300, 'summary should be ≤ content length');
@@ -103,53 +109,6 @@ describe('Phase39 — maskToolObservations pipeline', () => {
     const result = maskToolObservations([], undefined, toolNameMap);
     assert.strictEqual(result.messages.length, 0);
     assert.strictEqual(result.recoverable.length, 0);
-  });
-
-});
-
-import { mergeOldToolPairs } from '../../src/utils/mask-tool-observations';
-
-describe('Phase40 — mergeOldToolPairs', () => {
-
-  it('merges old tool pairs into single assistant messages', () => {
-    const messages: Message[] = [
-      { role: 'user', content: [{ type: 'text', text: 'read files' }] } as unknown as Message,
-      { role: 'assistant', content: '', toolCalls: [{ id: 'call_a', name: 'Read', args: { path: 'a.ts' } }] } as unknown as Message,
-      { role: 'tool', toolCallId: 'call_a', content: [{ type: 'text', text: '[已遮蔽·key:micro:call_a·Read·archive_recover可取回]' }], toolUseId: 'call_a' } as unknown as Message,
-      { role: 'assistant', content: '', toolCalls: [{ id: 'call_b', name: 'Read', args: { path: 'b.ts' } }] } as unknown as Message,
-      { role: 'tool', toolCallId: 'call_b', content: [{ type: 'text', text: '[已遮蔽·key:micro:call_b·Read·archive_recover可取回]' }], toolUseId: 'call_b' } as unknown as Message,
-    ];
-
-    // keepLastNPairs=1 — keep only the last pair, merge the first
-    const result = mergeOldToolPairs(messages, 1);
-
-    // user msg stays
-    assert.strictEqual(result[0]?.role, 'user');
-    // first pair merged: 2 messages → 1
-    assert.strictEqual(result[1]?.role, 'assistant');
-    assert.strictEqual((result[1] as any).toolCalls, undefined, 'merged pair should not have toolCalls');
-    assert.ok((result[1]?.content as unknown as string)?.includes('调用 Read'), 'merged content should describe the call');
-    // second pair intact (kept as last)
-    assert.strictEqual(result[2]?.role, 'assistant');
-    assert.ok((result[2] as any).toolCalls, 'kept pair should still have toolCalls');
-    assert.strictEqual(result[3]?.role, 'tool', 'kept pair should still have tool result');
-
-    // Total: user(1) + merged(1) + kept pair(2) = 4 instead of original 5
-    assert.strictEqual(result.length, 4, 'should reduce 5 messages to 4');
-  });
-
-  it('preserves all messages when all pairs are kept', () => {
-    const messages: Message[] = [
-      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'Read', args: {} }] } as unknown as Message,
-      { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] } as unknown as Message,
-    ];
-
-    const result = mergeOldToolPairs(messages, 3);
-    assert.strictEqual(result.length, 2, 'should keep both messages when under keep limit');
-  });
-
-  it('handles empty input', () => {
-    assert.strictEqual(mergeOldToolPairs([], 3).length, 0);
   });
 
 });

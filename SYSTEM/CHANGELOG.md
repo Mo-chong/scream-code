@@ -845,9 +845,17 @@ updated: 2026-07-11
 #### Phase40a: Edit 失败自动附预览 [2026-07-12]
 - **`tools/builtin/file/edit.ts`** — 新增 `autoReadPreview()` 辅助函数；`old_string not found` 时自动读当前文件附上 20 行预览，省掉 AI 一轮 Read
 
-#### Phase40b: mergeOldToolPairs — 旧 tool pair 合并为单条消息 [2026-07-12]
-- **`utils/mask-tool-observations.ts`** — 新增 `mergeOldToolPairs()` 导出函数；检测老的 assistant(toolCalls)+tool result 对，合并为单条 assistant 消息，消息数量直接减半
-- **`loop/turn-step.ts`** — 调用 `mergeOldToolPairs(maskedMsgs)` 串联到管线
+#### Phase40b: mergeOldToolPairs — 旧 tool pair 合并为单条消息 [2026-07-12] 🗑️ **已删除**
+- **`utils/mask-tool-observations.ts`** — ~~新增 `mergeOldToolPairs()` 导出函数；检测老的 assistant(toolCalls)+tool result 对，合并为单条 assistant 消息，消息数量直接减半~~ **已删除**（违反消息协议，混淆 AI 导致幻觉）
+- **`loop/turn-step.ts`** — ~~调用 `mergeOldToolPairs(maskedMsgs)` 串联到管线~~ **已删除**
+
+#### Phase40c: 遮蔽系统重塑 — 自然语言格式 + 删 mergeOldToolPairs [2026-07-13]
+- **`utils/mask-tool-observations.ts`** — 删除 `mergeOldToolPairs()`（整函数+export）；`getMaskText()` 替换为 `buildMaskContent()`，输出自然语言格式（`Read 返回 xxx。完整内容已存档，可调用 archive_recover("key") 取回全文。`）；`generateSummary()` 上限 200→400 chars
+- **`loop/turn-step.ts`** — 恢复遮蔽管线调用（移除禁用注释）；删除 `mergeOldToolPairs` import；只调 `maskToolObservations()`，不调 merge
+- **`agent/injection/active-summary.ts`** — 简化为纯提醒注入器；移除 `currentStep!==1` guard；不再携带 per-record 数据（摘要已内联）
+- **`agent/compaction/full.ts`** — compaction maskToolObservations 调用传入 toolNameMap
+- **`agent/turn/index.ts`** — computeILR 增加新自然语言格式检测（`可调用 archive_recover`）
+- **`test/agent/active-summary.test.ts`** — 删除 3 个 mergeOldToolPairs 测试用例
 
 #### 测试
-- **`test/agent/active-summary.test.ts`** — 5 个 maskToolObservations 用例 + 3 个 mergeOldToolPairs 用例，8/8 通过
+- **`test/agent/active-summary.test.ts`** — 5 个 maskToolObservations 用例，5/5 通过。mergeOldToolPairs 3 个用例已随 Phase40c 删除

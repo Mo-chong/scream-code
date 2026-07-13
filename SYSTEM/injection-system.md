@@ -377,7 +377,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
 | `session-summary.ts` 🆕 | `session_summary` | MID_CONTEXT | B | step=1 / compaction 后 | ✅ |
 | `tool-result-recovery.ts` | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ❌ Phase39 已删除 |
-| `active-summary.ts` 🆕 | `active_summary` | MID_CONTEXT | B | _pendingRecoveries 非空 | ✅ 替代 tool_result_recovery |
+| `active-summary.ts` 🆕 | `active_summary` | MID_CONTEXT | B | _pendingRecoveries 非空 → 纯提醒 archive_recover 可用（摘要已内联在 tool message 中） | ✅ 替代 tool_result_recovery |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
 | ~~`anti_confabulation.ts`~~ 🗑️ | ~~`system_ref_anti_confabulation`~~ | — | — | — | ❌ | **已删除** Phase38c（合并入 confabulationDetector） |

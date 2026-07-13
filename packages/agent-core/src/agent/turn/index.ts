@@ -100,7 +100,11 @@ export function computeILR(history: readonly any[], keepLastN = 3): number {
     const msg = toolMsgs[i]!;
     const text = typeof msg.content === 'string' ? msg.content
       : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
-    const isMasked = i < maskThreshold && text.startsWith('[tool output masked');
+    const isMasked = i < maskThreshold && (
+      text.startsWith('[tool output masked') ||
+      text.startsWith('[已遮蔽') ||
+      text.includes('可调用 archive_recover')
+    );
     totalBytes += text.length;
     if (isMasked) maskedBytes += text.length;
   }

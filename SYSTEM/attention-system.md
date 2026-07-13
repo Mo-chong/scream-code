@@ -188,13 +188,13 @@ AI 自主调用工具，无系统干预。
   └─ budget 持续下降 → **P4 通知** ✅（budgetNotifyDetector，仅知会不干预）
 
 我被遮蔽的内容已存档:
-  ├─ 需要历史工具结果 → 检查上下文中是否有 `[已遮蔽·key:xxx·archive_recover可取回]`
+  ├─ 需要历史工具结果 → 检查上下文中是否有 `可调用 archive_recover("key") 取回全文`
   ├─ 有 → 调用 `archive_recover(key=xxx)` 取回全文 ✅
   ├─ 有但摘要够用 → 继续工作，不额外取回
   └─ 没有 → 正常 Read（新文件）
 
 我连续 Read 同一文件:
-  ├─ 已 Read 过且被遮蔽 → **P3 建议用 archive_recover** ✅（archiveInefficiencyDetector）
+  ├─ 已 Read 过且内容摘要中标注了 `可调用 archive_recover` → **P3 建议用 archive_recover** ✅（archiveInefficiencyDetector）
   └─ 新文件 → 正常 Read
 
 我收到 [摘要] 注入:

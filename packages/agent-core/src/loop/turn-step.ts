@@ -17,7 +17,7 @@ import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 import { chatWithRetry } from './retry';
 import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
 import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
-import { maskToolObservations, mergeOldToolPairs, type RecoverableRecord } from '../utils/mask-tool-observations';
+import { maskToolObservations, type RecoverableRecord } from '../utils/mask-tool-observations';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -89,8 +89,13 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       }
     }
   }
-  const { messages: maskedMsgs, recoverable } = maskToolObservations(messages, undefined, toolNameMap);
-  messages = mergeOldToolPairs(maskedMsgs, undefined);
+  // Observation masking: replace old tool results with a natural-language
+  // summary, keeping the last `keepLastN` results and the current round of
+  // tool calls intact so the model's active exchange is not disrupted.
+  // Uses natural language format so the AI understands what was returned
+  // and how to retrieve the full content via archive_recover(key).
+  const { messages: maskedMessages, recoverable } = maskToolObservations(messages, undefined, toolNameMap);
+  messages = maskedMessages;
   deps.storePendingRecoveries?.(recoverable);
   signal.throwIfAborted();
 

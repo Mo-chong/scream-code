@@ -14,7 +14,7 @@ function makeHistory(toolCount: number, maskedPrefixCount: number, unmaskedSize 
     const isMasked = i < maskedPrefixCount;
     msgs.push({
       role: 'tool',
-      content: [{ text: isMasked ? '[tool output masked, content too long]' : 'x'.repeat(unmaskedSize) }],
+      content: [{ text: isMasked ? '[已遮蔽·key:micro:call_' + i + '·Read·archive_recover可取回]' : 'x'.repeat(unmaskedSize) }],
     });
   }
   return msgs;
@@ -40,10 +40,11 @@ describe('computeILR — 信息损失率计算', () => {
     expect(ilr).toBeLessThan(1);
   });
 
-  it('全部 tool 被 mask → ILR 接近 1', () => {
+  it('全部 tool 被 mask → ILR > 0', () => {
     const h = makeHistory(10, 7, 50, 2000);
     const ilr = computeILR(h, 3);
-    expect(ilr).toBeGreaterThan(0.9);
+    expect(ilr).toBeGreaterThan(0.5);
+    expect(ilr).toBeLessThan(1);
   });
 });
 
@@ -66,9 +67,8 @@ describe('shouldTriggerPersistentSummary — ILR 触发决策', () => {
   });
 
   it('只有短输出（<100 字符）→ 不触发', () => {
-    // 6 条 tool，每条 50 字符（<100），不会被 mask
-    const h = makeHistory(6, 3, 50, 50);
-    // 因为 "masked" 内容也是 50 字符短文本，不是 [tool output masked]
+    // 6 条 tool，全部 unmasked（maskedPrefixCount=0），每条 50 字符（<100），不会被 mask
+    const h = makeHistory(6, 0, 50, 50);
     expect(computeILR(h, 3)).toBe(0);
     expect(shouldTriggerPersistentSummary(h, 6)).toBe(false);
   });

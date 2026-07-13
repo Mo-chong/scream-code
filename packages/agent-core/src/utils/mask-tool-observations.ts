@@ -42,16 +42,35 @@ function inferPriority(toolName?: string): number {
   return PRIORITY.STATUS;
 }
 
-function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
+/**
+ * Build natural-language replacement for a masked tool result.
+ *
+ * Produces AI-readable text that describes what the tool returned and how to
+ * retrieve the full content. No opaque markers like [已遮蔽] — the model
+ * can immediately understand the summary and act on it.
+ */
+function buildMaskContent(
+  toolCallId?: string,
+  toolNameMap?: ReadonlyMap<string, string>,
+  summary?: string,
+): string {
   const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
   const key = toolCallId ? `micro:${toolCallId}` : '';
+
+  // Best case: we have tool name AND a content summary
+  if (toolName && key && summary) {
+    return `${toolName} 返回 ${summary}。完整内容已存档，可调用 archive_recover("${key}") 取回全文。`;
+  }
+  // Partial: tool name only
   if (toolName && key) {
-    return `[已遮蔽·key:${key}·${toolName}·archive_recover可取回]`;
+    return `${toolName} 已执行。完整内容已存档，可调用 archive_recover("${key}") 取回全文。`;
   }
+  // Fallback: just the key
   if (key) {
-    return `[已遮蔽·key:${key}·已存档·archive_recover可取回]`;
+    return `工具结果已存档，可调用 archive_recover("${key}") 取回全文。`;
   }
-  return '[已遮蔽·已存档·archive_recover可取回]';
+  // No identifiers at all
+  return '工具结果已存档，可调用 archive_recover 取回全文。';
 }
 
 function getContentText(msg: Message): string {
@@ -63,10 +82,20 @@ function getContentText(msg: Message): string {
   return '';
 }
 
+/**
+ * Generate a concise human-readable summary of a tool result.
+ * Takes first 5 lines, normalizes whitespace, caps at 400 chars.
+ * Short results (< 100 chars) are not masked elsewhere, so this only
+ * runs on longer content that genuinely needs summarisation.
+ */
 function generateSummary(msg: Message): string {
-  const text = getContentText(msg).replace(/\s+/g, ' ').trim();
-  if (text.length <= 200) return text;
-  return text.slice(0, 197) + '...';
+  const raw = getContentText(msg);
+  const text = raw.replace(/\s+/g, ' ').trim();
+  if (text.length <= 400) return text;
+  // Take first ~5 lines worth of content for a meaningful preview
+  const lines = text.slice(0, 400).split('.');
+  const preview = lines.slice(0, 5).join('.').trim();
+  return preview.length > 0 ? preview.slice(0, 397) + '...' : text.slice(0, 397) + '...';
 }
 
 /**
@@ -92,27 +121,52 @@ export function maskToolObservations(
   toolNameMap?: ReadonlyMap<string, string>,
 ): { messages: Message[]; recoverable: RecoverableRecord[] } {
   const k = keepLastN ?? flags.asNumber('mask.keepLastN') ?? 3;
-  const indices: number[] = [];
-  for (let i = 0; i < messages.length; i++) {
+
+  // ── 找"当前轮"边界：最后一条 assistant(toolCalls) 之后的所有 tool result 永不遮蔽 ──
+  // 跨步骤场景：AI 上一步执行的 tool result 在当前步骤必须可见
+  let currentRoundStart = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m !== undefined && m.role === 'tool') {
-      // 短输出保护：< 100 chars 不遮蔽
-      if (m.content) {
-        const text = getContentText(m);
-        if (text.length < 100) continue; // 保留短输出
-      }
-      indices.push(i);
+    if (m && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+      currentRoundStart = i;
+      break;
     }
   }
 
-  const cutoff = indices.length - k;
-  if (cutoff <= 0) return { messages: [...messages], recoverable: [] };
+  // ── 收集所有 tool result 索引（短输出保护） ──
+  const allIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m !== undefined && m.role === 'tool') {
+      if (m.content) {
+        const text = getContentText(m);
+        if (text.length < 100) continue; // 短输出保留
+      }
+      allIndices.push(i);
+    }
+  }
 
-  const keep = new Set(indices.slice(cutoff));
+  // 划分：当前轮（boundary 之后） vs 历史轮（boundary 及之前）
+  const currentRoundSet = new Set(
+    currentRoundStart >= 0
+      ? allIndices.filter((i) => i > currentRoundStart)
+      : [],
+  );
+  const oldIndices = currentRoundStart >= 0
+    ? allIndices.filter((i) => i <= currentRoundStart)
+    : allIndices;
+
+  // 只对历史轮应用 keepLastN
+  const cutoff = oldIndices.length - k;
+  if (cutoff <= 0 && currentRoundSet.size === 0) {
+    return { messages: [...messages], recoverable: [] };
+  }
+
+  const maskSet = new Set(oldIndices.slice(0, Math.max(0, cutoff)));
   const recoverable: RecoverableRecord[] = [];
 
   const result = messages.map((msg, i) => {
-    if (msg === undefined || msg.role !== 'tool' || keep.has(i)) return msg;
+    if (msg === undefined || msg.role !== 'tool' || !maskSet.has(i)) return msg;
     // Build recoverable record before masking the content
     if (msg.toolCallId) {
       const toolName = toolNameMap?.get(msg.toolCallId);
@@ -124,114 +178,9 @@ export function maskToolObservations(
         priority: inferPriority(toolName),
       });
     }
-    const maskText = getMaskText(msg.toolCallId, toolNameMap);
+    const maskText = buildMaskContent(msg.toolCallId, toolNameMap, generateSummary(msg));
     return { ...msg, content: [{ type: 'text' as const, text: maskText }] };
   });
 
   return { messages: result, recoverable };
-}
-
-/**
- * After masking, merge old tool-call + tool-result pairs into single assistant messages.
- *
- * For assistant messages with toolCalls outside the keep window where ALL of their
- * corresponding tool results have been masked:
- * - Merge the tool call descriptions + masked result markers into assistant content
- * - Remove the toolCalls array
- * - Remove the corresponding tool result messages
- *
- * This runs AFTER maskToolObservations, so it sees already-masked tool results.
- * It cuts the message count nearly in half for old turns, improving AI attention.
- *
- * Pure function — does not mutate the input.
- */
-export function mergeOldToolPairs(
-  messages: readonly Message[],
-  keepLastNPairs?: number,
-): Message[] {
-  const k = keepLastNPairs ?? 3;
-
-  // Step 1: Identify all assistant(toolCalls) → tool result pairs
-  type Pair = { asstIdx: number; toolCallIds: string[]; toolResultIdxs: number[] };
-  const pairs: Pair[] = [];
-
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m?.role !== 'assistant' || !m.toolCalls?.length) continue;
-
-    const toolCallIds = m.toolCalls
-      .map((tc: any) => tc?.id ?? tc?.toolUseId ?? '')
-      .filter(Boolean);
-    if (toolCallIds.length === 0) continue;
-
-    // Find matching tool results that follow this message
-    const toolResultIdxs: number[] = [];
-    for (let j = i + 1; j < messages.length; j++) {
-      const tj = messages[j];
-      if (tj?.role !== 'tool') {
-        if (tj?.role === 'assistant' && tj.toolCalls?.length) break;
-        continue;
-      }
-      const tid = (tj as any).toolCallId ?? (tj as any).toolUseId ?? '';
-      if (toolCallIds.includes(tid)) {
-        toolResultIdxs.push(j);
-      }
-    }
-
-    if (toolResultIdxs.length === toolCallIds.length) {
-      // Safety: only merge if ALL tool results are masked
-      // Prevents merging active/in-flight exchanges that would break tool protocol
-      const allMasked = toolResultIdxs.every(idx => {
-        const r = messages[idx];
-        return r && getContentText(r).startsWith('[已遮蔽');
-      });
-      if (allMasked) {
-        pairs.push({ asstIdx: i, toolCallIds, toolResultIdxs });
-      }
-    }
-  }
-
-  // Step 2: Keep last K pairs, merge the rest
-  const cutoff = pairs.length - k;
-  if (cutoff <= 0) return [...messages];
-
-  const mergePairIdxs = new Set(pairs.slice(0, cutoff).map(p => p.asstIdx));
-  const mergeToolIdxs = new Set(pairs.slice(0, cutoff).flatMap(p => p.toolResultIdxs));
-
-  // Step 3: Build result
-  const result: Message[] = [];
-  let i = 0;
-  while (i < messages.length) {
-    if (mergePairIdxs.has(i)) {
-      const pair = pairs.find(p => p.asstIdx === i)!;
-      const asstMsg = messages[i]!;
-
-      const lines: string[] = [];
-      const contentStr = (asstMsg.content as any) ?? '';
-      if (typeof contentStr === 'string' && contentStr.trim()) {
-        lines.push(contentStr.trim());
-      }
-
-      for (let idx = 0; idx < pair.toolCallIds.length; idx++) {
-        const tcId = pair.toolCallIds[idx]!;
-        const tc = (asstMsg.toolCalls as any[])?.find((t: any) => (t?.id ?? t?.toolUseId) === tcId);
-        const tcName = tc?.name ?? 'tool';
-        const tcArgs = (tc?.args as any) ? JSON.stringify(tc.args).slice(0, 120) : '';
-        const tResult = messages[pair.toolResultIdxs[idx]!];
-        const resultText = tResult ? getContentText(tResult) : '[无结果]';
-        lines.push(`调用 ${tcName}(${tcArgs}) → ${resultText}`);
-      }
-
-      result.push({ ...asstMsg, content: [{ type: 'text' as const, text: lines.join('\n') }], toolCalls: [] } as unknown as Message);
-      i++;
-      while (i < messages.length && mergeToolIdxs.has(i)) i++;
-    } else if (mergeToolIdxs.has(i)) {
-      i++;
-    } else {
-      result.push(messages[i]!);
-      i++;
-    }
-  }
-
-  return result;
 }

@@ -483,7 +483,16 @@ export class FullCompaction {
         messagesToCompact: readonly ContextMessage[],
       ): Promise<{ summary: string; usage: TokenUsage | null }> => {
         const projected = project(messagesToCompact);
-        const { messages: masked } = maskToolObservations(projected, 1);
+        // Build tool name map for enriched mask content
+        const compactToolNameMap = new Map<string, string>();
+        for (const msg of projected) {
+          if (msg.role === 'assistant' && msg.toolCalls) {
+            for (const tc of msg.toolCalls) {
+              if (tc.id && tc.name) compactToolNameMap.set(tc.id, tc.name);
+            }
+          }
+        }
+        const { messages: masked } = maskToolObservations(projected, 1, compactToolNameMap);
         const instruction = isUpdate
           ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
           : COMPACTION_INSTRUCTION(data.instruction);

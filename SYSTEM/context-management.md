@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/context, status/final]
 keywords: [上下文, context, 四层架构, compaction, 截断]
-updated: 2026-07-08
+updated: 2026-07-13
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -31,6 +31,11 @@ updated: 2026-07-08
 | 11 | **Predictor** 上下文增长预测器 | `compaction/predictor.ts` | ✅ **已实现** |
 | 12 | **缓存审计系统** 全链路缓存诊断 | `agent/usage/audit-log.ts` | ✅ **已实现（Phase29）** |
 | 13 | **FileActionAudit↔ContentArchive 融合** | — | 🗑️ **已废弃**（TURN buffering 替代） |
+| 14 | **mergeOldToolPairs** 旧 tool pair 合并 | — | 🗑️ **已删除**（破坏消息协议） |
+| 15 | **ActiveSummaryInjector** 主动摘要注入（替代死代码 ToolResultRecoveryInjector） | `agent/injection/active-summary.ts` | ✅ **已实现（Phase39b）** |
+| 16 | **Edit 自修复** autoReadPreview（失败时自动附当前文件预览） | `tools/builtin/file/edit.ts` | ✅ **已实现（Phase40a）** |
+| 17 | **archiveInefficiencyDetector** 检测重复 Read 引导 archive_recover | `agent/interception/detectors/archive-inefficiency.ts` | ✅ **已实现（Phase39补）** |
+| 18 | **editRetryDetector** 检测连续 Edit 失败引导预览 | `agent/interception/detectors/edit-retry.ts` | ✅ **已实现（Phase39补）** |
 
 ---
 
@@ -47,15 +52,21 @@ ContentArchive (纯内存 LRU) ──→ key 前缀 + toolCallId     无日志
      │
      ▼
 maskToolObservations (每轮)  ──→ 每轮对话前自动执行        无日志
-     │                          保留最近 keepLastN(3) 条
-     │                          旧 tool result → 占位符
+     │                          当前轮（最后 assistant(tc) 之后）全部保留
+     │                          历史轮保留最近 keepLastN(3) 条
+     │                          其余 tool result → 占位符
      │                          生成 RecoverableRecord[]
      │
      ▼
 mergeOldToolPairs (每轮)    ──→ maskToolObservations 之后    无日志
      │                          保留最近 keepLastNPairs(3) 对
      │                          旧 tool pair → 合并为单条 assistant
-     │                          (仅全部已遮蔽)
+     │                          (仅全部已遮蔽的进行合并)
+     │
+     ▼
+ActiveSummaryInjector (每轮) ──→ step=1 读取 _pendingRecoveries   audit.activeSummaryCount
+     │                          排序 ERROR>FILE>API>SEARCH>STATUS
+     │                          最多 3 条摘要 → system-reminder
      │
      ▼
 MicroCompaction (自动/无感)  ──→ 3 道关卡触发               micro_compaction.apply
@@ -481,7 +492,7 @@ ArchiveRecoverInput {
 
 | 机制 | 触发频次 | 说明 |
 |------|----------|------|
-| maskToolObservations | **每步** | API 调用前无条件遮蔽 |
+| maskToolObservations | **每步** | API 调用前无条件遮蔽；当前轮 tool result 永远保留 |
 | Point A 存档 | **每步** | tool result 写入 history 后即时存档 |
 | MicroCompaction detect | **每 BATCH_SIZE=8 步** | 8 步才检查一次，上下文>50%才砍 |
 | Predictor | **每步** | 持续预测上下文增长 |

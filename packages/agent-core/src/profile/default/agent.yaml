@@ -34,6 +34,7 @@ tools:
   - Skill
   - MakeSkillPlan
   - MakeSkillApply
+  - ArchiveRecover
   - WebSearch
   - Agent
   - WolfPack

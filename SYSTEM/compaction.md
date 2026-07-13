@@ -64,22 +64,22 @@ v0.7 fork 新增三层优化，针对 **KV-cache 命中率** 和 **token 开销*
 | OpenAI | 隐式前缀匹配 | ✅ 大幅提升 | ⚠️ 轻微（消息结构变化影响匹配） |
 | Gemini | 隐式前缀匹配 | ✅ 大幅提升 | ⚠️ 轻微 |
 
-### B. Observation Masking + Tool Pair Merge（P1 — 省 attention 省 token）
+### B. Observation Masking（P1 — 省 attention 省 token）
 
 **位置**：
-- 正常路径：`turn-step.ts:73-77` — `buildMessages()` → `maskToolObservations()` → `mergeOldToolPairs()` → `llm.chat()`
-- 压缩路径：`full.ts:compactionWorker` — project() → `maskToolObservations(projected, 1)` → LLM
+- 正常路径：`turn-step.ts:79-98` — `buildMessages()` → `maskToolObservations()` → `llm.chat()`
+- 压缩路径：`full.ts:compactionWorker` — project() → `maskToolObservations(projected, 1, toolNameMap)` → LLM
 
-**两步流水线**：
+**流程**：
 
-1. **maskToolObservations**：旧 tool result 替换为占位符 `[已遮蔽·key:xxx·toolName·archive_recover可取回]`，同时生成 `RecoverableRecord[]`（含摘要、key、优先级）供 ActiveSummaryInjector 使用。
-2. **mergeOldToolPairs**：旧 assistant(toolCalls) + tool result 对合并为单条 assistant 消息（仅当所有 tool result 已被遮蔽时）。消息数量直接减半。
+1. **maskToolObservations**：旧 tool result 替换为自然语言摘要（`Read 返回 xxx。完整内容已存档，可调用 archive_recover("key") 取回全文。`），同时生成 `RecoverableRecord[]`（含摘要、key、优先级）供 ActiveSummaryInjector 使用。
+2. ~~mergeOldToolPairs~~ — 已删除（曾将旧 assistant(toolCalls) + tool result 对合并为单条 assistant 消息，但违反消息协议，混淆 AI 导致幻觉）。
 
 **两种路径的行为差异**：
 
 | 路径 | 位置 | keepLastN | 目的 |
 |------|------|-----------|------|
-| 正常对话 | turn-step.ts | 3（最近 3 条不遮） | 当前轮仍需参考最近的 tool 结果 |
+| 正常对话 | turn-step.ts | 3（最近 3 条不遮 + 当前轮全部保留） | 当前轮仍需参考最近的 tool 结果 |
 | FullCompaction | full.ts | 1（最近 1 条不遮） | 被裁的老历史不需要完整 tool 原文，LLM 只用作格式参考 |
 
 **关键设计决策**：
