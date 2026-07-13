@@ -167,7 +167,8 @@ export function getSummaryLevel(ilr: number): SummaryLevel {
 }
 
 export function shouldTriggerPersistentSummary(history: readonly any[], _stepCount: number): boolean {
-  return getSummaryLevel(computeILR(history, 3)) !== 'none';
+  const keepLastN = flags.asNumber('mask.keepLastN') ?? 3;
+  return getSummaryLevel(computeILR(history, keepLastN)) !== 'none';
 }
 
 /** Phase 14: 收敛条件接口 — 每个条件是一个 check 函数 + 优先级 */

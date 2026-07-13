@@ -234,8 +234,10 @@ export class MicroCompaction {
           // dedup: Point A (context/index.ts) 已用 'tool:'+toolCallId 存档
           const toolKey = 'tool:' + msg.toolCallId;
           if (!this.agent.contentArchive?.recover(toolKey)) {
+            // Use same 'tool:' prefix as primary store (context/index.ts L463)
+            // so archive_recover("tool:xxx") always works even after LRU eviction.
             this.agent.contentArchive?.archive(
-              'micro:' + msg.toolCallId,
+              'tool:' + msg.toolCallId,
               textContent,
               { source: 'microCompact' },
             );

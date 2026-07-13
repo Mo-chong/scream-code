@@ -1,6 +1,7 @@
 import { DynamicInjector, type ResidualConfig } from './injector';
 import type { Agent } from '..';
 import { computeILR, getSummaryLevel } from '../turn/index';
+import { flags } from '../../flags';
 
 /**
  * PersistentSummaryInjector — 基于 ILR (Information Loss Ratio) 注入持久摘要
@@ -35,7 +36,8 @@ export class PersistentSummaryInjector extends DynamicInjector {
     if (step !== 1) return undefined;
 
     const history = this.agent.context.history;
-    const ilr = computeILR(history, 3);
+    const keepLastN = flags.asNumber('mask.keepLastN') ?? 3;
+    const ilr = computeILR(history, keepLastN);
     const level = getSummaryLevel(ilr);
     if (level === 'none') return undefined;
 

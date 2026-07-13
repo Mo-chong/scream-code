@@ -8,7 +8,7 @@ import { flags } from '../flags';
  * and for the model to call archive_recover(key) to retrieve the full content.
  */
 export interface RecoverableRecord {
-  /** ContentArchive key, e.g. 'micro:' + toolCallId (matches micro.ts format). */
+  /** ContentArchive key, e.g. 'tool:' + toolCallId (matches context/index.ts format). */
   key: string;
   /** toolCallId of the masked message. */
   toolCallId: string;
@@ -55,7 +55,7 @@ function buildMaskContent(
   summary?: string,
 ): string {
   const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
-  const key = toolCallId ? `micro:${toolCallId}` : '';
+  const key = toolCallId ? `tool:${toolCallId}` : '';
 
   // Best case: we have tool name AND a content summary
   if (toolName && key && summary) {
@@ -171,7 +171,7 @@ export function maskToolObservations(
     if (msg.toolCallId) {
       const toolName = toolNameMap?.get(msg.toolCallId);
       recoverable.push({
-        key: 'micro:' + msg.toolCallId,
+        key: 'tool:' + msg.toolCallId,
         toolCallId: msg.toolCallId,
         toolName: toolName || 'unknown',
         summary,

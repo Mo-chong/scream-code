@@ -98,7 +98,7 @@ describe('Phase39 — maskToolObservations pipeline', () => {
     const result = maskToolObservations(messages, 0, toolNameMap);
     const rec = result.recoverable[0];
     assert.ok(rec, 'should have a record');
-    assert.ok(rec.key.startsWith('micro:call_'), 'key should start with micro:');
+    assert.ok(rec.key.startsWith('tool:call_'), 'key should start with tool:');
     assert.strictEqual(rec.toolCallId, 'call_0', 'toolCallId should match');
     assert.strictEqual(rec.toolName, 'Read', 'toolName should be Read');
     assert.strictEqual(rec.priority, 1, 'Read should have priority 1 (FILE_OPS)');
