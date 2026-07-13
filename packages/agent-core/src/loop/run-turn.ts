@@ -40,7 +40,7 @@ export interface RunTurnInput {
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
-  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => void;
+  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => string | undefined;
 }
 
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {

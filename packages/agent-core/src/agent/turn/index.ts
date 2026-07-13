@@ -880,7 +880,7 @@ export class TurnFlow {
                 }
                 if (recoveredLines.length > 3) {
                   recoveredLines.push('</system-reminder>');
-                  this.inject(recoveredLines.join('\n'), { kind: 'system_trigger', name: 'auto_recover' });
+                  return recoveredLines.join('\n');
                 }
               }
             }

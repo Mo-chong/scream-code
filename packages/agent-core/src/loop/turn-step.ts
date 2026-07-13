@@ -18,6 +18,7 @@ import { chatWithRetry } from './retry';
 import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
 import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
 import { maskToolObservations, type RecoverableRecord } from '../utils/mask-tool-observations';
+import type { Message } from '@scream-code/ltod';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -41,7 +42,7 @@ export interface ExecuteLoopStepDeps {
    * The caller (turn/index.ts) writes these to context._pendingRecoveries
    * for ActiveSummaryInjector to consume on step 1.
    */
-  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => void;
+  readonly storePendingRecoveries?: (records: RecoverableRecord[]) => string | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -96,7 +97,13 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // and how to retrieve the full content via archive_recover(key).
   const { messages: maskedMessages, recoverable } = maskToolObservations(messages, undefined, toolNameMap);
   messages = maskedMessages;
-  deps.storePendingRecoveries?.(recoverable);
+  const autoRecoverText = deps.storePendingRecoveries?.(recoverable) ?? undefined;
+  if (autoRecoverText) {
+    messages = [
+      { role: 'system', content: [{ type: 'text' as const, text: autoRecoverText }] } as unknown as Message,
+      ...messages,
+    ];
+  }
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();
