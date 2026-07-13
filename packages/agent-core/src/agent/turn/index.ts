@@ -46,6 +46,7 @@ import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
 import type { CacheMetrics } from '../usage/audit-log';
 import { summarizeWithLLM } from '../compaction/summary';
+import { flags } from '../../flags';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -91,15 +92,53 @@ const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
 // 基于 maskToolObservations 的真实信息丢失量判断是否需恢复上下文
 export type SummaryLevel = 'none' | 'factual' | 'full';
 
+/**
+ * Compute ILR (Information Loss Ratio) matching maskToolObservations logic.
+ *
+ * Replicates the same boundary logic:
+ * 1. Find current round boundary (last assistant with toolCalls)
+ * 2. Tool results after boundary = current round (never masked)
+ * 3. Tool results before boundary = historical (keepLastN applies)
+ * 4. Short results (<100 chars) are never masked
+ * 5. Old format markers also counted as masked
+ */
 export function computeILR(history: readonly any[], keepLastN = 3): number {
-  const toolMsgs = history.filter(m => m.role === 'tool');
-  if (toolMsgs.length === 0) return 0;
-  const maskThreshold = Math.max(0, toolMsgs.length - keepLastN);
+  // Find current round boundary (matches maskToolObservations)
+  let currentRoundStart = -1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+      currentRoundStart = i;
+      break;
+    }
+  }
+
+  // Separate tool results: old (before/at boundary) vs current (after boundary)
+  const oldToolIndices: number[] = [];
+  const currentToolIndices: number[] = [];
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i];
+    if (m?.role !== 'tool') continue;
+    if (currentRoundStart >= 0 && i > currentRoundStart) {
+      currentToolIndices.push(i);
+    } else {
+      oldToolIndices.push(i);
+    }
+  }
+
+  // Current round tool results are never masked → contribute 0 to maskedBytes
   let totalBytes = 0, maskedBytes = 0;
-  for (let i = 0; i < toolMsgs.length; i++) {
-    const msg = toolMsgs[i]!;
+  const maskThreshold = Math.max(0, oldToolIndices.length - keepLastN);
+
+  // Count old tool results
+  for (let i = 0; i < oldToolIndices.length; i++) {
+    const msg = history[oldToolIndices[i]!]!;
     const text = typeof msg.content === 'string' ? msg.content
       : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
+    // computeILR reads from history (original content).
+    // Short-content protection (<100 chars) is a projected-only mask rule,
+    // not applied here — ILR measures what maskToolObservations *would* mask
+    // based on position, not what the projected copy decides.
     const isMasked = i < maskThreshold && (
       text.startsWith('[tool output masked') ||
       text.startsWith('[已遮蔽') ||
@@ -108,6 +147,16 @@ export function computeILR(history: readonly any[], keepLastN = 3): number {
     totalBytes += text.length;
     if (isMasked) maskedBytes += text.length;
   }
+
+  // Count current round tool results (never masked, counted as unmasked)
+  for (const idx of currentToolIndices) {
+    const msg = history[idx]!;
+    const text = typeof msg.content === 'string' ? msg.content
+      : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
+    totalBytes += text.length;
+    // currentToolIndices contribute 0 to maskedBytes
+  }
+
   return totalBytes === 0 ? 0 : maskedBytes / totalBytes;
 }
 
@@ -2166,25 +2215,33 @@ export class TurnFlow {
     this.agent.context.removeSystemRemindersByPrefix(summaryPrefix);
     const recentAssistantTexts: string[] = [];
 
-    // Phase34: 收集会被 maskToolObservations 遮蔽的 tool result（keepLastN=3 之后的旧结果）
-    // mask 只改 projected 列表，history 保留原文，所以从 history 取最旧的 tool 消息
-    let toolCount = 0;
+    // Phase34: 收集会被 maskToolObservations 遮蔽的 tool result
+    // 使用与 maskToolObservations 一致的边界逻辑：
+    // 1. 找到最后一条 assistant(toolCalls) 作为当前轮边界
+    // 2. 边界之后的 tool result 永不遮蔽（当前轮）
+    // 3. 边界之前的 tool result 才按 keepLastN 判断
+    // 4. 短输出（<100 字符）永不遮蔽
+    // mask 只改 projected 列表，history 保留原文，所以从 history 取原文
+    const keepLastN = flags.asNumber('mask.keepLastN') ?? 3;
+    let currentRoundStart = -1;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+        currentRoundStart = i;
+        break;
+      }
+    }
+    let oldToolCount = 0;
     for (let i = 0; i < history.length && recentAssistantTexts.length < 30; i++) {
       const msg = history[i]!;
-      if (msg.role === 'tool') {
-        toolCount++;
-        // 保留最后 3 条（不被遮蔽），之前的才需要摘要
-        if (toolCount > 3) {
-          let text = '';
-          const content = msg.content;
-          if (typeof content === 'string') {
-            text = (content as string).slice(0, 500);
-          } else if (Array.isArray(content)) {
-            text = content.map((p: any) => ('text' in p ? p.text : '')).join('').slice(0, 500);
-          }
-          if (text) recentAssistantTexts.push(text);
-        }
-      }
+      if (msg.role !== 'tool') continue;
+      if (currentRoundStart >= 0 && i > currentRoundStart) continue; // skip current round
+      oldToolCount++;
+      if (oldToolCount <= keepLastN) continue; // within keep window
+      const text = typeof msg.content === 'string' ? msg.content
+        : Array.isArray(msg.content) ? msg.content.map((p: any) => ('text' in p ? p.text : '')).join('') : '';
+      if (text.length < 100) continue; // short output, never masked
+      if (text) recentAssistantTexts.push(text.slice(0, 500));
     }
 
     // 调 LLM 做摘要，不阻塞主流程（_summaryTriggered 已同步设为 true 记录触发事实）

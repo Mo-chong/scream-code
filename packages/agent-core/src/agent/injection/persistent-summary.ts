@@ -60,16 +60,35 @@ export class PersistentSummaryInjector extends DynamicInjector {
     return `<system-reminder>\n${text}\n</system-reminder>`;
   }
 
+  /**
+   * Check if a message content contains mask output in any format.
+   */
+  private isMaskedContent(msg: any): boolean {
+    const text = typeof msg.content === 'string' ? msg.content
+      : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
+    if (!text) return false;
+    return text.startsWith('[tool output masked') ||
+      text.startsWith('[已遮蔽') ||
+      text.includes('可调用 archive_recover');
+  }
+
   private extractFacts(history: readonly any[]): string[] {
-    const toolMsgs = history.filter((m: any) => m.role === 'tool');
-    const maskThreshold = Math.max(0, toolMsgs.length - 3);
     const facts: string[] = [];
-    for (let i = 0; i < maskThreshold; i++) {
-      const msg = toolMsgs[i];
+    for (const msg of history) {
+      if (msg?.role !== 'tool') continue;
       const text = typeof msg.content === 'string' ? msg.content
         : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
-      if (text.startsWith('[tool output masked')) {
-        facts.push(`(工具${i+1} 输出过长已遮蔽，共 ${text.length} 字符)`);
+      if (this.isMaskedContent(msg)) {
+        // New format: "Read 返回 xxx。完整内容已存档..."
+        if (text.includes('可调用 archive_recover')) {
+          // Extract tool name from text (first word before " 返回" or " 已执行")
+          const toolName = text.split(/ [返回已]/)[0] ?? '工具';
+          const charLen = text.length;
+          facts.push(`(${toolName} 结果已存档摘要，共 ${charLen} 字符，可 archive_recover 取回全文)`);
+        } else {
+          // Old format: [tool output masked] or [已遮蔽·key:...]
+          facts.push(`(工具结果已遮蔽，共 ${text.length} 字符)`);
+        }
       }
     }
     return facts;

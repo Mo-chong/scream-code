@@ -167,18 +167,18 @@ export function maskToolObservations(
 
   const result = messages.map((msg, i) => {
     if (msg === undefined || msg.role !== 'tool' || !maskSet.has(i)) return msg;
-    // Build recoverable record before masking the content
+    const summary = generateSummary(msg); // compute once, use twice
     if (msg.toolCallId) {
       const toolName = toolNameMap?.get(msg.toolCallId);
       recoverable.push({
         key: 'micro:' + msg.toolCallId,
         toolCallId: msg.toolCallId,
         toolName: toolName || 'unknown',
-        summary: generateSummary(msg),
+        summary,
         priority: inferPriority(toolName),
       });
     }
-    const maskText = buildMaskContent(msg.toolCallId, toolNameMap, generateSummary(msg));
+    const maskText = buildMaskContent(msg.toolCallId, toolNameMap, summary);
     return { ...msg, content: [{ type: 'text' as const, text: maskText }] };
   });
 
