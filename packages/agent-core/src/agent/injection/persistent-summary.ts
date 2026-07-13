@@ -62,18 +62,6 @@ export class PersistentSummaryInjector extends DynamicInjector {
     return `<system-reminder>\n${text}\n</system-reminder>`;
   }
 
-  /**
-   * Check if a message content contains mask output in any format.
-   */
-  private isMaskedContent(msg: any): boolean {
-    const text = typeof msg.content === 'string' ? msg.content
-      : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
-    if (!text) return false;
-    return text.startsWith('[tool output masked') ||
-      text.startsWith('[已遮蔽') ||
-      text.includes('可调用 archive_recover');
-  }
-
   private extractFacts(history: readonly any[]): string[] {
     // Use same positional logic as computeILR: find current round boundary,
     // then collect tool results beyond keepLastN (those that get masked).
@@ -105,8 +93,9 @@ export class PersistentSummaryInjector extends DynamicInjector {
       const text = typeof msg.content === 'string' ? msg.content
         : Array.isArray(msg.content) ? msg.content.map((p: any) => p.text ?? '').join('') : '';
       if (text.length < 100) continue; // short output, never masked
-      const toolCallId = (msg as any).toolCallId ?? (msg as any).toolUseId ?? '';
-      facts.push(`(工具${i+1} 结果过长，可用 archive_recover("tool:${toolCallId}") 取回全文，共 ${text.length} 字符)`);
+      const rawId = (msg as any).toolCallId ?? (msg as any).toolUseId ?? '';
+      if (!rawId) continue; // skip entries without identifiers
+      facts.push(`(工具${i+1} 结果过长，可用 archive_recover("tool:${rawId}") 取回全文，共 ${text.length} 字符)`);
     }
     return facts;
   }

@@ -266,6 +266,8 @@ export class TurnFlow {
 
   // ── Phase 14: 正反馈每回合一次 ─────────────────────────────────
   private positiveFeedbackGivenThisTurn = false;
+  /** Dedup set for P1 auto-recover */
+  private _autoRecoveredKeys?: Set<string>;
   private _summaryTriggered = false;
 
   // ── Phase 24: 截断数据强制恢复 ─────────────────────────────────
@@ -663,6 +665,7 @@ export class TurnFlow {
     this.agent.injection.guardInjector.clearGuardData();
     this.lastUserInputText = input.map(c => c.type === 'text' ? (c.text ?? '') : '').join(' ');
     this.positiveFeedbackGivenThisTurn = false;
+    this._autoRecoveredKeys?.clear();
     this.guardRule1FiredThisTurn = false;
     this.codeQualityViolations = [];
     this.codeQualityViolationsThisTurn = 0;
@@ -871,7 +874,10 @@ export class TurnFlow {
               const highValue = records.filter(r => r.priority <= 2);
               if (highValue.length >= 3) {
                 const recoveredLines: string[] = ['<system-reminder>', '[auto-recover] Detected high-priority archived items, batch fetched:'];
+                const _seen = this._autoRecoveredKeys ??= new Set<string>();
                 for (const r of highValue) {
+                  if (_seen.has(r.key)) continue;
+                  _seen.add(r.key);
                   const c = this.agent.contentArchive?.recover(r.key);
                   if (c && typeof c === 'string') {
                     recoveredLines.push('[' + r.toolName + ' (key: ' + r.key + ')]');
