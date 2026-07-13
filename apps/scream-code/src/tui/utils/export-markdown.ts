@@ -199,7 +199,7 @@ function buildOverview(
   }
 
   const toolCallCount = history.reduce(
-    (sum, msg) => sum + msg.toolCalls.length,
+    (sum, msg) => sum + (msg.toolCalls ?? []).length,
     0,
   );
 

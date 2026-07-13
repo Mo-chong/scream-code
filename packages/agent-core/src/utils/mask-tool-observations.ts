@@ -222,7 +222,7 @@ export function mergeOldToolPairs(
         lines.push(`调用 ${tcName}(${tcArgs}) → ${resultText}`);
       }
 
-      result.push({ ...asstMsg, content: lines.join('\n'), toolCalls: undefined } as unknown as Message);
+      result.push({ ...asstMsg, content: [{ type: 'text' as const, text: lines.join('\n') }], toolCalls: [] } as unknown as Message);
       i++;
       while (i < messages.length && mergeToolIdxs.has(i)) i++;
     } else if (mergeToolIdxs.has(i)) {

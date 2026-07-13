@@ -64,14 +64,14 @@ export function project(history: readonly ContextMessage[]): Message[] {
   const usable = history.filter((message) => {
     return (
       message.partial !== true &&
-      !(message.role === 'assistant' && message.content.length === 0 && message.toolCalls.length === 0)
+      !(message.role === 'assistant' && message.content.length === 0 && (message.toolCalls ?? []).length === 0)
     );
   });
   // A crash mid-tool-execution leaves an assistant message with tool_calls at
   // the tail but no matching tool results — the API rejects this. Drop it.
   const last = usable.at(-1);
   const repaired =
-    last?.role === 'assistant' && last.toolCalls.length > 0 ? usable.slice(0, -1) : usable;
+    last?.role === 'assistant' && (last.toolCalls ?? []).length > 0 ? usable.slice(0, -1) : usable;
   const reordered = reorderToolResults(repaired);
   return mergeAdjacentUserMessages(reordered);
 }
@@ -94,7 +94,7 @@ function reorderToolResults(history: readonly ContextMessage[]): ContextMessage[
   while (i < history.length) {
     const message = history[i]!;
 
-    if (message.role !== 'assistant' || message.toolCalls.length === 0) {
+    if (message.role !== 'assistant' || !message.toolCalls || message.toolCalls.length === 0) {
       result.push(message);
       i += 1;
       continue;

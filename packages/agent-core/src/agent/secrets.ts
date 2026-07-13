@@ -263,7 +263,7 @@ export function obfuscateMessages(
     // the persisted assistant message). Without this outbound pass, the
     // real secret would leak to the provider on the next turn.
     let toolCalls = message.toolCalls;
-    if (message.role === 'assistant' && message.toolCalls.length > 0) {
+    if (message.role === 'assistant' && (message.toolCalls ?? []).length > 0) {
       let tcChanged = false;
       toolCalls = message.toolCalls.map((call): ToolCall => {
         if (call.arguments === null) return call;
