@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5]
-updated: 2026-07-12
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -151,3 +151,19 @@ updated: YYYY-MM-DD
 - ❌ 删旧内容（只追加或 deprecated）
 - ❌ 添加参见不验证正文出现（假关联）
 - ❌ 更新了文件内容而不改 YAML `updated` 日期
+
+### 3.8 大版本变更速查（2026-07-14 cache-stable-v1）
+
+| 事件 | 涉及文件 | 操作 |
+|:----|:--------|:-----|
+| **三层蒸馏塔**（保真/压缩/归档） | `context-management.md` | 全篇重写 |
+| **MicroCompaction 废弃** | `compaction.md` | 标记 deprecated |
+| **ArchiveRecover 注销** | `context-management.md` | 标记废弃 |
+| **incremental LLM summary 移除** | `context-management.md` | 管线移除 |
+| **ArchivalSummaryInjector 新增** | `injection-system.md` | 追加注册条目 |
+| **edit-failure-loop 新增** | `interception-system.md` | 追加注册条目 |
+| **SABCD 5→3（critical/normal/debug）** | `variant-registry.ts` + 12 文件 | 类型+函数+配额+测试同步 |
+| **注入器位置优化**（5 个移尾部） | `manager.ts` + 5 个注入器 | AFTER_SYSTEM/MID → AFTER_TOOL_CALL |
+| **tool-result-recovery 删除** | `manager.ts` | 注销注册 |
+| **CRLF 修复** | `.gitattributes` + git config | 全仓库 LF 归一化 |
+| **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表
