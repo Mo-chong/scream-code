@@ -180,6 +180,11 @@ const BASH_INTERCEPTOR_RULES: readonly BashInterceptorRule[] = [
     message: 'Use the Read tool instead of cat/head/tail. It provides better context and handles binary files.',
   },
   {
+    pattern: /^\s*(find|fd)\s+/i,
+    tool: 'Glob',
+    message: 'Use the Glob tool instead of find/fd. It respects .gitignore and returns structured results.',
+  },
+  {
     pattern: /^\s*(grep|rg|ripgrep|ag|ack)\s+/i,
     tool: 'Grep',
     message: 'Use the Grep tool instead of grep/rg. It respects .gitignore and provides structured output.',

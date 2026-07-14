@@ -19,7 +19,7 @@ export const deviationChainDetector: DetectorFn = (ctx): RawSignal | null => {
       rootCause: 'edit_discipline',
       priority: 'critical',
       confidence: 0.8,
-      message: '上回合因偏差链被拦截。本回合如涉及修改代码，请先查 LSP.references。',
+      message: '上回合因偏差链被拦截。本回合如涉及修改代码，请先查 LSP.references。已知符号名时 codegraph_node 比 explore 省 90% token。',
       escalation: 'hint',
       phase: 'pre_step',
     };

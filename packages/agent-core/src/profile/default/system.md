@@ -60,9 +60,11 @@ State exactly what's missing and what you tried.
 
 # Tool priority [P1]
 
-1. codegraph_explore: new files/unknown symbols/call chains/impact scope (primary)
-2. LSP.references/definition: known symbol precise targeting
-3. Read / Grep / Glob: fallback
+1. codegraph_explore: new files/unknown symbols/call chains/impact scope (primary). maxFiles=12 for broad, 3 for known module
+2. codegraph_node: known symbol precise lookup (source+callers+callees, 替代 LSP.references + Read)
+3. LSP.references/definition: known symbol precise targeting
+4. Read / Grep / Glob: fallback
+5. codegraph callees/impact/affected: via Bash — callees(内部调用链), impact(重构影响面), affected(关联测试)
 
 Web: anysearch (default) | batch_search (≥2 queries)
 Doc: context7 | KnowledgeLookup for local KB
