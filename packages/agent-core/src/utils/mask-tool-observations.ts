@@ -1,12 +1,14 @@
 import type { Message } from '@scream-code/ltod';
 import { flags } from '../flags';
 
+const MASKED_TOOL_TEXT = '此工具结果已执行。完整结果见消息尾部 <masked-tools> 索引区（含每步取回KEY）。archive_recover(KEY) 可取回完整内容。';
+
+function buildMaskContent(): string {
+  return MASKED_TOOL_TEXT;
+}
+
 function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
-  const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
-  if (toolName) {
-    return `[已遮蔽·${toolName}·已存档·ArchiveRecover可恢复]`;
-  }
-  return '[已遮蔽·已存档·ArchiveRecover可恢复]';
+  return buildMaskContent();
 }
 
 /**
