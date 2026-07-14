@@ -5,6 +5,7 @@ import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { RecoverableRecord } from '../../utils/mask-tool-observations';
 import type { CompactionResult } from '../compaction';
+import type { MsgFingerprint } from '../usage/audit-log';
 import { assertWireFormat, project } from './projector';
 import { stabilizePrefix } from './prefix-stabilizer';
 import { flags } from '../../flags';
@@ -53,6 +54,8 @@ export class ContextMemory {
   private _microCompactCount = 0;
   /** Number of turns where prefix stabilizer did not need to mutate the prefix. Exposed via getMetrics(). */
   private _stabilizeHitCount = 0;
+  /** L1 消息指纹 — 由 get messages() 在 project() 后计算，供审计日志使用 */
+  private _msgFingerprint: MsgFingerprint | null = null;
   /**
    * Recoverable records collected during the most recent masking pass.
    * Set by turn-step.ts (~L93) via storePendingRecoveries callback.
@@ -378,7 +381,14 @@ export class ContextMemory {
     if (JSON.stringify(msgs) === serializedBeforeStab) ++this._stabilizeHitCount;
     const result = project(msgs);
     assertWireFormat(result);
+    // L1 消息指纹：捕获 project() 后的完整结构特征
+    this._msgFingerprint = computeMsgFingerprint(result);
     return result;
+  }
+
+  /** L1 消息指纹 — 由 get messages() 在 project() 后计算，供审计日志使用 */
+  get msgFingerprint(): MsgFingerprint | null {
+    return this._msgFingerprint;
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {
@@ -633,6 +643,43 @@ function isEmptyOutputText(output: string): boolean {
  * anchoring.  Regular user messages and user-triggered skill activations
  * both count; injections, system reminders, and model-triggered skills don't.
  */
+/**
+ * 计算 L1 消息结构指纹 — 用于诊断缓存断裂。
+ * 每次 API 请求前从 project() 输出提取，精确标识请求前缀特征。
+ * 对比缓存命中/未命中轮的指纹差异 → 定位前缀变化点。
+ */
+function computeMsgFingerprint(msgs: readonly ContextMessage[]): MsgFingerprint {
+  let sysLen = 0;
+  let sysTail64 = '';
+  let remindN = 0;
+  let totalChars = 0;
+  const roles: string[] = [];
+
+  for (const m of msgs) {
+    const role = m.role ?? 'unknown';
+    const roleCode = role[0] ?? '?';
+    roles.push(roleCode === 'a' ? 'a' : roleCode); // s/u/a/t/?
+    const content = m.content;
+    let text = '';
+    if (typeof content === 'string') text = content;
+    totalChars += text.length;
+    if (role === 'system') {
+      sysLen += text.length;
+      sysTail64 = text.slice(-64);
+    }
+    if (text.includes('<system-reminder>')) remindN++;
+  }
+
+  return {
+    n: msgs.length,
+    roles: roles.join(''),
+    sysLen,
+    sysTail64,
+    remindN,
+    totalChars,
+  };
+}
+
 export function isRealUserPrompt(message: ContextMessage): boolean {
   if (message.role !== 'user') return false;
   const origin = message.origin;

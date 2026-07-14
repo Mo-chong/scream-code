@@ -1942,7 +1942,7 @@ export class TurnFlow {
       const archiveRecoverCount = (this.agent.context?.messages as readonly any[])?.filter(m =>
         m.role === 'assistant' && (m.toolCalls ?? []).some((tc: any) => tc.name === 'archive_recover')
       ).length ?? 0;
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered, activeSummaryCount, archiveRecoverCount);
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered, activeSummaryCount, archiveRecoverCount, this.agent.context?.msgFingerprint ?? undefined);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态

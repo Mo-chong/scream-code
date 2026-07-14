@@ -27,7 +27,10 @@ export class ActiveSummaryInjector extends DynamicInjector {
     return InsertPosition.AFTER_TOOL_CALL;
   }
 
-  /** 是否已写入 history 聚合存档（只写一次，不重复覆盖） */
+  /** 
+   * 是否已写入 history 聚合存档（只写一次，不重复覆盖）
+   * 第一次滑出 Tier1 时设为 true，避免每次 pending>3 都覆盖 contentArchive
+   */
   private _archiveHistoryWritten = false;
 
   override getResidualConfig(): ResidualConfig | undefined {

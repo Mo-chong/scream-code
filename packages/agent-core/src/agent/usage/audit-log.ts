@@ -134,6 +134,17 @@ export interface AuditLogEntry {
 
   archiveRecoverCount: number;
 
+  /** L1 消息结构指纹 — 诊断缓存断裂根因。从 project() 输出计算。 */
+  msgFingerprint?: MsgFingerprint;
+}
+
+export interface MsgFingerprint {
+  n: number;
+  roles: string;
+  sysLen: number;
+  sysTail64: string;
+  remindN: number;
+  totalChars: number;
 }
 
 
@@ -580,6 +591,8 @@ export function buildAuditEntry(
 
   archiveRecoverCount = 0,
 
+  msgFingerprint?: MsgFingerprint,
+
 ): AuditLogEntry {
 
   const alerts: string[] = [];
@@ -653,6 +666,8 @@ export function buildAuditEntry(
     activeSummaryCount,
 
     archiveRecoverCount,
+
+    msgFingerprint,
 
   };
 

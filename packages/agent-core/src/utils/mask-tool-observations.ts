@@ -193,7 +193,8 @@ export function formatMaskedIndexBlock(records: RecoverableRecord[]): string {
     const errCount = older.filter(r => r.isError).length;
     const okCount = tier2Count - errCount;
     lines.push('');
-    lines.push(`前 ${tier2Count} 个工具结果已归档（${errCount} ERROR, ${okCount} OK）。archive_recover("history") 可取回全部。`);
+    lines.push(`前 ${tier2Count} 个工具结果已归档（${errCount} ERROR, ${okCount} OK）。`);
+    lines.push('archive_recover("history") 可取回全部已归档工具的摘要和KEY。');
   }
 
   // 统一取回指引（恒定文本）
