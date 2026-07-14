@@ -10,6 +10,10 @@
  *   - tokenCount > 100K → 每步触发
  *
  * 缓存安全：默认 AFTER_TOOL_CALL → appendSystemReminder 追加尾部。
+ *
+ * v3 新增：任务级聚合（高置信度时显示任务标题）。
+ * 信号来源：文件路径(50%) + 搜索模式(30%) + reasoning(20%)。
+ * 置信度 >0.6 才显示，宁缺毋滥。
  */
 
 import { DynamicInjector, type ResidualConfig } from './injector';
@@ -23,6 +27,222 @@ const VARIANT = 'archival_summary';
 /** 每轮最多扫尾部的消息数 */
 const MAX_SCAN = 80;
 
+// ─── 任务域推断 ──────────────────────────────────────────
+
+/** 域名 → 显示标题 */
+interface DomainInfo {
+  id: string;
+  label: string;
+}
+
+/** 域映射：一级目录名 → domain */
+const DIR_DOMAIN: Record<string, string> = {
+  auth: 'auth',
+  login: 'auth',
+  api: 'api',
+  route: 'api',
+  controller: 'api',
+  component: 'ui',
+  page: 'ui',
+  view: 'ui',
+  test: 'test',
+  spec: 'test',
+  e2e: 'test',
+  docker: 'deploy',
+  deploy: 'deploy',
+  ci: 'deploy',
+  config: 'config',
+  db: 'db',
+  model: 'db',
+  migration: 'db',
+  schema: 'db',
+  util: 'util',
+  helper: 'util',
+  lib: 'util',
+  middleware: 'middleware',
+  hook: 'hook',
+  store: 'state',
+  reducer: 'state',
+  style: 'style',
+  css: 'style',
+};
+
+/** 文件名关键词 → domain */
+const FILE_KEYWORD_DOMAIN: Record<string, string> = {
+  login: 'auth',
+  auth: 'auth',
+  token: 'auth',
+  session: 'auth',
+  jwt: 'auth',
+  oauth: 'auth',
+  dockerfile: 'deploy',
+  docker: 'deploy',
+  makefile: 'deploy',
+  webpack: 'build',
+  vite: 'build',
+  jest: 'test',
+  vitest: 'test',
+  'package.json': 'config',
+  'tsconfig': 'config',
+};
+
+/** 搜索模式关键词 → domain */
+const SEARCH_KEYWORD_DOMAIN: Record<string, string> = {
+  jwt: 'auth',
+  token: 'auth',
+  password: 'auth',
+  login: 'auth',
+  session: 'auth',
+  docker: 'deploy',
+  deploy: 'deploy',
+  test: 'test',
+  jest: 'test',
+  webpack: 'build',
+  'package.json': 'config',
+};
+
+/** 推理关键词 → domain */
+const REASONING_KEYWORD_DOMAIN: Record<string, string> = {
+  auth: 'auth',
+  login: 'auth',
+  token: 'auth',
+  authenticate: 'auth',
+  permission: 'auth',
+  deploy: 'deploy',
+  docker: 'deploy',
+  test: 'test',
+  'unit test': 'test',
+  'e2e': 'test',
+  build: 'build',
+  config: 'config',
+  api: 'api',
+  route: 'api',
+  component: 'ui',
+  ui: 'ui',
+  style: 'style',
+  db: 'db',
+  database: 'db',
+  migration: 'db',
+  model: 'db',
+  middleware: 'middleware',
+  hook: 'hook',
+  state: 'state',
+  refactor: 'refactor',
+  fix: 'fix',
+};
+
+/** 域名 → 显示标题 */
+const DOMAIN_LABELS: Record<string, string> = {
+  auth: '认证/权限',
+  api: 'API 端点',
+  ui: 'UI 组件',
+  test: '测试',
+  deploy: '部署/CI',
+  config: '配置',
+  db: '数据库',
+  model: '数据模型',
+  util: '工具函数',
+  middleware: '中间件',
+  hook: 'React Hooks',
+  state: '状态管理',
+  style: '样式',
+  build: '构建',
+  refactor: '重构',
+  fix: '修复',
+};
+
+// ─── 信号聚合 ─────────────────────────────────────────────
+
+interface TaskSignal {
+  domain: string;
+  weight: number;
+  source: string;
+}
+
+/**
+ * 从操作列表中收集任务信号，做加权投票。
+ * 只有置信度 >0.6 时才返回确定的域。
+ */
+function inferTaskDomain(ops: ToolOp[]): { domain: string; confidence: number } | null {
+  const signals: TaskSignal[] = [];
+
+  for (const op of ops) {
+    // 信号1：文件路径（权重 0.5）
+    if (op.path) {
+      const parts = op.path.replace(/\\/g, '/').split('/');
+      // 一级目录
+      if (parts.length >= 2) {
+        const dir = parts[0]?.toLowerCase() ?? '';
+        if (dir && DIR_DOMAIN[dir]) {
+          signals.push({ domain: DIR_DOMAIN[dir]!, weight: 0.5, source: `path:${op.path}` });
+        }
+      }
+      // 文件名关键词
+      const filename = parts[parts.length - 1]?.toLowerCase() ?? '';
+      for (const [kw, domain] of Object.entries(FILE_KEYWORD_DOMAIN)) {
+        if (filename.includes(kw)) {
+          signals.push({ domain, weight: 0.4, source: `file:${filename}` });
+          break;
+        }
+      }
+    }
+
+    // 信号2：搜索模式（权重 0.3）
+    if (op.type === 'Grep' || op.type === 'LSP') {
+      const lower = (op.desc ?? '').toLowerCase();
+      for (const [kw, domain] of Object.entries(SEARCH_KEYWORD_DOMAIN)) {
+        if (lower.includes(kw)) {
+          signals.push({ domain, weight: 0.3, source: `search:${kw}` });
+          break;
+        }
+      }
+    }
+
+    // 信号3：reasoning（权重 0.2）
+    const reasoning = (op.desc ?? '').split(' — ')[1] ?? '';
+    if (reasoning) {
+      const lowerR = reasoning.toLowerCase();
+      for (const [kw, domain] of Object.entries(REASONING_KEYWORD_DOMAIN)) {
+        if (lowerR.includes(kw)) {
+          signals.push({ domain, weight: 0.2, source: `reason:${kw}` });
+          break;
+        }
+      }
+    }
+  }
+
+  if (signals.length === 0) return null;
+
+  // 按域名聚合加权
+  const scoreMap = new Map<string, number>();
+  for (const s of signals) {
+    scoreMap.set(s.domain, (scoreMap.get(s.domain) ?? 0) + s.weight);
+  }
+
+  // 排序取最高
+  const sorted = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]);
+  const [topDomain, topScore] = sorted[0]!;
+
+  // 置信度 = 最高分 / 总分
+  const totalScore = [...scoreMap.values()].reduce((a, b) => a + b, 0);
+  const confidence = totalScore > 0 ? topScore / totalScore : 0;
+
+  // 阈值：>0.6 才显示
+  if (confidence > 0.6) {
+    return { domain: topDomain, confidence };
+  }
+
+  return null;
+}
+
+// ─── 摘要构建 ─────────────────────────────────────────────
+
+interface ToolOp {
+  type: 'Read' | 'Write' | 'Edit' | 'Grep' | 'Bash' | 'LSP' | string;
+  path?: string;
+  desc?: string;
+}
+
 export class ArchivalSummaryInjector extends DynamicInjector {
   private _lastSummaryTurn = 0;
 
@@ -33,7 +253,6 @@ export class ArchivalSummaryInjector extends DynamicInjector {
   override get injectionVariant(): string { return VARIANT; }
 
   override getResidualConfig(): ResidualConfig {
-    // 由我们自己控制频率，不做残差限制
     return { weight: 0, decayPerStep: 0, threshold: 0, minStepGap: 0 };
   }
 
@@ -42,14 +261,10 @@ export class ArchivalSummaryInjector extends DynamicInjector {
     const tokenCount = this.agent.context.tokenCount;
     const currentStep = this._lastInjectContext?.currentStep ?? 0;
 
-    // 触发条件
     if (tokenCount < THRESHOLD_MEDIUM) return undefined;
 
-    // 频率控制
-    let stepGap = 1; // >100K 每步
-    if (tokenCount < THRESHOLD_HIGH) {
-      stepGap = 3; // 50K-100K 每 3 步
-    }
+    let stepGap = 1;
+    if (tokenCount < THRESHOLD_HIGH) stepGap = 3;
     if (currentStep - this._lastSummaryTurn < stepGap) return undefined;
     this._lastSummaryTurn = currentStep;
 
@@ -60,14 +275,6 @@ export class ArchivalSummaryInjector extends DynamicInjector {
     super.onContextClear();
     this._lastSummaryTurn = 0;
   }
-}
-
-// ─── 摘要构建 ─────────────────────────────────────────────
-
-interface ToolOp {
-  type: 'Read' | 'Write' | 'Edit' | 'Grep' | 'Bash' | 'LSP' | string;
-  path?: string;
-  desc?: string;
 }
 
 function buildArchivalSummary(history: readonly ContextMessage[]): string | undefined {
@@ -130,6 +337,14 @@ function buildArchivalSummary(history: readonly ContextMessage[]): string | unde
   }
 
   const lines: string[] = ['<归档摘要>'];
+
+  // 任务级聚合：高置信度时显示任务标题
+  const task = inferTaskDomain(ops);
+  if (task) {
+    const label = DOMAIN_LABELS[task.domain] ?? task.domain;
+    lines.push(`📋 任务：${label}（置信度 ${Math.round(task.confidence * 100)}%）`);
+    lines.push('');
+  }
 
   // 文件操作（Read/Write/Edit）
   const fileOps = (byType.get('Read') ?? []).concat(byType.get('Write') ?? []).concat(byType.get('Edit') ?? []);
