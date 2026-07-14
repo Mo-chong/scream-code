@@ -181,12 +181,14 @@ export class TurnFlow {
   private totalCodeFileEditsThisTurn = 0;
 
   // ── Phase 16-17: Code exploration tool priority — 4D smart enforcement ─
-  /** 探索债务（float）。每次探索 Read/Grep +1（同主题 +0.5），调 codegraph -2。不归零。 */
+  /** 探索债务（float）。每次探索 Read/Grep +1（同主题 +0.5）。不归零。 */
   private explorationDebt = 0;
-  /** 跨回合 carryover = min(3, 上回合 debt)。新回合起点。 */
+  /** 跨回合 carryover = min(2, 上回合 debt)。新回合起点。 */
   private carryover = 0;
   /** 最近 N 步探索的关键词 Set（用于语义重复检测，最多 4 条） */
   private recentExplorationKeywords: { step: number; keywords: Set<string> }[] = [];
+  /** 非探索步数计数器（用于衰减窗口：每 3 步 -1） */
+  private nonExploreStepsSinceLastExplore = 0;
   /** Paths edited/written this turn — Read of these = verification (not exploratory). */
   private recentlyModifiedPathsThisTurn: Set<string> = new Set();
 
@@ -461,7 +463,7 @@ export class TurnFlow {
       }
       return end;
     } finally {
-      this.carryover = Math.min(3, Math.floor(this.explorationDebt)); // 保存跨回合 carryover
+      this.carryover = Math.min(2, Math.floor(this.explorationDebt)); // 保存跨回合 carryover
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
@@ -598,6 +600,7 @@ export class TurnFlow {
     this.totalCodeFileEditsThisTurn = 0;
     this.explorationDebt = this.carryover; // 跨回合 carryover 从 newTurn 注入
     this.carryover = 0;                    // 年久 carryover 只注入一次，清零
+    this.nonExploreStepsSinceLastExplore = 0;
     this.recentExplorationKeywords = [];   // 新回合清空关键词（新任务不保留旧主题）
     this.recentlyModifiedPathsThisTurn = new Set();
     this.variantRegistry.reset();
@@ -1382,16 +1385,19 @@ export class TurnFlow {
                       if (this.recentExplorationKeywords.length > 4) this.recentExplorationKeywords.shift();
                     }
                   } else {
-                    // 非探索型工具调用 → 衰减窗口
-                    this.explorationDebt = Math.max(0, this.explorationDebt - 0.1);
+                    // 非探索型工具调用 → 衰减窗口（每 3 步 -1）
+                    this.nonExploreStepsSinceLastExplore++;
+                    if (this.nonExploreStepsSinceLastExplore >= 3) {
+                      this.explorationDebt = Math.max(0, this.explorationDebt - 1);
+                      this.nonExploreStepsSinceLastExplore = 0;
+                    }
                   }
                 }
                 if (ctx.toolCall.name === 'MemoryLookup') {
                   this.lastStepCalledMemoryLookup = true;
                 }
                 if (ctx.toolCall.name.startsWith('mcp__codegraph__codegraph')) {
-                  // codegraph 调用：debt -2（不归零），记录关键词
-                  this.explorationDebt = Math.max(0, this.explorationDebt - 2);
+                  // codegraph 调用：不直接减债（防止 dummy call 作弊），仅记录关键词
                   const codegraphKeywords = this.extractExplorationKeywords(ctx);
                   if (codegraphKeywords.size > 0) {
                     this.recentExplorationKeywords.push({ step: this.currentStep, keywords: codegraphKeywords });
@@ -2428,6 +2434,8 @@ export class TurnFlow {
           return false;
         }
       }
+      // 文档/配置文件的 Read 不是探索（不需要 codegraph 来理解结构）
+      if (/\.(md|json|yaml|yml|toml|txt)$/i.test(readPath)) return false;
       // 其他 → 探索（查看未知代码路径）
       return true;
     }
