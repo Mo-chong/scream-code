@@ -176,6 +176,24 @@ function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, stri
   return `[masked${tag}]`;
 }
 
+// ─── codegraph 结果定向压缩 ────────────────────────────────
+
+/** 检测是否为 codegraph 工具结果 */
+function isCodegraphResult(toolName: string | undefined, text: string): boolean {
+  if (toolName?.includes('codegraph')) return true;
+  if (/^\*\*Exploration:/m.test(text)) return true;
+  return false;
+}
+
+/** 压缩 codegraph 结果：保留 L1+L2（摘要+调用关系），去掉 L3 源码块 */
+function getCodegraphSummary(text: string): string {
+  const codeBlockStart = text.indexOf('\n```');
+  if (codeBlockStart === -1) return text;
+  const summary = text.slice(0, codeBlockStart).trim();
+  if (summary.split('\n').length < 3) return text;
+  return summary;
+}
+
 // ─── 入口 ─────────────────────────────────────────────────
 
 export function maskToolObservations(
@@ -203,6 +221,14 @@ export function maskToolObservations(
 
     const text = getContentText(msg.content);
     const toolName = msg.toolCallId ? toolNameMap?.get(msg.toolCallId) : undefined;
+
+    // ★ codegraph 结果定向压缩（先于 isStructuredOutput，避免源码块被结构化保护整段保留）
+    if (isCodegraphResult(toolName, text)) {
+      const summary = getCodegraphSummary(text);
+      if (summary !== text) {
+        return { ...msg, content: [{ type: 'text' as const, text: summary }] };
+      }
+    }
 
     // 保真层：错误 → 保留完整（单条预算上限，已解决降级）
     const error = classifyError(text);

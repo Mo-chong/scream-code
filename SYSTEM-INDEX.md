@@ -22,8 +22,8 @@
 ├─ 执行架构
 │   ├─ 回合控制    turn-control.md
 │   ├─ 注入系统    injection-system.md
-│   ├─ 注意力管理  attention-management.md
-│   ├─ Guard引擎   guard-engine.md
+│   ├─ 注意力管理  attention-system.md
+│   ├─ 拦截执行    interception-system.md
 │   └─ 工具执行    prompt-assembly.md
 ├─ 上下文管理
 │   ├─ 总架构      context-management.md
@@ -38,6 +38,8 @@
 ├─ MCP服务器集成   mcp-server.md
 ├─ CLI/TUI         cli-tui.md
 ├─ 拦截日志        interception.md
+├─ 拦截系统        interception-system.md
+├─ 注意力系统      attention-system.md
 ├─ 知识库
 │   └─ 外部文档知识库  SYSTEM/knowledge.md
 ├─ 经验库
@@ -63,19 +65,19 @@
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **知识系统（knowledge包）** | `SYSTEM/knowledge.md` | 文档→chunk→实体/事件→向量索引，SQLite 6表+3FTS，三级降级搜索 |
 | **知识库维护** 🆕 | `SYSTEM/知识库维护.md` | 按源码逆向分析的分档矩阵：高/中/低/绝对不能放，含自检清单 |
-| **注意力管理** | `SYSTEM/attention-management.md` | ResNet 残差调度(R=W×D^Δs) + W/D/T 三级参数 + VariantScheduler 残差门控 + Step 反馈注入 + Guard 行为验证 + 反事实检测 |
+| **注意力系统** | `SYSTEM/attention-system.md` | **统一大脑**：AI 全流程 5 步 + 3 级优先级(critical/normal/debug 对齐 WeightLevel) + 9 detectors + 探索债务模型 + 决策表 |
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
-| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 17个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
-| **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 15个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | **v3 三层蒸馏塔**：保真层(错误按预算保留) + 压缩层(成功→一行) + 归档层(>50K触发尾部append) + Edit循环检测。旧功能废弃：MicroCompaction(deprecated)/ArchiveRecover(注销)/incremental LLM summary(移除)。缓存安全基线 cache-stable-v1 ✅ |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | MicroCompaction→已废弃 v3（0.01% token换44%缓存断裂），FullCompaction正常使用 |
 | **AGENTS 分层设计** 🆕 | `SYSTEM/agents-hierarchy.md` | 三层加载链(findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget) + 四维评估框架 + 语言设计规范 + 55KB 提取方法论 |
 | **System Prompt 装配** | `SYSTEM/prompt-assembly.md` | Template → Render → Inject → API 全链路，模板变量/AGENTS合并/user-prefs双路 |
+| **拦截执行** 🆕 | `SYSTEM/interception-system.md` | InterceptionManager 9 detectors(Phase38/39) + mergeByRootCause + calcEscalation + sortByPriority(critical/normal/debug) + budgetCap(3)。Priority 5→3 对齐 WeightLevel |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
 | **CLI/TUI 层** | `SYSTEM/cli-tui.md` | apps/scream-code，dispatch → screm-tui → dialog，/memory 命令链路 + 新版标签图标 |
 | **踩坑与经验** | `SYSTEM/pitfalls.md` | 构建链陷阱、FTS5 限制、中文权重、路径修复、上游合并踩坑、merge SOP、Phase22 4 坑 |
-| **Phase14：可执行优化** 🆕 | `SYSTEM/Phase14-可执行优化.md` | afterStep 分段命名化 + 收敛条件数组化 + 跨回合标记 + 模块减肥 |
-| **Phase15：行为偏差拦截通道** 🆕 | `SYSTEM/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
+| **Phase14：可执行优化** 🆕 | `../../ZHU/DECISIONS/Phase14-可执行优化.md` | afterStep 分段命名化 + 收敛条件数组化 + 跨回合标记 + 模块减肥 |
+| **Phase15：行为偏差拦截通道** 🆕 | `../../ZHU/DECISIONS/Phase15-行为偏差拦截通道.md` | BEB 通道 + 增强日志基础设施 + 数据驱动配置 |
 | **Phase26：缓存感知架构** 🆕 | `SYSTEM/phase26-cache-aware.md` | DeepSeek KV Cache 兼容，注入位置修正(A→head/feedback→tail)，实时缓存审计日志 ndjson，动态自适应压缩阈值(GrowthPredictor) |
 | **系统说明书维护SOP** 🆕 | `SYSTEM/系统说明书维护SOP.md` | AI 更新文档的标准流程：决策树→分类→执行→交叉验证，含每个文件的写入规范 |
 | **合并上游仓库SOP** 🆕 | `SYSTEM/合并上游仓库SOP.md` | 二开 fork 合并上游作者仓库的标准流程：双 remote 结构、冲突策略、guard 验证、force-push 恢复 |

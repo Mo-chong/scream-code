@@ -46,9 +46,9 @@ export const toolPatternDetector: DetectorFn = (ctx): RawSignal | null => {
   if (readCount + grepCount >= 3 && codegraphCount === 0) {
     return {
       rootCause: 'quality_degrade',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.6,
-      message: '检测到连续 Read/Grep 探索。如果找不到目标文件或结构，试试用 codegraph_explore 查符号关联和调用路径——它比手动 Read 更高效。',
+      message: '检测到连续 Read/Grep 探索。如果找不到目标文件或结构，试试用 codegraph_explore 查符号关联和调用路径——它比手动 Read 更高效。大面积未知探索用 maxFiles=12，已知模块探细节用 maxFiles=3 可省 80% token。已知道符号名时 node/callees 更精准。',
       escalation: 'hint',
       phase: 'post_step',
     };
@@ -58,7 +58,7 @@ export const toolPatternDetector: DetectorFn = (ctx): RawSignal | null => {
   if (consecutiveSameError >= 2) {
     return {
       rootCause: 'quality_degrade',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.7,
       message: `连续 ${consecutiveSameError + 1} 次调用同一工具报错：${lastToolName}。建议检查参数或换其他方法。`,
       escalation: 'hint',

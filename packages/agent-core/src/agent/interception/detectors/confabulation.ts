@@ -21,7 +21,7 @@ export const confabulationDetector: DetectorFn = (ctx): RawSignal | null => {
   if (confidence >= 3) {
     return {
       rootCause: 'confabulation',
-      priority: 'P0_block',
+      priority: 'critical',
       confidence: 0.95,
       message: '检测到高置信度虚构：AI 声称的内容缺乏工具调用证据。每个声明必须先用 Read/Grep/LSP 证实。禁止凭空编造。',
       escalation: 'block',
@@ -32,7 +32,7 @@ export const confabulationDetector: DetectorFn = (ctx): RawSignal | null => {
   if (confidence >= 2) {
     return {
       rootCause: 'confabulation',
-      priority: 'P1_discipline',
+      priority: 'critical',
       confidence: 0.7,
       message: '检测到中等疑似虚构：输出与工具证据不匹配。当说"检查发现""可以看到"时，必须有 Read/Grep/LSP 工具调用证据。没有工具调用就声称什么是在编造。',
       escalation: 'hint',

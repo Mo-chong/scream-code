@@ -17,7 +17,7 @@ export const deviationChainDetector: DetectorFn = (ctx): RawSignal | null => {
   if (ctx.lastTurnHadDeviation) {
     return {
       rootCause: 'edit_discipline',
-      priority: 'P1_discipline',
+      priority: 'critical',
       confidence: 0.8,
       message: '上回合因偏差链被拦截。本回合如涉及修改代码，请先查 LSP.references。',
       escalation: 'hint',
@@ -29,7 +29,7 @@ export const deviationChainDetector: DetectorFn = (ctx): RawSignal | null => {
   if (ctx.lastTurnHadGuardRule1) {
     return {
       rootCause: 'edit_discipline',
-      priority: 'P1_discipline',
+      priority: 'critical',
       confidence: 0.7,
       message: '上回合因虚构内容检测被阻断。本回合请严格遵守：每个声明必须有 Read/Grep/LSP 工具调用证据。',
       escalation: 'hint',

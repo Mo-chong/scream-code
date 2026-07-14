@@ -1,6 +1,6 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
-keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD]
+keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD, SYSTEM-INDEX, 索引同步]
 updated: 2026-07-14
 ---
 
@@ -34,8 +34,8 @@ updated: 2026-07-14
 | 2 | 新接口/类型/配置 | API-REFERENCE.md + `<!-- ref: xxx -->` | T4 |
 | 3 | 踩坑/教训 | pitfalls.md（三段：根因/修复/预防） | T4 |
 | 4 | 值得记录（上游合并 / 二开功能 / 文档维护） | CHANGELOG.md（双轨：上游合并顶部倒序 / 二开发日志正向追加） | T4 |
-| 5 | SYSTEM 文件增删 | MAP.md（注册）+ INDEX.md（路径）+ SYSTEM-INDEX（索引+层级图） | T0 |
-| 6 | 修改文件正文 | 检查并更新相关文件的 `参见：` 区块 | 跨层 |
+| 5 | 修改/新增 SYSTEM 文件 | MAP.md（注册）+ INDEX.md（路径）+ SYSTEM-INDEX.md（验证/更新索引表+层级图） | T0 |
+| 6 | 修改文件正文 | 检查并更新相关文件的 `参见：` 区块 + 检查 SYSTEM-INDEX.md 中该文件的描述是否过时 | 跨层 |
 | 7 | 都不触发 | 不更新 | — |
 
 （条件）变更无关任何规则 → 跳过，交付前告知。
@@ -51,12 +51,16 @@ updated: 2026-07-14
 
 **分类**：列影响文件清单（按 T0→T4 层级分组）给用户确认，确认后才动手。
 
-**执行顺序**（不可乱）：
+**执行顺序**（不可乱。**SYSTEM-INDEX.md 是根索引，必须先于其他索引文件更新，后于专题文件进行验证**）：
 ```
-SYSTEM/xxx.md（专题 T1-T4）→ MAP.md（T0）→ SYSTEM-INDEX.md（根）
-→ API-REFERENCE.md（T4）→ pitfalls.md（T4）→ CHANGELOG.md（T4）
-→ INDEX.md（T0）
-→ 读回验证：全部文件头部完整性
+┌─ 专题文件 SYSTEM/xxx.md（T1-T4 修改/新增）
+├─ MAP.md（T0 目录注册）
+├─ SYSTEM-INDEX.md（T0 根索引同步 ← 专题文件必须在此有正确摘要）
+├─ API-REFERENCE.md（T4 接口/类型同步）
+├─ pitfalls.md（T4 踩坑）
+├─ CHANGELOG.md（T4 变更记录）
+├─ INDEX.md（T0 DECISIONS 索引）
+└─ 读回验证：全部文件头部完整性
 ```
 
 **读回验证清单**：
@@ -67,6 +71,7 @@ SYSTEM/xxx.md（专题 T1-T4）→ MAP.md（T0）→ SYSTEM-INDEX.md（根）
 □ 无假关联（正文未提及却放在参见中）
 □ 路径 Read 可访问 √
 □ Grep 验证新增链接的文件名在正文中出现 √
+□ **SYSTEM-INDEX.md 中对应条目的描述、层级树、日期是否同步 √**
 □ 无多余改动 √
 ```
 
@@ -111,7 +116,16 @@ updated: YYYY-MM-DD
 
 ### 3.4 SYSTEM-INDEX.md
 
-索引表：`| 路径 | 用途（≤15字） | 更新日 |` 字母序插入。层级图：找到模块分支追加。
+**根索引，必须维护。**
+
+| 操作 | 规则 |
+|------|------|
+| 新增 SYSTEM 文件 | **必须**在 SYSTEM-INDEX.md 的层级图和索引表中各加一条。层级图找到对应分支追加，索引表字母序插入 |
+| 修改 SYSTEM 文件 | **必须**检查索引表中该文件的行是否需要更新（描述/日期/Phase 号） |
+| 删除 SYSTEM 文件 | **必须**从层级图和索引表中删除对应行 |
+| 跳过 | 仅改 ZHU/DECISIONS/ 或源码不改 SYSTEM/ 时不需要碰 |
+
+> SYTEM-INDEX.md 是 ScreamCode 对外暴露的知识入口。过时的索引比没有索引更危险——它会引导读者到不存在的文件或错误的方向。**改 SYSTEM 文件后不更新索引 = 违反 T0 规则。**
 
 ### 3.5 API-REFERENCE.md
 

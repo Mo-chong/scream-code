@@ -22,10 +22,10 @@ updated: 2026-07-11
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门/工具优先级
+│   ├─ turn-control.md            — 回合生命周期/收敛门/探索债务模型
 │   ├─ injection-system.md        — ☑ 注入系统：14个注入器/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
-│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步(Phase38)
-│   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 8 detectors(Phase38)
+│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级(Phase38/39)
+│   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors(Phase38/39)
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
 
 ├─ AGENTS 架构

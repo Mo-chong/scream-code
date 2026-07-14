@@ -32,7 +32,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
     }
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.9,
       message: '你报告了 [DONE]，请先用构建/测试/检查工具验证后再确认完成，不要凭空声称。',
       escalation: 'hint',
@@ -42,7 +42,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
   if (sig?.need) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.7,
       message: '你报告了 [NEED]，请说明：当前目标、已尝试的方法、具体卡在哪一步。我会给你针对性引导。',
       escalation: 'hint',
@@ -52,7 +52,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
   if (sig?.confirm) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.6,
       message: '你报告了 [CONFIRM]，请根据已有信息自行判断并继续推进。不确定时直接用工具验证假设，不必等用户确认。',
       escalation: 'hint',
@@ -67,7 +67,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
   if (DONE_PATTERN.test(aiResponse)) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.8,
       message: '你报告了 [DONE]，请先用构建/测试/检查工具验证后再确认完成，不要凭空声称。',
       escalation: 'hint',
@@ -77,7 +77,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
   if (NEED_PATTERN.test(aiResponse)) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.6,
       message: '你报告了 [NEED]，请说明：当前目标、已尝试的方法、具体在哪一步。我会针对性引导。',
       escalation: 'hint',
@@ -87,7 +87,7 @@ export const attentionMonitorDetector: DetectorFn = (ctx): RawSignal | null => {
   if (CONFIRM_PATTERN.test(aiResponse)) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.5,
       message: '你报告了 [CONFIRM]，请根据已有信息自行判断并继续推进。不确定时直接用工具验证假设。',
       escalation: 'hint',

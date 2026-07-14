@@ -19,7 +19,7 @@ export const sceneMemoryDetector: DetectorFn = (ctx): RawSignal | null => {
   if (!ctx.calledMemoryLookup) {
     return {
       rootCause: 'attention_signal',
-      priority: 'P3_signal',
+      priority: 'normal',
       confidence: 0.6,
       message: '用户提到了"上次/以前"相关的表述。请先调 MemoryLookup 查询历史记录，不要凭记忆回答。',
       escalation: 'hint',

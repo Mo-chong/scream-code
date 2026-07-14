@@ -120,9 +120,12 @@ runOneTurn()
 ```
 
 **代码级提醒**（turn/index.ts:983-991）：
-- 当前回合连续 Read/Grep ≥3 次且从未调 codegraph → 注入 `step_code_explore` 提醒
-- 调过一次 codegraph `mcp__codegraph__codegraph_*` → 计数清零
+- 探索债务模型。每次探索 Read/Grep +1（同主题 +0.5），调 codegraph -2，5 步无探索自然 -0.1
+- debt ≥ carryover+4 → 注入 `step_code_explore` 提醒（含 maxFiles 三档引导）
+- debt ≥ carryover+7 → 警告并接近阻断
+- debt ≥ carryover+10 → 阻断（syntheticResult）
 - codegraph MCP 不可用时（断开等），从不触发提醒
+- 跨回合 carryover = min(3, floor(debt))，防止重启洗白
 - 提醒只是建议，不阻断执行
 
 **收敛门条件更新**（line 1787）：

@@ -17,7 +17,7 @@ export const permissionEnforcerDetector: DetectorFn = (ctx): RawSignal | null =>
   if (guard.rule === 1 && guard.block) {
     return {
       rootCause: 'confabulation',
-      priority: 'P0_block',
+      priority: 'critical',
       confidence: 0.95,
       message: guard.feedback || '检测到虚构内容，已阻断。',
       escalation: 'block',
@@ -25,11 +25,11 @@ export const permissionEnforcerDetector: DetectorFn = (ctx): RawSignal | null =>
     };
   }
 
-  // Guard Rule 2 (claim without evidence) → P1_discipline
+  // Guard Rule 2 (claim without evidence) → critical
   if (guard.rule === 2) {
     return {
       rootCause: 'edit_discipline',
-      priority: 'P1_discipline',
+      priority: 'critical',
       confidence: 0.7,
       message: guard.feedback || '声称发现内容但无工具调用证据。请先用 Read/Grep/LSP 验证。',
       escalation: 'hint',
@@ -37,11 +37,11 @@ export const permissionEnforcerDetector: DetectorFn = (ctx): RawSignal | null =>
     };
   }
 
-  // Guard Rule 3 (claim edit without write) → P1_discipline
+  // Guard Rule 3 (claim edit without write) → critical
   if (guard.rule === 3) {
     return {
       rootCause: 'edit_discipline',
-      priority: 'P1_discipline',
+      priority: 'critical',
       confidence: 0.7,
       message: guard.feedback || '声称已修改但无 Edit/Write 调用。',
       escalation: 'hint',
@@ -49,11 +49,11 @@ export const permissionEnforcerDetector: DetectorFn = (ctx): RawSignal | null =>
     };
   }
 
-  // Guard Rule 4 (memory without code tools) → P2_quality
+  // Guard Rule 4 (memory without code tools) → normal
   if (guard.rule === 4) {
     return {
       rootCause: 'quality_degrade',
-      priority: 'P2_quality',
+      priority: 'normal',
       confidence: 0.6,
       message: guard.feedback || '使用记忆信息但未用 Read/Grep 确认当前代码。',
       escalation: 'hint',

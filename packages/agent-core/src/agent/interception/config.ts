@@ -14,27 +14,17 @@ export const DEFAULT_INTERCEPTION_CONFIG: InterceptionConfig = {
   maxMessagesPerStep: 3,
 
   priorities: {
-    P0_block: {
+    critical: {
       enabled: true,
       action: 'block_step',
-      enableEscalation: false, // P0 直接阻断，不递进
+      enableEscalation: false, // critical 直接阻断，不递进
     },
-    P1_discipline: {
+    normal: {
       enabled: true,
       action: 'inject_feedback',
       enableEscalation: true, // hint → nudge → warn → block
     },
-    P2_quality: {
-      enabled: true,
-      action: 'inject_feedback',
-      enableEscalation: true, // log → hint → nudge → warn
-    },
-    P3_signal: {
-      enabled: true,
-      action: 'inject_feedback',
-      enableEscalation: false, // 只做 1 次
-    },
-    P4_info: {
+    debug: {
       enabled: true,
       action: 'log_only',
       enableEscalation: false, // 纯日志，不注入

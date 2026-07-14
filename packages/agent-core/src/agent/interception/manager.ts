@@ -44,11 +44,9 @@ const ROOT_CAUSE_LABEL: Record<RootCause, string> = {
 
 /** 优先级标签（短格式，用于 header） */
 const PRIORITY_LABEL: Record<AttentionPriority, string> = {
-  P0_block: 'P0',
-  P1_discipline: 'P1',
-  P2_quality: 'P2',
-  P3_signal: 'P3',
-  P4_info: 'P4',
+  critical: 'CRIT',
+  normal: 'NORM',
+  debug: 'DBG',
 };
 
 export class InterceptionManager {
@@ -102,7 +100,7 @@ export class InterceptionManager {
     if (firstResolved) {
       resolutionSignal = {
         rootCause: firstResolved.rootCause as any,
-        priority: 'P3_signal',
+        priority: 'normal',
         confidence: 0.7,
         message: `[恢复] 你已修复/摆脱了「${firstResolved.rootCause}」问题，已连续触发 ${firstResolved.prevCount} 次后在本轮消除。正向行为确认。`,
         escalation: 'hint',
@@ -158,7 +156,7 @@ export class InterceptionManager {
     }
 
     // Step 7: 阻断检查
-    const blocked = capped.some((m) => m.priority === 'P0_block');
+    const blocked = capped.some((m) => m.priority === 'critical');
 
     // Step 8: 高频异常检测 — 当某个根因触发次数 ≥5 时自动注入趋势
     const anomalySignals: RawSignal[] = [];
@@ -167,7 +165,7 @@ export class InterceptionManager {
         const label = ROOT_CAUSE_LABEL[cause as RootCause] || cause;
         anomalySignals.push({
           rootCause: cause as RootCause,
-          priority: 'P1_discipline' as const,
+          priority: 'critical' as const,
           confidence: 0.9,
           message: `高频异常：检测到「${label}」已触发 ${count} 次。请检查是否陷入重复模式——系统会自动记录，但需要你来打破循环。`,
           escalation: count >= 10 ? 'warn' as const : 'hint' as const,
@@ -185,7 +183,7 @@ export class InterceptionManager {
     const reSorted = this.sortByPriority(reEscalated);
     const reCapped = reSorted.slice(0, this.config.maxMessagesPerStep);
     const finalCapped = anomalySignals.length > 0 ? reCapped : capped;
-    const finalBlocked = finalCapped.some((m) => m.priority === 'P0_block');
+    const finalBlocked = finalCapped.some((m) => m.priority === 'critical');
 
     // Step 9: 结构化日志记录 — 记录本轮拦截事件（供 AI 自助查询）
     this.recordStep(ctx, extendedSignals, finalCapped, finalBlocked);
@@ -333,8 +331,8 @@ export class InterceptionManager {
           rootCause: m.rootCause,
           outcome: blocked ? 'blocked_step' as const : 'delivered' as const,
           budgetUsed: true,
-          position: m.priority === 'P0_block' ? 'EARLY'
-            : m.priority === 'P1_discipline' ? 'AFTER_SYSTEM' : 'NEAR_END',
+          position: m.priority === 'critical' ? 'EARLY'
+            : m.priority === 'normal' ? 'AFTER_SYSTEM' : 'NEAR_END',
           tokenEstimate: Math.round(m.message.length / 4),
         })),
         wasBlocked: blocked,
@@ -399,11 +397,11 @@ export class InterceptionManager {
   /* ──────────────── 工具方法 ──────────────── */
 
   private highestPriority(priorities: AttentionPriority[]): AttentionPriority {
-    const order: AttentionPriority[] = ['P0_block', 'P1_discipline', 'P2_quality', 'P3_signal', 'P4_info'];
+    const order: AttentionPriority[] = ['critical', 'normal', 'debug'];
     for (const p of order) {
       if (priorities.includes(p)) return p;
     }
-    return 'P4_info';
+    return 'debug';
   }
 
   private highestEscalation(levels: EscalationLevel[]): EscalationLevel {
@@ -416,12 +414,10 @@ export class InterceptionManager {
 
   private priorityOfRootCause(cause: RootCause): AttentionPriority {
     const idx = ROOT_CAUSE_PRIORITY_ORDER.indexOf(cause);
-    if (idx <= 1) return 'P0_block';      // turn_limit, tool_permission
-    if (idx <= 2) return 'P0_block';      // confabulation
-    if (idx <= 4) return 'P1_discipline';  // stuck_loop, edit_discipline
-    if (idx <= 6) return 'P1_discipline';  // verify_discipline, behavior_repeat
-    if (idx <= 7) return 'P2_quality';     // quality_degrade
-    if (idx <= 8) return 'P3_signal';      // attention_signal
-    return 'P4_info';                      // context_pressure, log_info
+    if (idx <= 2) return 'critical';     // turn_limit, tool_permission, confabulation
+    if (idx <= 6) return 'critical';     // stuck_loop, edit_discipline, verify_discipline, behavior_repeat
+    if (idx <= 7) return 'normal';       // quality_degrade
+    if (idx <= 8) return 'normal';       // attention_signal
+    return 'debug';                      // context_pressure, log_info
   }
 }

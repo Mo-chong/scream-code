@@ -57,11 +57,10 @@ InterceptionManager（中央调度器）
 
 | 优先级 | 含义 | 动作 | 递进 |
 |--------|------|------|------|
-| P0_block | 阻断当前 step | block_step | ❌ 直接阻断 |
-| P1_discipline | 行为规则违规 | inject_feedback | ✅ hint→nudge→warn→block |
-| P2_quality | 质量偏差 | inject_feedback | ✅ log→hint→nudge→warn |
-| P3_signal | AI 模式信号 | inject_feedback | ❌ 只做 1 次 |
-| P4_info | 纯信息 | log_only | ❌ 不注入 |
+| critical | 阻断/纪律 | block_step / inject_feedback | ❌ critical 直接阻断不递进。normal 递进 |
+| normal | 质量偏差/信号 | inject_feedback / inject_feedback | ✅ hint→nudge→warn→block |
+| debug | 纯信息 | log_only | ❌ 不注入 |
+| **合计** | **3 级（对齐 WeightLevel）** | | |
 
 ---
 
@@ -69,17 +68,17 @@ InterceptionManager（中央调度器）
 
 | 根因 | 说明 | 优先级 |
 |------|------|--------|
-| `confabulation` | 虚构内容 | P0_block |
-| `turn_limit` | 回合上限 | P0_block |
-| `tool_permission` | 工具权限 | P0_block |
-| `stuck_loop` | 失败循环 | P1_discipline |
-| `edit_discipline` | 编辑未查 LSP | P1_discipline |
-| `verify_discipline` | 跳过验证 | P1_discipline |
-| `behavior_repeat` | 重复违规 | P1_discipline |
-| `quality_degrade` | 质量下降 | P2_quality |
-| `attention_signal` | [DONE]/[NEED] 等 | P3_signal |
-| `context_pressure` | token 压力 | P4_info |
-| `log_info` | 纯日志 | P4_info |
+| `confabulation` | 虚构内容 | critical |
+| `turn_limit` | 回合上限 | critical |
+| `tool_permission` | 工具权限 | critical |
+| `stuck_loop` | 失败循环 | critical |
+| `edit_discipline` | 编辑未查 LSP | critical |
+| `verify_discipline` | 跳过验证 | critical |
+| `behavior_repeat` | 重复违规 | critical |
+| `quality_degrade` | 质量下降 | normal |
+| `attention_signal` | [DONE]/[NEED] 等 | normal |
+| `context_pressure` | token 压力 | debug |
+| `log_info` | 纯日志 | debug |
 
 ---
 
@@ -124,7 +123,7 @@ const config = {
 
 ### edit_failure_loop —— Edit循环检测器（v3 新增）
 - rootCause: stuck_loop
-- priority: P1_discipline
+- priority: critical
 - confidence: 0.75
 - phase: post_step
 - 触发条件：同一文件在同一轮中连续 Edit 2次以上

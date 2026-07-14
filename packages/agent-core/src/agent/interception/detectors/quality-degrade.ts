@@ -49,9 +49,9 @@ export const qualityDegradeDetector: DetectorFn = (ctx): RawSignal | null => {
 
   // 计算优先级：C→P3, B→P2, A→P1_discipline, S→P1_discipline
   const sevIdx = SEVERITY_ORDER.indexOf(highestSeverity);
-  const priority = sevIdx <= 0 ? 'P3_signal'
-    : sevIdx === 1 ? 'P2_quality'
-    : 'P1_discipline' as const;
+  const priority = sevIdx <= 0 ? 'normal'
+    : sevIdx === 1 ? 'normal'
+    : 'critical' as const;
 
   // 根据严重级别生成不同消息
   const severityLabel = highestSeverity;

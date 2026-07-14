@@ -337,6 +337,29 @@ updated: 2026-07-11
 
 ## 二开发日志（Mo-chong fork）
 
+### Phase38-39 — 拦截系统正收益审计 + codegraph 智能触发 + 探索债务模型（2026-07-14）
+
+**拦截系统优化：**
+- **删除 4 个 detector** (verifyPass / toolDedup / interceptionSummary / budgetNotify)，13→9，-31%，0 安全损失
+- **Priority 5→3 对齐**：P0_block/P1_discipline → critical, P2_quality/P3_signal → normal, P4_info → debug。10 文件旧字面量全清零
+- **SYSTEM 说明书同步**：attention-system.md 全量重写, interception.md/ interception-system.md/ turn-control.md/ API-REFERENCE.md 更新
+- **maxFiles 引导**：tool-pattern.ts 文案含三档引导（12/3/1）
+
+**codegraph 智能压缩：**
+- mask-tool-observations.ts: isCodegraphResult() + getCodegraphSummary()，旧结果 ~4,000→~300 tokens（-93%）
+- 先于 isStructuredOutput() 拦截 codegraph 源码块，避免被结构化保护整段保留
+
+**探索债务模型（替换 Phase 17 二进制门控）：**
+- explorationDebt：探索 +1（同主题 +0.5），codegraph -2，非探索衰减 -0.1
+- debt ≥ carryover+4(suggest) / +7(warn) / +10(block)
+- 语义重复检测：extractExplorationKeywords() 提取 Grep/Read 路径关键词，近 4 步快照比对
+- 跨回合 carryover = min(3, floor(debt))，防重启洗白
+- 消除 dummy call bypass 漏洞（旧：调一次永久放行）
+
+**决策文档（2 份）：**
+- `DECISIONS/分析-拦截系统正收益审计.md` — 13 detectors 逐项 + 外部 7 论文 8 开源验证 + AI 消费角色四维评分
+- `DECISIONS/方案-3-codegraph智能触发机制重设计.md` — 完整方案，749 行（含附录 A 智能压缩 + B 工具对比）
+
 ### Phase33 — Context Facts 尾部聚合 + 内容哈希埋点 + toolCalls TypeError 修（2026-07-10）
 
 #### 新功能

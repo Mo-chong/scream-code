@@ -16,13 +16,8 @@ import type { GuardResult } from '../turn/guard-engine';
 
 /* ──────────────── 优先级与递进 ──────────────── */
 
-/** 注意力优先级 — 决定了消息是否 / 如何送达 AI */
-export type AttentionPriority =
-  | 'P0_block'       // 阻断当前 step。必须立即处理。
-  | 'P1_discipline'  // 行为规则违规。需要修正动作。
-  | 'P2_quality'     // 代码 / 行为质量偏差。需要改进。
-  | 'P3_signal'      // AI 表达的模式信号。需要注意到。
-  | 'P4_info';       // 纯信息。需要知道但不需行动。
+/** 注意力优先级 — 决定消息是否 / 如何送达 AI。对齐全系统 WeightLevel 3 级 */
+export type AttentionPriority = 'critical' | 'normal' | 'debug';
 
 /** 递进等级 — 同一根因多次触发时升级 */
 export type EscalationLevel = 'hint' | 'nudge' | 'warn' | 'block';
@@ -124,7 +119,7 @@ export type DetectorFn = (ctx: InterceptionContext) => RawSignal | null;
 export interface PriorityLayerConfig {
   enabled: boolean;
   action: 'block_step' | 'inject_feedback' | 'log_only';
-  /** 是否启用递进（P3/P4 通常不递进） */
+  /** 是否启用递进（normal/debug 通常不递进） */
   enableEscalation: boolean;
 }
 

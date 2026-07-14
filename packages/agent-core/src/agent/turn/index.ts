@@ -181,14 +181,12 @@ export class TurnFlow {
   private totalCodeFileEditsThisTurn = 0;
 
   // ── Phase 16-17: Code exploration tool priority — 4D smart enforcement ─
-  /** Has any mcp__codegraph__codegraph_* been called this turn (resets per turn). */
-  private hasCalledCodegraphThisTurn = false;
-  /**
-   * Exploratory Read/Grep steps this turn without codegraph (excludes verification reads).
-   * Verification reads: Edit/Write-刚改过的文件；Grep(具体路径)。
-   * ≥3 → injection; ≥5 → hard block via syntheticResult.
-   */
-  private exploratoryStepsWithoutCodegraph = 0;
+  /** 探索债务（float）。每次探索 Read/Grep +1（同主题 +0.5），调 codegraph -2。不归零。 */
+  private explorationDebt = 0;
+  /** 跨回合 carryover = min(3, 上回合 debt)。新回合起点。 */
+  private carryover = 0;
+  /** 最近 N 步探索的关键词 Set（用于语义重复检测，最多 4 条） */
+  private recentExplorationKeywords: { step: number; keywords: Set<string> }[] = [];
   /** Paths edited/written this turn — Read of these = verification (not exploratory). */
   private recentlyModifiedPathsThisTurn: Set<string> = new Set();
 
@@ -463,6 +461,7 @@ export class TurnFlow {
       }
       return end;
     } finally {
+      this.carryover = Math.min(3, Math.floor(this.explorationDebt)); // 保存跨回合 carryover
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
@@ -597,8 +596,9 @@ export class TurnFlow {
     this.turnHasCalledAnyLsp = false;
     this.totalStepsWithEditsThisTurn = 0;
     this.totalCodeFileEditsThisTurn = 0;
-    this.hasCalledCodegraphThisTurn = false;
-    this.exploratoryStepsWithoutCodegraph = 0;
+    this.explorationDebt = this.carryover; // 跨回合 carryover 从 newTurn 注入
+    this.carryover = 0;                    // 年久 carryover 只注入一次，清零
+    this.recentExplorationKeywords = [];   // 新回合清空关键词（新任务不保留旧主题）
     this.recentlyModifiedPathsThisTurn = new Set();
     this.variantRegistry.reset();
     this.currentStep = 0;
@@ -1122,28 +1122,28 @@ export class TurnFlow {
                   );
                 }
               }
-              // 🆕 Phase 17: 4D 智能拦截 — 探索 vs 验证 / 可用性 / 渐进 escal / 疲劳重置
+              // 🆕 Phase 17: 探索债务模型 — 语义重复检测 + 后置校验 + 跨回合 carryover
               if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') {
                 const codegraphAvailable = this.agent.tools.data().some(t => t.name.startsWith('mcp__codegraph__codegraph'));
-                if (codegraphAvailable && !this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
-                  const n = this.exploratoryStepsWithoutCodegraph;
-                  if (n >= 5) {
+                if (codegraphAvailable && this.isExploratoryReadGrep(ctx)) {
+                  const d = this.explorationDebt;
+                  if (d >= this.carryover + 10) {
                     return {
                       syntheticResult: {
                         isError: true,
-                        output: `已连续 ${n} 次使用 Read/Grep 探索代码而未调用 codegraph。请先用 mcp__codegraph__codegraph_explore 获取相关符号源码+调用路径。确认 Read/Grep 是验证行为而非探索后，可先调一次 codegraph 再继续。`,
+                        output: `探索债务已达 ${d.toFixed(1)} 点（上限 = 携带 ${this.carryover.toFixed(0)} + 10）。请用 codegraph_explore 获取相关符号源码+调用路径。如果已查过，继续探索将被终止。`,
                         stopTurn: false,
                       },
                     };
                   }
-                  if (n >= 4) {
+                  if (d >= this.carryover + 7) {
                     this.inject(
-                      `已连续 ${n} 次 Read/Grep 探索代码未调 codegraph。下一步再不调用 codegraph 将被阻断。mcp__codegraph__codegraph_explore 一次返回完整上下文。`,
+                      `探索债务 ${d.toFixed(1)} 点（接近上限）。连续低效探索将触发阻断。建议用 codegraph_explore（大面积未知用 maxFiles=12，已知模块用 maxFiles=3）。`,
                       { kind: 'injection', variant: 'step_code_explore' },
                     );
-                  } else if (n >= 3) {
+                  } else if (d >= this.carryover + 4) {
                     this.inject(
-                      '已连续多次用 Read/Grep 探索代码。建议先用 mcp__codegraph__codegraph_explore — 一次调用返回相关符号源码+调用路径，比多轮 Read/Grep 更高效。',
+                      '检测到连续 Read/Grep 探索。试试用 codegraph_explore 查符号关联和调用路径。大面积未知探索用 maxFiles=12，已知模块探细节用 maxFiles=3。如果已知道符号名，node/callees 更精准。',
                       { kind: 'injection', variant: 'step_code_explore' },
                     );
                   }
@@ -1368,17 +1368,38 @@ export class TurnFlow {
                 if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile') {
                   this.hasCurrentCodeToolsThisStep = true;
                   this.hasKnowledgeToolsThisStep = true;
-                  // D1 (Phase 17): Only count exploratory reads — reads of recently-modified files are verification
-                  if (!this.hasCalledCodegraphThisTurn && this.isExploratoryReadGrep(ctx)) {
-                    this.exploratoryStepsWithoutCodegraph++;
+                  // 🆕 Phase 17: 探索债务模型 — debt +1（同主题 +0.5）/ -2 codegraph / 自然衰减
+                  if (this.isExploratoryReadGrep(ctx)) {
+                    // 语义重复检测
+                    const keywords = this.extractExplorationKeywords(ctx);
+                    const isSameTopic = keywords.size > 0 && this.recentExplorationKeywords.some(
+                      entry => [...entry.keywords].some(k => keywords.has(k))
+                    );
+                    this.explorationDebt += isSameTopic ? 0.5 : 1;
+                    // 记录关键词（最多 4 条）
+                    if (keywords.size > 0) {
+                      this.recentExplorationKeywords.push({ step: currentStep, keywords });
+                      if (this.recentExplorationKeywords.length > 4) this.recentExplorationKeywords.shift();
+                    }
+                  } else {
+                    // 非探索型工具调用 → 衰减窗口
+                    this.explorationDebt = Math.max(0, this.explorationDebt - 0.1);
                   }
                 }
                 if (ctx.toolCall.name === 'MemoryLookup') {
                   this.lastStepCalledMemoryLookup = true;
                 }
                 if (ctx.toolCall.name.startsWith('mcp__codegraph__codegraph')) {
-                  this.hasCalledCodegraphThisTurn = true;
-                  this.exploratoryStepsWithoutCodegraph = 0;
+                  // codegraph 调用：debt -2（不归零），记录关键词
+                  this.explorationDebt = Math.max(0, this.explorationDebt - 2);
+                  const codegraphKeywords = this.extractExplorationKeywords(ctx);
+                  if (codegraphKeywords.size > 0) {
+                    this.recentExplorationKeywords.push({ step: currentStep, keywords: codegraphKeywords });
+                    if (this.recentExplorationKeywords.length > 4) this.recentExplorationKeywords.shift();
+                  }
+                  // 后置校验：记下此时的 debt，3 步后比较
+                  // TODO: 后置校验需要存储 debtBefore 和 3 步后在 afterStep 比较
+                  // 简版：直接 debt-2 + 关键词记录，不做跨步比较（减少复杂度）
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
@@ -2411,6 +2432,29 @@ export class TurnFlow {
       return true;
     }
     return false;
+  }
+
+  /** 从工具调用中提取探索关键词（用于语义重复检测） */
+  private extractExplorationKeywords(ctx: { toolCall: { name: string }; args: unknown }): Set<string> {
+    const { toolCall, args: raw } = ctx;
+    const args = raw as Record<string, unknown>;
+    if (toolCall.name === 'Grep') {
+      const pattern = (args.pattern as string) ?? '';
+      const words = pattern.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
+      return new Set(words);
+    }
+    if (toolCall.name === 'Read' || toolCall.name === 'ReadGroup') {
+      const path = (args.path as string) ?? '';
+      const basename = path.split('/').pop()?.split('\\').pop()?.replace(/\.[^.]+$/, '') ?? '';
+      if (basename.length < 2) return new Set();
+      return new Set([basename.toLowerCase()]);
+    }
+    if (toolCall.name.startsWith('mcp__codegraph__codegraph')) {
+      const query = (args.query as string) ?? '';
+      const words = query.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, ' ').split(/\s+/).filter(w => w.length >= 2);
+      return new Set(words);
+    }
+    return new Set();
   }
 
 

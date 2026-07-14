@@ -40,28 +40,25 @@ Guard 引擎 + 收敛门 + 偏差链 + 反事实检测 —— 这些拦截系统
 ### 3.1 拦截系统整体架构
 
 ```
-detectors/（12 个纯函数检测器）
+detectors/（9 个纯函数检测器）
   ├── attention-monitor      — [DONE]/[NEED]/[CONFIRM] 信号检测
   ├── quality-degrade        — C→B→A→S 质量衰退检测
-  ├── verify-pass            — 验证通过正向信号
   ├── confabulation          — 虚构内容检测（防幻核心）
   ├── deviation-chain        — 偏差链状态检测
   ├── turn-limits            — 回合步数上限检测（step≥45 预告）
-  ├── tool-dedup             — 连续相同工具调用检测
   ├── permission-enforcer    — Guard 规则 1-4 检测
-  ├── interception-summary   — 拦截运行概况（step≥30 时注入）
-  ├── tool-pattern           — 连续 Read 无 codegraph + 连续报错
-  ├── scene-memory           — 用户说"上次/以前"提醒查记忆
-  └── budget-notify          — 注入预算降级通知（Phase38l）
+  ├── edit-failure-loop      — 同一文件连续 Edit 循环检测
+  ├── tool-pattern           — 连续 Read 无 codegraph + 连续报错 + maxFiles 引导
+  └── scene-memory           — 用户说"上次/以前"提醒查记忆
            │
            │ RawSignal
            ▼
 InterceptionManager（决策层）
   ├── mergeByRootCause       — 同根因合并为 1 条
   ├── calcEscalation         — hint→nudge→warn→block
-  ├── sortByPriority         — P0 > P1 > P2 > P3 > P4
+  ├── sortByPriority         — critical > normal > debug（3 级，对齐全系统 WeightLevel）
   ├── budgetCap(3)           — 最多 3 条/步
-  └── formatMessage          — 统一 "[拦截/Px]" 格式
+  └── formatMessage          — 统一 "[拦截/CRIT]" 格式
            │
            ▼
 InjectionRouter（注入层）

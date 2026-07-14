@@ -31,7 +31,7 @@ export const editFailureLoopDetector: DetectorFn = (ctx): RawSignal | null => {
       if (paths[i] === paths[j]) {
         return {
           rootCause: 'stuck_loop',
-          priority: 'P1_discipline',
+          priority: 'critical',
           confidence: 0.75,
           message: `同一文件连续 Edit ${paths[i]} 多次。如第一次失败，请先 Read 确认当前内容再重试。`,
           escalation: 'hint',

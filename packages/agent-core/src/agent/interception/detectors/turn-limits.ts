@@ -19,7 +19,7 @@ export const turnLimitsDetector: DetectorFn = (ctx): RawSignal | null => {
   if (step >= MAX_STEPS_PER_TURN) {
     return {
       rootCause: 'turn_limit',
-      priority: 'P0_block',
+      priority: 'critical',
       confidence: 0.95,
       message: `已达回合步数上限 (${step}/${MAX_STEPS_PER_TURN})。本回合即将终止。`,
       escalation: 'block',
@@ -31,7 +31,7 @@ export const turnLimitsDetector: DetectorFn = (ctx): RawSignal | null => {
     if (step >= 45) {
       return {
         rootCause: 'turn_limit',
-        priority: 'P4_info',
+        priority: 'debug',
         confidence: 0.8,
         message: `已达 ${step}/${MAX_STEPS_PER_TURN} 步，回合即将终止。请在剩余步数内完成收尾——验证+提交。`,
         escalation: 'warn',
@@ -40,7 +40,7 @@ export const turnLimitsDetector: DetectorFn = (ctx): RawSignal | null => {
     }
     return {
       rootCause: 'turn_limit',
-      priority: 'P4_info',
+      priority: 'debug',
       confidence: 0.6,
       message: `接近回合步数上限 (${step}/${MAX_STEPS_PER_TURN})。请尽快收尾。`,
       escalation: 'hint',

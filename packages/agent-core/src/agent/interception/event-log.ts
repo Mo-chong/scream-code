@@ -46,7 +46,7 @@ export function recordInterceptionEvents(
       turnId: report.turnId,
       action: d.blocked ? 'blocked' : d.isPositive ? 'positive' : 'injected',
       reason: `[${d.priority}] ${d.escalation} x${d.triggerCount}: ${d.message.slice(0, 60)}`,
-      level: d.priority === 'P0_block' ? '3' : d.priority === 'P1_discipline' ? '2' : d.priority === 'P2_quality' ? '1' : '0',
+      level: d.priority === 'critical' ? '3' : d.priority === 'normal' ? '2' : '1',
       tokenEstimate: Math.round(d.message.length / 4),
       agentType: 'main',
     });
