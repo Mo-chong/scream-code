@@ -115,57 +115,13 @@ powershell -Command "Get-Process node | Where-Object { \$_.StartTime -lt (Get-Da
 
 ---
 
-### CRLF 换行符导致 Edit/sed/node 文本替换不命中
 
-**现象**：`Edit` 调用返回 "old_string not found"、`sed -i` 替换不生效、node `replace()` 返回 0 匹配。
+### Edit old_string not found — 一劳永逸修复方案
 
-**环境**：Windows CRLF 文件。Read 输出显示 LF 行尾，但实际文件是 CRLF。Edit 的 `old_string` 用 LF 匹配，
-但 node `replace()` / `sed` 面对原始 CRLF 文件时换行符不一致导致匹配失败。
+- 根因：文件换行符混合（CRLF+LF）
+- 修复：.gitattributes eol=lf + git add --renormalize . + core.autocrlf false
+- skill: /edit-fix
 
-**根因**：
-- `Read` 显示时自动将 CRLF 转写为 LF，让 AI 误以为文件是 LF 行尾。
-- `Edit` 工具内部处理了 CRLF 映射（old_string 用 LF 即可），但 node 脚本的 `replace()` 和 `sed -i` 面
-  对原始 CRLF 文件时不命中。
-- 多次 `Edit` 后文件行数被工具内部更新（CRLF→LF→CRLF），导致后续 `Read` 行号偏移。
-
-**修复**：
-- 替换操作优先用 `Edit` 工具（它识别 CRLF）。迫不得已用 `sed` 时，先用 `dos2unix` 或
-  `sed -i 's/$/\r/'` 对齐。
-- Node `replace()` 失败时改用 `indexOf + slice` 定位，因为 `replace` 依赖正则的 `$` 锚定在 CRLF 上
-  行为不同。
-- 修改后不依赖行号，而是 `grep -c` 验证替换是否命中。
-
-**预防**：
-- 第一选择：`Edit` 工具（自动处理 CRLF）。
-- 第二选择：`sed -i` 配合简单字符串（无行尾锚定）。
-- 第三选择：node 脚本用 `indexOf` 而非 `replace`。
-- 修改后立即 `grep -c` 验证替换结果，不依赖行号判断。
-
----
-
-### git stash 在 CRLF 环境中冲掉未 commit 修改
-
-**现象**：`git stash` 后 `git stash pop` 回来，发现 7 个核心源文件修改全部丢失，
-`git diff` 显示 0 行变动。
-
-**环境**：Windows CRLF 仓库。`git stash` 和 `git stash pop` 在 CRLF→LF→CRLF 转换过程中
-可能丢弃未 commit 的修改，原因是 autocrlf 设置与 stash 机制冲突。
-
-**根因**：
-- `git stash` 保存工作区修改时做了 CRLF 归一化，`stash pop` 恢复时做了反向归一化。
-- 如果文件在 stash 前后经历了 CRLF→LF 转换（通过 `Edit` 工具），diff 算法认为行尾变了
-  整文件冲突，选择丢弃 AI 的修改保持 HEAD 版本。
-- 5 个文件的合并冲突中 `git checkout --ours` 选错了版本，保留了旧代码。
-
-**修复**：重新应用全部修改：用 `Read` 逐个确认文件状态，对丢失的 7 个源文件重新执行修改。
-
-**预防**：
-- 大修改前先 `git add -A && git commit`，不用 `stash` 暂存。
-- stash 前确认 `git diff --stat` 有改动量的记录。
-- stash pop 后 `git diff --stat` 对比前后行数，发现丢失立即 `git stash pop` 恢复（不能丢）。
-- 冲突时用 `git checkout --ours` 后手动核对关键文件内容，不完全信任自动解决。
-
----
 
 ## 记忆系统
 
@@ -939,3 +895,23 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
 - 根因：`removeSystemRemindersByPrefix('[summary]')` splice 删除旧摘要 → 后续所有消息位移 → 缓存前缀变化
 - 解决：从管线移除，用归档层（ArchivalSummaryInjector）替代
 - 教训：缓存安全的方式是只追加尾部（appendSystemReminder），不删、不插入头部
+
+
+
+
+### Edit old_string not found — 一劳永逸修复方案（cache-stable-v1 验证）
+
+- **根因**：文件换行符混合（CRLF + LF）。Windows core.autocrlf=true + Write(LF) + Edit(CRLF映射) 交替 → 同一文件既有 
+ 又有 
+ → Edit精确字节匹配失败
+- **修复方案**：
+  1. 新建 : （强制全仓库 LF）
+  2. （归一化已有文件）
+  3. （关掉自动转换）
+  4. 效果：Read(LF) = 磁盘(LF) = Edit old_string(LF) → 彻底一致，不再报错
+- **skill**：已注册 ，遇到 Edit 报错时直接触发，自动执行诊断→归一化→重试→HEX诊断→兜底
+- **教训**：
+  - CRLF 问题的根因是 Windows Git 的 autocrlf 自作主张转换。 +  在项目层锁定，一劳永逸
+  - 新 clone 的仓库报 Edit 失败，第一条就是检查  和 
+  -  比  更容易被忘记，但影响同样大
+
