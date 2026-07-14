@@ -22,7 +22,7 @@ export class DecisionTraceInjector extends DynamicInjector {
   protected readonly injectionVariant = 'decision_trace';
 
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.AFTER_SYSTEM;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   override getResidualConfig(): ResidualConfig | undefined {

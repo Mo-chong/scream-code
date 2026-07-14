@@ -13,9 +13,8 @@ import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
-// ❌ 废弃: PersistentSummaryInjector（用 ToolResultRecoveryInjector 替代）
-// import { PersistentSummaryInjector } from './persistent-summary';
-import { ToolResultRecoveryInjector } from './tool-result-recovery';
+// ❌ 废弃: tool-result-recovery（依赖 Micro/ArchiveRecover，已废弃）
+// import { ToolResultRecoveryInjector } from './tool-result-recovery';
 import { DecisionTraceInjector } from './decision-trace';
 import { ArchivalSummaryInjector } from './archival-summary';
 import { InjectionRouter, type InjectContext } from './router';
@@ -46,10 +45,8 @@ export class InjectionManager {
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
       ['session-summary', new SessionSummaryInjector(agent)],
-      // [替换 2026-07-11] PersistentSummaryInjector → ToolResultRecoveryInjector
-      // PersistentSummaryInjector 基于 ILR 恢复，见 tool-result-recovery.ts
-      // 旧文件 persistent-summary.ts 保留不动，可回退
-      ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
+      // ❌ 废弃: tool-result-recovery（依赖 Micro/ArchiveRecover 已废弃，蒸馏塔归档层替代）
+      // ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
       ['decision-trace', new DecisionTraceInjector(agent)],
       // 归档层（蒸馏塔第三层）：上下文 >50K 时触发式结构化摘要，尾部 append
       ['archival-summary', new ArchivalSummaryInjector(agent)],

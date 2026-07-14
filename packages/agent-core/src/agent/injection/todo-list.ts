@@ -31,7 +31,7 @@ export class TodoListReminderInjector extends DynamicInjector {
   protected override readonly injectionVariant = TODO_LIST_REMINDER_VARIANT;
 
   override getPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   protected override getInjection(): string | undefined {

@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-11
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -11,9 +11,10 @@ updated: 2026-07-11
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
 > 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个：ToolResultRecovery / DecisionTrace / SessionSummary）。
-> 路径 B 已清零（Phase22，2026-07-08）。详见 ZHU/DECISIONS/方案-注入系统三路径统一设计.md。
-> 路径 C (GuardInjector) 已完成迁移（Phase33，2026-07-10）。
-> Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化 | 注意力信号闭环 | pushHistory 过滤
+> **演变**：路径 B 已清零（Phase22）。路径 C (GuardInjector) 已完成迁移（Phase33）。
+> Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱。
+> **v3 (2026-07-14)**：PersistentSummaryInjector→废弃（被 ArchivalSummaryInjector 归档层替代）。
+> TruncationTracker→Micro/ArchiveRecover 已废弃，自动恢复走归档层。
 
 ---
 
@@ -82,7 +83,8 @@ export interface VariantMeta {
 | ~~`quality_escalate`~~ 🗑️ | — | — | — | — | — | **已删除** Phase38j（由 qualityDegradeDetector 替代，走 InterceptionManager 统一管道） |
 | `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
 | `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
-| `persistent_summary` | — | — | — | — | — | ❌ 已替换为 tool_result_recovery |
+| `persistent_summary` | — | — | — | — | — | ❌ **已废弃 v3**（被 ArchivalSummaryInjector 归档层替代） |
+| `archival_summary` 🆕 | 0 | 0 | 0 | 0（自身频率控制） | — | 归档层结构化摘要，>50K触发，尾部append |
 | `tool_result_recovery` 🆕 | 0.6 | 0.85 | 0.15 | 3 | B | 被mask的关键tool结果恢复 |
 | `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
 | `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
@@ -509,9 +511,11 @@ agent.injection.getRouter().enable('error-audit');
 | `session-summary` | step===1 或 compaction 后 | 受残差调度 + 预算限制 |
 | `persistent-summary` | ILR > 0（有信息被 mask） | 受残差调度 + 预算限制 |
 
-### 截断数据自动恢复（TruncationTracker，Phase24.2）
+### 截断数据自动恢复（TruncationTracker，Phase24.2）— 🗑️ Micro/ArchiveRecover 已废弃
 
-**不在本系统内。** 走独立管线，不经过 Injector/Router。
+> **v3 废弃说明**：TruncationTracker 原依赖 Micro Compaction 存档 + ArchiveRecover 工具取回。
+> Micro Compaction 已废弃（ROI 负）、ArchiveRecover 已注销注册。
+> 截断数据自动恢复功能**不再由本管线承担**——由蒸馏塔保真层（错误不遮）+ 归档层（结构化摘要尾部 append）替代。
 
 定义于 `turn/index.ts` 的 `turnTruncation`（`TruncationTracker` 实例），截断数据显示恢复（`turn/index.ts:1094-1126`）。
 
@@ -524,22 +528,14 @@ TurnFlow.turnTruncation.hasUnrecovered() && currentStep > 1
   → 变体：truncation_recover_guard
 ```
 
-**数据流**：
-- Micro Compaction 砍工具输出前 → `contentArchive.archive(key, content)` 存档
-- `TruncationTracker` 记录 pending keys
-- 下一步自动恢复 → `recover(key)` 取回 → 注入 context
-- 自动恢复失败（数据不存在/TTL 过期）→ `turn/index.ts:1734-1741` afterStep 注入手动提醒：
-  ```
-  "有截断数据在 ContentArchive 中但自动恢复未找到对应内容，建议使用 archive_recover 手动获取。Pending keys: [...]"
-  ```
-- 退路：`archive-recover` 工具（`src/tools/builtin/context/archive-recover.ts`），AI 手动调（审计日志显示从未被调过——自动恢复已兜底）
+- **兜底提醒**：自动恢复失败时的消息提示（`turn/index.ts:1734-1741`）
+- **退路**：ArchiveRecover tool（已废弃 v3，注销注册）
+- **变体**：`truncation_recover_guard`（仍注册，不走残差管线，直接尾部 append）
+- **Position**：`AFTER_TOOL_CALL`（尾部）
 
-**跟注入系统的关系**：
-- 变体 `truncation_recover_guard` 注册于 `variant-registry.ts`（34 个之一）
-- 但**不经过本管线**——不走 `shouldInjectByResidual()`、不受残差控制
-- Position：`AFTER_TOOL_CALL`（尾部）
-
-**为什么不在本系统内**：这是"系统级数据持久性保障"——自动恢复或失败后提醒，跟"根据残差衰减决定是否注入的变体"语义不同。AI 不需要参与判断，系统自动执行或兜底提醒。
+**v3 变更**：Micro Compaction（存档源）和 ArchiveRecover（取回工具）已在 `cache-stable-v1` 中废弃。
+截断数据自动恢复的功能由蒸馏塔保真层（错误不遮）+ 归档层（结构化摘要尾部 append）替代。
+`truncation_recover_guard` 当前仅作为兜底——正常运行时不触发。
 
 ### 预留注入器（Phase22 规划）
 

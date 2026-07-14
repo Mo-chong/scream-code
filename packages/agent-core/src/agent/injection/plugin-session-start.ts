@@ -7,7 +7,7 @@ export class PluginSessionStartInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'plugin_session_start';
 
   override getPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   protected override async getInjection(): Promise<string | undefined> {

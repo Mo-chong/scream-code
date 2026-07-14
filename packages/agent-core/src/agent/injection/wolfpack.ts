@@ -28,7 +28,7 @@ export class WolfPackModeInjector extends DynamicInjector {
   private wasActive = false;
 
   override getPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   getInjection(): string | undefined {

@@ -7,7 +7,7 @@ export class WorkingSetInjector extends DynamicInjector {
   protected readonly injectionVariant = 'working-set';
 
   override getPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   protected getInjection(): string | undefined {
