@@ -156,6 +156,18 @@ function isErrorResolved(
   return false;
 }
 
+// ─── 内容类型检测（结构化内容保护） ───────────────────────
+
+function isStructuredOutput(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try { JSON.parse(trimmed); return true; } catch {}
+  }
+  if (/^```[\w-]*\n/m.test(trimmed)) return true;
+  if (/^\|.+\|.+\|\s*$/m.test(trimmed) && /^\|[-\s:]+\|/.test(trimmed)) return true;
+  return false;
+}
+
 // ─── 遮蔽文本 ──────────────────────────────────────────────
 
 function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
@@ -205,6 +217,9 @@ export function maskToolObservations(
       const truncated = text.slice(0, error.budget) + '\n[content truncated - use Read to re-read if needed]';
       return { ...msg, content: [{ type: 'text' as const, text: truncated }] };
     }
+
+    // 结构化内容保护：JSON/代码/表格 → 保留完整
+    if (isStructuredOutput(text)) return msg;
 
     // 压缩层：成功 → 一行摘要
     if (isSuccessCompressible(text)) {
