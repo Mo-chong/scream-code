@@ -14,7 +14,7 @@ export const FLAG_DEFINITIONS = [
   {
     id: 'micro-compaction',
     env: 'SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION',
-    default: true,
+    default: false,
     surface: 'both',
   },
   {
@@ -26,7 +26,7 @@ export const FLAG_DEFINITIONS = [
   {
     id: 'content-archive',
     env: 'SCREAM_CODE_EXPERIMENTAL_CONTENT_ARCHIVE',
-    default: true,
+    default: false,
     surface: 'both',
   },
   {
@@ -38,21 +38,21 @@ export const FLAG_DEFINITIONS = [
   {
     id: 'micro.batchSize',
     env: 'SCREAM_CODE_MICRO_BATCH_SIZE',
-    default: true,
+    default: false,
     numDefault: 8,
     surface: 'internal',
   },
   {
     id: 'contentArchive.ttlMs',
     env: 'SCREAM_CODE_CONTENT_ARCHIVE_TTL_MS',
-    default: true,
+    default: false,
     numDefault: 14400000,
     surface: 'internal',
   },
   {
     id: 'mask.keepLastN',
     env: 'SCREAM_CODE_MASK_KEEP_LAST_N',
-    default: true,
+    default: false,
     numDefault: 3,
     surface: 'internal',
   },
