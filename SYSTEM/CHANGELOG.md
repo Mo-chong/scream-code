@@ -804,3 +804,64 @@ updated: 2026-07-11
 - **`turn/index.ts`** — 删除 3 个 `this.inject()` bypass（detectSceneMemory / injectInterceptionSummary / injectCrossTurnFlags）
 - **`SYSTEM/interception.md`** — detector 列表 8→12
 - **`SYSTEM/attention-system.md`** — 决策表 3 条新规则
+
+---
+
+### cache-stable-v1 — 三层蒸馏塔 + 缓存正常初级版（2026-07-14）
+
+**基线**：`e2fbdec`（Phase38 完整构建产物）
+
+#### 废弃（3 个功能）
+
+| 功能 | 原因 | 操作 |
+|:----|:----|:----|
+| **ArchiveRecover Tool** | 5 天零调用，训练分布不支持 AI 主动取回 | 注销注册（`agent/tool/index.ts` 注释） |
+| **Incremental LLM Summary** | `removeSystemRemindersByPrefix` splice 断缓存 | 从 `turn/index.ts` 管线移除 |
+| **Micro Compaction** | 0.01% token 换 6.5-44% 缓存断裂 | `flags/registry.ts` `default: false` + deprecated |
+
+#### 新功能：三层蒸馏塔
+
+| 层 | 模块 | 机制 |
+|:--|:----|:----|
+| **保真层** | `mask-tool-observations.ts` | 错误按类型预算保留（编译300/Edit不限/测试500/权限300），已解决→自动降级 |
+| **结构化保护** | `mask-tool-observations.ts` | JSON/代码 fence/Markdown 表格 → 保留完整，不压缩 |
+| **压缩层** | `mask-tool-observations.ts` | 成功→一行（"Build: 0 errors"），无 emoji |
+| **归档层** | `injection/archival-summary.ts` | 上下文 >50K 触发，尾部 append，按文件/错误/搜索分组 |
+| **任务级聚合** | `archival-summary.ts` | 三信号加权（路径 50%+搜索 30%+reasoning 20%），置信度 >0.6 显示标题 |
+| **Edit 循环检测** | `detectors/edit-failure-loop.ts` | 同文件连续 Edit 2 次 → appendSystemReminder 警告 |
+
+#### 接口变更
+
+- `maskToolObservations(messages, keepLastN?, toolNameMap?)` — 签名不变，行为改为分级保留（向后兼容）
+- `DynamicInjector` 新增 `ArchivalSummaryInjector` 子类（注册于 `manager.ts`）
+
+#### 新文件
+
+| 文件 | 路径 |
+|:----|:----|
+| 归档层注入器 | `packages/agent-core/src/agent/injection/archival-summary.ts` |
+| Edit 循环检测 | `packages/agent-core/src/agent/interception/detectors/edit-failure-loop.ts` |
+
+#### 文档
+
+- `SYSTEM/context-management.md` — 重写为 v3 蒸馏塔架构（旧 micro/ArchiveRecover/incremental summary → 已废弃）
+- `SYSTEM/compaction.md` — 标记 Micro 为已废弃
+- `ZHU/DECISIONS/分析-从AI消费者视角看缓存保护与注意力优化方向.md` — 最终版(v3)
+- `ZHU/DECISIONS/INDEX.md` — 同步文件列表
+
+#### 外部调研
+
+- 10 篇学术论文（LLMLingua/MemGPT/ACON/SnapKV 等）
+- 10 个开源/工业方案（Letta/ContextCompressionEngine/Claude Code/Anthropic Context Engineering 等）
+- 核心确认：三层蒸馏塔方向与工业界最佳实践一致，Anthropic/Claude Code 使用相同策略
+- 完整报告：`ZHU/workspace/研-上下文蒸馏塔外部调研对比分析.md`
+
+#### 经验教训
+
+- **缓存断裂根因**：micro compaction 推进 cutoff 改变消息前缀 → 6.5% 断裂率；注入器（ActiveSummaryInjector+DecisionTraceInjector）将可变尾部放大到 44%
+- **ArchiveRecover 不成立**：训练分布不支持 AI 主动取回被遮内容（5 天零调用），根因不是"信息问题"是"激励问题"
+- **缓存安全边界**：不是"改什么文件"，而是"改 `_history` 还是 projected 消息" / "插入头部还是尾部"
+- **系统驱动 vs AI 驱动**：上下文管理不应依赖 AI 主动行为，应系统自动整理好送到 AI 面前
+- **尾部 append 安全**：尾部内容本就是每轮可变的，追加 system-reminder 在任何情况下不伤缓存前缀
+- **确定性优先**：全管线确定性规则，不依赖 LLM（ContextCompressionEngine 验证了 651ms/4257 条）
+- **任务聚合确保高精度**：置信度 >0.6 才显示，宁可少显示也不能误导 AI

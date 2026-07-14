@@ -1,11 +1,16 @@
 ---
-tags: [type/reference, domain/compaction, status/final]
-keywords: [压缩, compaction, 前缀稳定, 批次门控, 裁切]
-updated: 2026-07-08
+tags: [type/reference, domain/compaction, status/deprecated]
+keywords: [压缩, micro compaction, deprecated, 缓存断裂]
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
-# 上下文压缩系统 — Compaction
+# 上下文压缩系统 — Compaction（Micro 部分已废弃 v3）
+
+> ⚠️ **v3 废弃**：MicroCompaction 0.01% token 节省（日均 ~522K / 10M+）换 6.5-44% 缓存断裂率。
+> **替代方案**：保真层+压缩层（`maskToolObservations`）+ 归档层（`ArchivalSummaryInjector`）。
+> **配置状态**：`flags/registry.ts` `default: false` + `@deprecated` 标记。
+> **FullCompaction 仍然正常使用**。
 
 > **体系集成**：本文件是 Compaction 子系统的**深度技术参考**，包含三层优化（前缀稳定/Observation Masking/批次门控）、双阶段压缩（Micro/Full）、记忆提取等实现细节。
 > 

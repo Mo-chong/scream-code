@@ -1244,3 +1244,7 @@ class KnowledgeLookupTool implements StepTool
 
 > Phase37 (2026-07-11): stuck weight 30→0.6; guard-injector minStepGap 0→3; error-audit 删分析瘫痪支柱;
 > 新增 tool_result_recovery + decision_trace; persistent_summary 退役。
+
+| archival_summary | variant | weight:0, decay:0, thr:0, minStepGap:0（自身频率控制：<50K不触发/50K-100K每3轮/>100K每轮） | archival-summary.ts |
+| edit_failure_loop | detector | rootCause:'stuck_loop', priority:'P1_discipline', phase:'post_step' | detectors/edit-failure-loop.ts |
+> v3 (2026-07-14): 新增 archival_summary（归档层）+ edit_failure_loop（Edit循环检测）；persistent_summary 正式退役；archive_recover 注销注册

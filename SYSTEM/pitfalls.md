@@ -922,3 +922,20 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
    - **根因**：`bin/scream` shim 写的是 `node packages/agent-core/dist/index.mjs`（库入口）。这个文件加载完就静静退出，不认识 `--version`。正确的 CLI 入口是 `apps/scream-code/dist/main.mjs`（CLI bundle，package.json 中 `bin` 字段指定的）
    - **修复**：3 个 shim（bash/cmd/ps1）全改为指向 `apps/scream-code/dist/main.mjs`
    - **教训**：写 shim 前查 `package.json#bin` 字段——它告诉你真正的 CLI 入口在哪。别猜。另：排查无输出时第一时间重定向 stdout/stderr 到文件，而不是猜 PowerShell 策略、猜 CWD、猜代理
+
+
+## 缓存与上下文管理
+
+### MicroCompaction 0.01%% token 节省换 44%% 缓存新裂率
+- 根因：micro compaction 每 8 步推进 cutoff → [Cleared] 替换老 tool result → 消息前缀字节变化→ KV-cache 前缀命中失效
+- 解决：`flags/registry.ts` default:false，管线切换到蒸馏塔
+- 教训：不要认为"静态的消息编辑操作”不会影响 KV-cache。做这类改动前必须实测确认
+
+### ArchiveRecover 5 天零调用
+- 根因：训练分布不支持 AI 主动取回，问题不是"不知道"是"没有即时需求"
+- 解决：注销注册，通过蒸馏塔把信息送到 AI 面前
+
+### Incremental LLM Summary removeSystemRemindersByPrefix 断缓存
+- 根因：`removeSystemRemindersByPrefix('[summary]')` splice 删除旧摘要 → 后续所有消息位移 → 缓存前缀变化
+- 解决：从管线移除，用归档层（ArchivalSummaryInjector）替代
+- 教训：缓存安全的方式是只追加尾部（appendSystemReminder），不删、不插入头部

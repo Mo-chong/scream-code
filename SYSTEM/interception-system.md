@@ -121,3 +121,12 @@ const config = {
 ```
 
 > **完整策略说明见** [`attention-system.md`](attention-system.md)（决策表、AI 行为→系统响应映射、等价关系）。本文件仅记录 `interception/` 目录源码的实现细节。
+
+### edit_failure_loop —— Edit循环检测器（v3 新增）
+- rootCause: stuck_loop
+- priority: P1_discipline
+- confidence: 0.75
+- phase: post_step
+- 触发条件：同一文件在同一轮中连续 Edit 2次以上
+- 文件：interception/detectors/edit-failure-loop.ts
+- 注册：agent/index.ts

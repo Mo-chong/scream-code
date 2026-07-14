@@ -67,8 +67,8 @@
 | **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
 | **注入系统** 🆕 | `SYSTEM/injection-system.md` | 17个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
 | **Guard 规则引擎** | `SYSTEM/guard-engine.md` | 4 条规则全量编码（exit code 矛盾/无证据声称/无编辑声称改/记忆仅代码断言），14 测试覆盖 |
-| **上下文管理** 🆕 | `SYSTEM/context-management.md` | 四层架构：maskToolObservations + ContentArchive（LRU 2000 条/30min TTL，sharedStore 跨子 agent 共享）+ MicroCompaction（3 道关卡）+ FullCompaction（LLM 总结→记忆库）。ArchiveRecover MCP 工具已放开。Bash 降噪：ANSI 剥离 + 重复行去重 |
-| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | FullCompaction（summarizeOnce 封装 + CompactionReport）+ MicroCompaction（isUseless/isOversizedTruncatable 两阶段）+ render-messages.ts。前缀稳定化 + maskToolObservations + 批次门控 + pipeline counters |
+| **上下文管理** 🆕 | `SYSTEM/context-management.md` | **v3 三层蒸馏塔**：保真层(错误按预算保留) + 压缩层(成功→一行) + 归档层(>50K触发尾部append) + Edit循环检测。旧功能废弃：MicroCompaction(deprecated)/ArchiveRecover(注销)/incremental LLM summary(移除)。缓存安全基线 cache-stable-v1 ✅ |
+| **上下文压缩**（旧版） | `SYSTEM/compaction.md` | MicroCompaction→已废弃 v3（0.01% token换44%缓存断裂），FullCompaction正常使用 |
 | **AGENTS 分层设计** 🆕 | `SYSTEM/agents-hierarchy.md` | 三层加载链(findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget) + 四维评估框架 + 语言设计规范 + 55KB 提取方法论 |
 | **System Prompt 装配** | `SYSTEM/prompt-assembly.md` | Template → Render → Inject → API 全链路，模板变量/AGENTS合并/user-prefs双路 |
 | **拦截日志** | `SYSTEM/interception.md` | 环形缓冲区 + W 驱动采样 + 磁盘持久化（每回合刷盘） |
@@ -131,17 +131,15 @@
 | 问题 | 先查这个文件 |
 |------|-------------|
 | ContentArchive 扩容与加权淘汰 | `SYSTEM/API-REFERENCE.md` §18 |
-| 上下文压缩触发条件 | `SYSTEM/compaction.md` §两层压缩 / `SYSTEM/context-management.md` §三、四 |
-| MicroCompaction 做什么 | `SYSTEM/compaction.md` §MicroCompaction / `SYSTEM/context-management.md` §三 |
-| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction / `SYSTEM/context-management.md` §四 |
-| FullCompaction 557k 超限 | `SYSTEM/pitfalls.md` §FullCompaction 缺少 Observation Masking |
-| ContentArchive（保留缓冲区） | `SYSTEM/context-management.md` §二 |
-| ArchiveRecover MCP 工具 | `SYSTEM/context-management.md` §五 |
-| ArchiveRecoverTool 内容存档恢复 | `SYSTEM/API-REFERENCE.md` §20 |
-| Bash 降噪/ANSI 剥离/sanitize | `SYSTEM/context-management.md` §11.4 / `SYSTEM/API-REFERENCE.md` §21 |
-| 上下文管理四层架构总览 | `SYSTEM/context-management.md` §一、七、十一 |
-| content-archive / file-action-audit flag | `flags/registry.ts` |
-| FileActionAudit 文件审计日志 | `SYSTEM/API-REFERENCE.md` §19 |
+| 三层蒸馏塔总览 | `SYSTEM/context-management.md` §一、八 |
+| 保真层（错误按预算保留） | `SYSTEM/context-management.md` §二 / `utils/mask-tool-observations.ts` |
+| 压缩层（成功→一行） | `SYSTEM/context-management.md` §二 |
+| 归档层（触发式结构化摘要+任务聚合） | `SYSTEM/context-management.md` §二 / `injection/archival-summary.ts` |
+| Edit 循环检测 | `interception/detectors/edit-failure-loop.ts` |
+| FullCompaction 什么时候调 | `SYSTEM/compaction.md` §FullCompaction |
+| MicroCompaction（已废弃 v3） | `SYSTEM/compaction.md` §MicroCompaction（已废弃） |
+| ArchiveRecover（已废弃 v3） | `SYSTEM/context-management.md` §六（已废弃） |
+| 缓存审计日志 | `cache-audit-*.ndjson` / `agent/usage/audit-log.ts` |
 
 ### 注入系统
 | 问题 | 先查这个文件 |

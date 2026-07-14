@@ -1,72 +1,70 @@
 ---
 tags: [type/reference, domain/context, status/final]
-keywords: [上下文, context, 四层架构, compaction, 截断]
-updated: 2026-07-08
+keywords: [上下文, context, 三层蒸馏塔, maskToolObservations, 归档摘要, 缓存]
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 上下文管理（Context Management）
 
-> **参见：** [`compaction.md`](compaction.md)（压缩深度技术参考） | [`memory-store.md`](memory-store.md)（四层架构中的 Memory 层） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合生命周期）
+> **参见：** [`compaction.md`](compaction.md)（压缩深度技术参考） | [`injection-system.md`](injection-system.md)（注入器系统/归档层） | [`记忆系统.md`](记忆系统.md) | [`architecture-overview.md`](architecture-overview.md)（架构全景）
 >
-> 演化图：`ZHU/DECISIONS/INDEX.md` → **上下文管理子演化线①+②**（06-27~06-28 合并）
-> 最后更新：2026-06-29
+> **核心设计文档**：`ZHU/DECISIONS/分析-从AI消费者视角看缓存保护与注意力优化方向.md`（三层蒸馏塔最终版）
 
 ---
 
-## 功能实现状态总览
+## 功能实现状态总览（v3 — 上下文蒸馏塔）
 
-| # | 功能 | 模块 | 状态 |
-|---|------|------|------|
-| 1 | **ContentArchive** 纯内存 LRU 保留缓冲区 | `context/content-archive.ts` | ✅ **已实现** |
-| 2 | **MicroCompaction** 自动轻量压缩 | `compaction/micro.ts` | ✅ **已实现** |
-| 3 | **FullCompaction** LLM 全局总结压缩 | `compaction/full.ts` + `strategy.ts` | ✅ **已实现** |
-| 4 | **PrefixStabilizer** 系统提示前缀稳定化 | `context/prefix-stabilizer.ts` | ✅ **已实现** |
-| 5 | **ArchiveRecover** MCP 恢复工具 | `tools/builtin/context/archive-recover.ts` | ✅ **已实现** |
-| 6 | **FileActionAudit** 文件操作审计日志（独立模块，不融合） | `audit/file-action-audit.ts` | ✅ **已实现，独立运行** |
-| 7 | **FlushBuffer** 事件缓冲抽象基类 | `audit/file-action-audit.ts` | ✅ **已实现（FAA 基类）** |
-| 8 | **ObservationMasking** tool result 遮蔽（每轮/FullCompaction前） | `utils/mask-tool-observations.ts` | ✅ **已实现** |
-| 9 | **Headroom-lite** 保留 40% 上下文窗口 | — | ⏸️ **搁置**（非必要） |
-| 10 | **CacheStats** 管线计数器 | — | ⏸️ **搁置** |
-| 11 | **Predictor** 上下文增长预测器 | `compaction/predictor.ts` | ✅ **已实现** |
-| 12 | **缓存审计系统** 全链路缓存诊断 | `agent/usage/audit-log.ts` | ✅ **已实现（Phase29）** |
-| 13 | **FileActionAudit↔ContentArchive 融合** | — | 🗑️ **已废弃**（TURN buffering 替代） |
+| # | 功能 | 模块 | 状态 | 备注 |
+|---|------|------|:----:|:-----|
+| 1 | **ContentArchive** 纯内存 LRU 保留缓冲区 | `context/content-archive.ts` | ✅ | 仅对内调试，不做 AI 取回 |
+| 2 | **MicroCompaction** 自动轻量压缩 | `compaction/micro.ts` | 🗑️ **已废弃** | ROI 负（0.01% token 换 44% 缓存断裂） |
+| 3 | **FullCompaction** LLM 全局总结压缩 | `compaction/full.ts` + `strategy.ts` | ✅ | 大上下文压缩 |
+| 4 | **PrefixStabilizer** 前缀稳定化 | `context/prefix-stabilizer.ts` | ✅ | 缓存前缀稳定基础 |
+| 5 | **ArchiveRecover** 归档恢复工具 | `tools/builtin/context/archive-recover.ts` | 🗑️ **已废弃** | 5 天零调用，训练分布不支持 AI 主动取回 |
+| 6 | **FileActionAudit** 文件操作审计 | `audit/file-action-audit.ts` | ✅ | 独立运行 |
+| 7 | **FlushBuffer** 事件缓冲 | `audit/file-action-audit.ts` | ✅ | |
+| 8 | **ObservationMasking** tool result 遮蔽（蒸馏塔核心） | `utils/mask-tool-observations.ts` | ✅ **v3 重写** | 三层蒸馏：保真/压缩/遮蔽 |
+| 9 | **ArchivalSummaryInjector** 归档摘要注入器 | `injection/archival-summary.ts` | ✅ **新增** | 上下文 >50K 触发，尾部 append |
+| 10 | **EditFailureLoop Detector** 连续 Edit 检测 | `interception/detectors/edit-failure-loop.ts` | ✅ **新增** | 同文件连续 Edit → 警告 |
+| 11 | **增量 LLM 摘要** | `turn/index.ts`（已移除） | 🗑️ **已废弃** | splice 断缓存，被归档层替代 |
+| 12 | **Predictor** 上下文增长预测器 | `compaction/predictor.ts` | ✅ | |
+| 13 | **缓存审计系统** | `agent/usage/audit-log.ts` | ✅ | |
 
 ---
 
-## 一、架构总览
+## 一、架构总览（v3 — 三层蒸馏塔）
 
-上下文管理分三层，从轻到重：
+上下文管理从轻到重：
 
 ```
-运行阶段                         压缩触发                  日志事件
+运行阶段                         处理时机
 ─────────────────────────────────────────────────────────────────
-ContentArchive (纯内存 LRU) ──→ key 前缀 + toolCallId     无日志
-     │                          容量门卫 → 加权淘汰
-     │                          TTL 过期 → prune()
+ContentArchive (纯内存 LRU) ──→ 仅对内调试（不面向 AI）
      │
+
      ▼
-maskToolObservations (每轮)  ──→ 每轮对话前自动执行        无日志
-     │                          保留最近 keepLastN(3) 条
-     │                          旧 tool result → 占位符
-     │
+maskToolObservations (三层蒸馏)  ──→ 每轮 LLM 调用前
+     ├── (1) 保真层：错误按预算保留 ← 编译300/Edit不限/测试500/权限300
+     │   └── 已解决 → 自动降级 "Edit path: resolved ✓"
+     ├── (2) 压缩层：成功→一行摘要
+     ├── (3) 结构化保护：JSON/代码/表格 → 保留完整
+     └── 遮蔽：其余旧结果 → [masked:toolName]
+
      ▼
-MicroCompaction (自动/无感)  ──→ 3 道关卡触发               micro_compaction.apply
-     │                          (1) BATCH_SIZE(8) 检查频率
-     │                          (2) minContextUsageRatio(0.5) 容量门槛
-     │                          (3) keepRecentMessages(20) 保护圈
-     │                          截断 cutoff 前 tool.result
-     │                          Supersede 旧 Read
-     │                          Point B → ContentArchive 存档
-     │
+ArchivalSummaryInjector ──→ 上下文 >50K 时触发，尾部 append
+     ├── <50K → 不触发
+     ├── 50K-100K → 每 3 轮生成
+     ├── >100K → 每轮生成
+     └── 任务级聚合（高置信度时显示标题）
+
      ▼
-FullCompaction (自动检测)   ──→ triggerRatio(0.75)         full_compaction.begin/complete/cancel
-                                project() 选代表消息
-                                maskToolObservations(projected, 1)
-                                LLM 总结
-                                extractAndStoreMemos → 记忆库
-                                applyCompaction → 清上下文
+FullCompaction (全局压缩)   ──→ triggerRatio(0.75)
+                                LLM 总结 → 清上下文
                                 micro.reset()
+
+     ▼
+EditFailureLoop Detector ──→ 同文件连续 Edit 2 次以上时警告
 ```
 
 ---
@@ -220,72 +218,43 @@ context/index.ts L241-245:
 
 ---
 
-## 四、MicroCompaction（自动轻量压缩）
+## 四、MicroCompaction（自动轻量压缩）— 🗑️ 已废弃 v3
 
-> 别名：微压缩 / 自动压缩 / MicroCompaction
-> 对应代码：MicroCompaction (compaction/micro.ts)
+> **废弃理由**：0.01% token 节省（日均 ~522K / 10M+）换 6.5-44% 缓存断裂率，ROI 负到极致。
+> **替代**：保真层+压缩层（maskToolObservations）和归档层（ArchivalSummaryInjector）。
+> **状态**：`flags/registry.ts` `default: false` + `@deprecated` 标记。
 
 **文件**：`packages/agent-core/src/agent/compaction/micro.ts`
 
-### 4.1 DEFAULT_CONFIG 完整参数表
-
-**文件**：`packages/agent-core/src/agent/compaction/micro.ts` L30-38
+### 4.1 历史参数（保留参考）
 
 | 参数 | 默认值 | 含义 |
 |------|--------|------|
 | `keepRecentMessages` | 20 | 最后 20 条消息永不截断 |
-| `keepRecentTokens` | 40,000 | 尾部窗口 token 预算，超了往前推 cutoff |
-| `pruneMinReclaimTokens` | 20,000 | 最少回收 20k tokens 才推进 cutoff（防微调） |
-| `minContentTokens` | 100 | tool result < 100 tokens 不截断（小结果保留） |
+| `keepRecentTokens` | 40,000 | 尾部窗口 token 预算 |
+| `pruneMinReclaimTokens` | 20,000 | 最少回收 20k tokens 才推进 cutoff |
+| `minContentTokens` | 100 | tool result < 100 tokens 不截断 |
 | `minContextUsageRatio` | 0.5 | 上下文用到 50% 才触发 |
-| `truncatedMarker` | `[Old tool result content cleared]` | 截断占位符 |
-| `uselessMarker` | `[Uneventful result elided]` | 无用输出标记（Phase20 Bash降噪） |
 
-### 4.2 触发条件（3 道关卡）
+### 4.2 废弃原因详细分析
 
-**BATCH_SIZE 注释原文**（L122-123）：
-```typescript
-/** Minimum steps between detect() evaluations to reduce cache-break churn. */
-const BATCH_SIZE = flags.asNumber('micro.batchSize');
-```
+**根因**：micro compaction 每 8 步推进一次 cutoff 线，cutoff 位置变化 = 消息前缀变化（被清的工具结果 → `[Cleared]`）。DeepSeek KV-cache 以消息前缀寻址，前缀变化迫使服务端丢弃缓存重建。
 
-逐行分析：
+| 指标 | Micro 开启 | Micro 关闭 | 说明 |
+|:----|:---------:|:---------:|:-----|
+| 缓存断裂率（无注入器） | 6.5% | 0% | 单 micro 的净影响 |
+| 缓存断裂率（有注入器） | 44% | 6.5% | micro + 注入器放大器效应 |
+| Token 日均节省 | ~522K | 0 | 占总 token 量 < 0.01% |
 
-```typescript
-// micro.ts L120-123
-this.stepsSinceLastDetect++;
-if (!force && this.stepsSinceLastDetect < BATCH_SIZE) return;
-```
+### 4.3 替代方案
 
-| 关卡 | 参数 | 当前值 | 作用 |
-|------|------|--------|------|
-| ① 检查频率 | BATCH_SIZE | 8（每8轮检查一次） | 防止 cutoff 线频繁变化破坏 KV-cache |
-| ② 容量门槛 | minContextUsageRatio | 0.5（上下文用到50%才触发） | 容量不够时不做无谓截断 |
-| ③ 保护圈 | keepRecentMessages | 20（保留最近20条消息） | 保护最近对话内容不被截断 |
-| ④ 收益保障 | pruneMinReclaimTokens | 20,000（至少回收20k tokens） | 收益不够时不推进 cutoff 线 |
+Micro 的三个目标都有更好的替代：
 
-- `BATCH_SIZE = flags.asNumber('micro.batchSize')` (L83)
-- 环境变量 `SCREAM_CODE_MICRO_BATCH_SIZE` 可覆盖
-
-### 4.2 压缩动作
-
-`compact(messages)` (L145-186)：
-
-1. **`findSupersededPaths()`** (L34-71) — 找出 cutoff 之前被后续 Read 覆盖的旧 Read
-2. **截断旧 tool.result** (L151-184) — cutoff 前的 tool 消息，内容替换为 `[Old tool result content cleared]`
-3. **Supersede** (L173-175) — 被后续 Read 覆盖的旧 Read 标记为 `[Superseded by a newer read of ...]`
-4. **存档原始内容** (L157-171, Point B) — 截断前调用 `contentArchive?.archive()` 保留原始内容
-
-### 4.3 集成点
-
-与 `context/index.ts` 的集成 (L235)：
-```typescript
-this.agent.microCompaction.detect();
-```
-
-与 `FullCompaction` 的协作：
-- Full 完成后调用 `micro.reset()` 重置 cutoff (L98-101)
-- `estimateSavings()` (L193-196) 给 Full 决策用
+| Micro 目标 | 蒸馏塔替代 | 优势 |
+|:----------|:----------|:-----|
+| 省 token（清旧结果） | 压缩层（成功→一行） | 不破坏缓存 |
+| 减少 AI 看旧信息 | 归档层（结构化摘要） | 不失忆 |
+| 清旧 Read 结果 | 保真层（错误保留）+ 压缩层 | 按类型分级，更智能 |
 
 ---
 
@@ -345,42 +314,30 @@ shouldCompact(usedSize: number): boolean {
 
 ---
 
-## 六、ArchiveRecover MCP 工具
+## 六、ArchiveRecover MCP 工具 — 🗑️ 已废弃 v3
 
-> 别名：归档恢复 / 缓冲区恢复 / ArchiveRecover
-> 对应代码：ArchiveRecover (tools/builtin/context/archive-recover.ts)
+> **废弃理由**：5 天审计数据零调用。训练分布不支持 AI 主动取回被遮内容——AI 在当前步骤没有"缺信息"的痛感。
+> **替代**：三层蒸馏塔——保真层（错误不遮）+ 压缩层（成功一句话）+ 归档层（结构化尾部摘要）。信息直接送到 AI 面前，不需 AI 自己取。
+> **状态**：代码保留在仓库中（标记 deprecated），已从工具注册表注销。
 
-**文件**：`packages/agent-core/src/tools/builtin/context/archive-recover.ts`
+### 6.1 原始注册点（已移除）
 
-### 6.1 注册
-
-`packages/agent-core/src/agent/tool/index.ts` L639：
 ```typescript
-this.agent.type === 'main' && this.agent.contentArchive && new b.ArchiveRecoverTool(this.agent.contentArchive)
+// agent/tool/index.ts — 已注释（cache-stable-v1）
+// this.agent.contentArchive && new b.ArchiveRecoverTool(this.agent.contentArchive),
 ```
 
-### 6.2 调用方式
+### 6.2 保留的 code（不删）
+
+ContentArchive 保留作为内部调试存储，不再面向 AI。
+
+### 6.3 历史调用方式（废弃，仅供阅读旧日志参考）
 
 ```typescript
 ArchiveRecoverInput {
   key?: string;   // 精确匹配 key，返回单条内容
-  query?: string; // 模糊搜 key（key.includes(query)），返回所有匹配
+  query?: string; // 模糊搜 key，返回所有匹配
 }
-```
-
-不传参数 → 返回所有可用 key（仅索引）
-传 key → 返回单条内容
-传 query → 返回 key.includes(query) 所有匹配
-
-### 6.3 数据流
-
-```
-模型调用 ArchiveRecover(key=...)
-  → ArchiveRecoverTool.resolveExecution() (L29-53)
-    → contentArchive.recover(key)
-      → TTL 检查 → 返回内容 / undefined
-      → priority += 0.1
-      → 刷新 lastAccessedAt
 ```
 
 ---
@@ -406,112 +363,64 @@ ArchiveRecoverInput {
 
 ---
 
-## 八、完整数据流
+## 八、完整数据流（v3 — 上下文蒸馏塔管线）
 
 ```
 用户消息
-  │
+  ｜
   ├─→ context/index.ts: 拼接消息到上下文
   │     ├─ collapseDuplicateLines() 去重
   │     ├─ MAX_TOOL_RESULT_TOKENS(8000) 长度截断
-  │     ├─ Point A: archive('tool:' + callId) → ContentArchive (每步)
+  │     ├─ Point A: archive('tool:' + callId) → ContentArchive（内部调试）
   │     └─ 写入 context.history
   │
-  ├─→ prefix-stabilizer.ts: stabilizePrefix() (每步)
+  ├─→ prefix-stabilizer.ts: stabilizePrefix()
   │     └─ 系统提示前缀固化 → 提高 KV-cache 前缀命中率
   │
-  ├─→ micro.ts: detect()
-  │     ├─ stepsSinceLastDetect < BATCH_SIZE → 跳过
-  │     └─ ≥ BATCH_SIZE + usage > 50% + reclaim > 20k → compact()
-  │           ├─ findSupersededPaths() 找出重叠 Read
-  │           ├─ Point B: archive('micro:' + callId) 截断前存档
-  │           ├─ 替换旧 tool.result 为 truncatedMarker
-  │           └─ Supersede 旧 Read
+  ├─→ maskToolObservations (三层蒸馏塔核心) [每步 LLM 调用前]
+  │     ├── 保真层：错误按类型预算（编译300/Edit不限/测试500/权限300）
+  │     │   └── 已解决 → 降级 "Edit path: resolved ✓"
+  │     ├── 结构化保护：JSON/代码/表格 → 保留完整
+  │     ├── 压缩层：成功→一行（"Build: 0 errors"）
+  │     └── 遮蔽：其余 → [masked:toolName]
   │
-  ├─→ maskToolObservations(messages, 3) (每步, buildMessages 后)
-  │     └─ 旧 tool result → 占位符 (API 调用前最终压缩)
+  ├─→ ArchivalSummaryInjector (归档层) [条件触发]
+  │     ├── <50K → 不触发（保真层+压缩层足够）
+  │     ├── 50K-100K → 每 3 轮生成结构化摘要
+  │     ├── >100K → 每轮生成
+  │     ├── 任务级聚合（高置信度 >0.6 时显示标题）
+  │     └── 尾部 append（appendSystemReminder，不碰缓存前缀）
   │
-  ├─→ Predictor: 预测上下文增长趋势 (每步)
-  │     └─ 提前预警 FullCompaction 触发
+  ├─→ EditFailureLoop Detector [每步]
+  │     └── 同文件连续 Edit 2 次 → appendSystemReminder 警告
+  │
+  ├─→ Predictor: 预测上下文增长趋势（每步）
+  │     └── 提前预警 FullCompaction 触发
   │
   ├─→ strategy.ts: shouldCompact()
   │     ├─ triggerRatio(0.75) → FullCompaction
   │     └─ reservedContext(50000) → FullCompaction
   │
-  ├─→ full.ts: compact()
+  ├─→ full.ts: compact()（全局压缩，满 75% 触发）
   │     ├─ LLM 总结上下文
   │     ├─ extractAndStoreMemos → 写记忆库
-  │     ├─ 清上下文
-	  ﹙     └─ micro.reset() 重置 cutoff
-	  ﹙
-	  ├─→ turn/index.ts: 增量 LLM 摘要（beforeStep，上轮 ≥ 8 步时）
-	  ﹙     ├─ lastTurnStepCount = 上轮步数
-	  ﹙     ├─ lastTurnStepCount >= 8 → summarizeWithLLM()
-	  ﹙     ├─ appendSystemReminder → 尾部（不破坏缓存前缀）
-	  ﹙     └─ 每次注入前 removeSystemRemindersByPrefix('[summary]')
-	  ﹙
-  │     ├─ Point A: 每步 tool result 写入后存档
-  │     ├─ Point B: Micro 截断前存档
-  │     ├─ 模型通过 ArchiveRecover 召回
-  │     ├─ TTL 30min → prune() — 基于创建时间
-  │     └─ recover() 升权 + 刷新 lastAccessedAt
+  │     └─ 清上下文
   │
-  ├─→ audit-log.ts: 缓存审计 (每步)
-  │     ├─ hitRatio / totalInput / totalOutput
-  │     ├─ injected[].{variant,success,position} / modelChanged / apiKeySwitched
-  │     ├─ turnStepCount / pendingRecoverKeys / summaryTriggered
-  │     └─ 写入 cache-audit-YYYY-MM-DD.ndjson
-  │
-  ├─→ pushHistory(): 工具结果入库（context/index.ts L498-508）
-  │     ├─ injection / system_trigger → continue（不进 replayBuilder）
-  │     └─ 正常工具结果 → replayBuilder.push() → TUI 重渲染
-  │
-  └─→ records: 所有事件写 wire.jsonl
+  └─→ audit-log.ts: 缓存审计 [每步]
+        ├─ hitRatio / totalInput / totalOutput
+        ├─ injected[].{variant,success,position} / modelChanged / apiKeySwitched
+        └─ 写入 cache-audit-YYYY-MM-DD.ndjson
 ```
 
-**关键时间维度**：
+**关键时间维度（v3）：
 
-| 机制 | 触发频次 | 说明 |
-|------|----------|------|
-| maskToolObservations | **每步** | API 调用前无条件遮蔽 |
-| Point A 存档 | **每步** | tool result 写入 history 后即时存档 |
-| MicroCompaction detect | **每 BATCH_SIZE=8 步** | 8 步才检查一次，上下文>50%才砍 |
-| Predictor | **每步** | 持续预测上下文增长 |
-| ContentArchive TTL | **被动**（recover 时检查） | 基于创建时间，不主动轮询 |
-| 增量 LLM 摘要 | **每轮结束、上轮≥8步** | beforeStep 注入尾部，不破坏缓存前缀 |
-| FullCompaction | **容量 > 75%** | 全局压缩 |
-
-```
-用户消息
-  │
-  ├─→ context/index.ts: 拼接消息到上下文
-  │
-  ├─→ micro.ts: detect()
-  │     ├─ stepsSinceLastDetect < BATCH_SIZE → 跳过
-  │     └─ ≥ BATCH_SIZE → compact()
-  │           ├─ findSupersededPaths() 找出重叠 Read
-  │           ├─ Point B: archive() 截断前存档
-  │           ├─ 替换旧 tool.result 为标记
-  │           └─ Supersede 旧 Read
-  │
-  ├─→ strategy.ts: shouldCompact()
-  │     ├─ triggerRatio(0.75) → FullCompaction
-  │     └─ reservedContext(50000) → FullCompaction
-  │
-  ├─→ full.ts: compact()
-  │     ├─ LLM 总结上下文
-  │     ├─ 写记忆
-  │     ├─ 清上下文
-  │     └─ micro.reset() 重置 cutoff
-  │
-  ├─→ content-archive.ts: archive/recover
-  │     ├─ Micro 截断前存档
-  │     ├─ 模型通过 ArchiveRecover 召回
-  │     └─ TTL 30min → prune()
-  │
-  └─→ records: 所有事件写 wire.jsonl
-```
-
+| 机制 | 触发频次 | 缓存影响 |
+|------|----------|:--------:|
+| PrefixStabilizer | **每步** | ✅ 稳定前缀 |
+| maskToolObservations | **每步** | ✅ 操作 projected 副本，不改 _history |
+| ArchivalSummaryInjector | **条件触发（>50K）** | ✅ 尾部 append，不碰前缀 |
+| EditFailureLoop Detector | **检测到循环时** | ✅ 尾部 append |
+| FullCompaction | **容量 > 75%** | ✅ 全局压缩后重建 |
 ---
 
 ## 九、偏差链（DeviationChain）

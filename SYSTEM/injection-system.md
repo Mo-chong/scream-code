@@ -722,3 +722,12 @@ B 级注入器（error-audit、working-set、goal、todo-list、wolfpack、plugi
 | **Phase B': Context Facts 尾部聚合** | 7 个注入器 + `context/index.ts` | ✅ 完成 (2026-07-10) |
 | **Phase M: 内容哈希测量埋点** | `injector.ts` / `router.ts` | ✅ 完成 (2026-07-10) |
 | **Phase33: FAA Regeneration** | `error-audit-injector.ts` → 2-Pillar 趋势检测 | ✅ 完成 (2026-07-10) |
+
+### archival_summary —— 归档层注入器（v3 新增）
+- variant: archival_summary
+- 类: ArchivalSummaryInjector extends DynamicInjector
+- 位置: AFTER_TOOL_CALL（尾部 append，不碰缓存前缀）
+- 触发: <50K 不触发 / 50K-100K 每3轮 / >100K 每轮
+- 注册: injection/manager.ts
+- 文件: injection/archival-summary.ts
+- 取代: ActiveSummaryInjector (23行表格 head insert) → 废弃
