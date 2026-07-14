@@ -27,6 +27,9 @@ export class ActiveSummaryInjector extends DynamicInjector {
     return InsertPosition.AFTER_TOOL_CALL;
   }
 
+  /** 是否已写入 history 聚合存档（只写一次，不重复覆盖） */
+  private _archiveHistoryWritten = false;
+
   override getResidualConfig(): ResidualConfig | undefined {
     return { weight: 0.3, decayPerStep: 0.9, threshold: 0.2, minStepGap: 5 };
   }
@@ -35,6 +38,21 @@ export class ActiveSummaryInjector extends DynamicInjector {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const pending: RecoverableRecord[] = this.agent.context?._pendingRecoveries;
     if (!pending || pending.length === 0) return undefined;
+
+    // ── Item 6: 滑出 Tier1 的记录归档到 ContentArchive ──
+    // 每条记录自身的 tool:callId 已在 context/index.ts:457 存档。
+    // history 聚合条目只写入一次（第一次滑出时），不重复覆盖。
+    const archive = (this.agent as any).contentArchive as
+      | { archive: (key: string, content: string, opts?: { source: string }) => void }
+      | undefined;
+    if (archive?.archive && pending.length > 3 && !this._archiveHistoryWritten) {
+      const slidOut = pending.slice(0, pending.length - 3);
+      const historyContent = slidOut
+        .map(r => `${r.isError ? '[ERROR]' : '[OK]'} ${r.toolName}: ${r.summary} (key: ${r.key})`)
+        .join('\n');
+      archive.archive('history', historyContent, { source: 'masked-index' });
+      this._archiveHistoryWritten = true;
+    }
 
     // 使用 L2 formatMaskedIndexBlock 生成结构化的 <masked-tools> 索引区块
     const indexBlock = formatMaskedIndexBlock(pending);

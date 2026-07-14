@@ -16,6 +16,8 @@ export interface RecoverableRecord {
   toolName: string;
   /** Short summary (≤200 chars) of the tool result content. */
   summary: string;
+  /** Whether the tool execution resulted in an error. */
+  isError: boolean;
   /**
    * Priority hint for injection ordering.
    * 0=user-interaction, 1=file-ops, 2=api-calls, 3=search, 4=status.
@@ -174,18 +176,24 @@ export function formatMaskedIndexBlock(records: RecoverableRecord[]): string {
   lines.push('--|------|------|------|---------');
 
   for (const rec of tier1) {
+    // 步骤号：从 1 开始计
+    const step = records.indexOf(rec) + 1;
     const truncatedSummary = rec.summary.length > 40
       ? rec.summary.slice(0, 39) + '…'
       : rec.summary;
+    const status = rec.isError ? 'ERROR' : 'OK';
     lines.push(
-      `${rec.priority} | ${rec.toolName} | OK | ${truncatedSummary} | ${rec.key}`,
+      `${step} | ${rec.toolName} | ${status} | ${truncatedSummary} | ${rec.key}`,
     );
   }
 
   // ── Tier2: 旧条目压缩统计 ──
   if (tier2Count > 0) {
+    const older = records.slice(0, -TIER1_MAX);
+    const errCount = older.filter(r => r.isError).length;
+    const okCount = tier2Count - errCount;
     lines.push('');
-    lines.push(`前 ${tier2Count} 个工具结果已归档。archive_recover("history") 可取回全部。`);
+    lines.push(`前 ${tier2Count} 个工具结果已归档（${errCount} ERROR, ${okCount} OK）。archive_recover("history") 可取回全部。`);
   }
 
   // 统一取回指引（恒定文本）
@@ -278,6 +286,7 @@ export function maskToolObservations(
         toolCallId: msg.toolCallId,
         toolName: toolName || 'unknown',
         summary,
+        isError: /^error:?/i.test(summary.trim()),
         priority: inferPriority(toolName),
       });
     }
