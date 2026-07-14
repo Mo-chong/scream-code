@@ -5,7 +5,7 @@ const __filename = __cjsShimFileURLToPath(import.meta.url);
 const __dirname = __cjsShimDirname(__filename);
 import "./suppress-sqlite-warning-C2VB0doZ.mjs";
 //#region src/main.ts
-const BUILD_TIME = 1783859884779;
+const BUILD_TIME = 1784011691570;
 const ageHours = (Date.now() - BUILD_TIME) / 36e5;
 process.stderr.write(`[scream] bundle 构建时间: ${(/* @__PURE__ */ new Date(BUILD_TIME)).toLocaleString("zh-CN", {
 	timeZone: "Asia/Shanghai",
