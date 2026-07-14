@@ -59,7 +59,7 @@ export function collectInjectorFacts(
       injectionCount,
       lastStep,
       residualScore: Math.round(residualScore * 100) / 100,
-      level: JSON.parse(JSON.stringify(meta)).level ?? 'D',
+      level: JSON.parse(JSON.stringify(meta)).level ?? 'normal',
     };
   }
 

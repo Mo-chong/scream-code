@@ -23,8 +23,8 @@ export interface InjectBudgetConfig {
 }
 
 export const DEFAULT_BUDGET_CONFIG: InjectBudgetConfig = {
-  perTurnMax: { S: 800, A: 600, B: 500, C: 300, D: 200 },
-  perStepMax: { S: 250, A: 200, B: 150, C: 100, D: 80 },
+  perTurnMax: { critical: 800, normal: 500, debug: 200 },
+  perStepMax: { critical: 250, normal: 150, debug: 80 },
 };
 
 export class InjectBudget {

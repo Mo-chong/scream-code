@@ -115,7 +115,7 @@ export class IntentInjector extends DynamicInjector {
 
     const parts = ctx.intentPhase.split(':');
     const variant: string = parts[0] ?? '';
-    const level = (parts[1] || 'B') as 'B' | 'A';
+    const level = (parts[1] || 'normal') as 'normal' | 'critical';
 
     const guidance = INTENT_GUIDANCE[variant as keyof typeof INTENT_GUIDANCE];
     if (!guidance) return undefined;

@@ -44,7 +44,7 @@ interface IndexStats {
       total: number;
       delivered: number;
       skipped: number;
-      byLevel: Partial<Record<'S' | 'A' | 'B' | 'C' | 'D', number>>;
+      byLevel: Partial<Record<WeightLevel, number>>;
     }>;
   };
 }

@@ -236,7 +236,7 @@ export function observeBehavior(
 
 /** C/D 级属于低权重，B 级为结构化，A/S 级为高权重。 */
 function isLowLevel(level: WeightLevel): boolean {
-  return level === 'C' || level === 'D';
+  return level === 'normal' || level === 'debug';
 }
 
 /** 从两个候选结果中选出更严重的一个。 */

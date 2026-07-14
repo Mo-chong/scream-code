@@ -5,7 +5,7 @@
  * 不依赖任何检测器或注入器。谁都能读。
  */
 
-export type WeightLevel = 'S' | 'A' | 'B' | 'C' | 'D';
+export type WeightLevel = 'critical' | 'normal' | 'debug';
 
 export interface VariantRecord {
   /** 变体名称，如 'step_after_edit', 'prepare_verify' */
@@ -228,11 +228,9 @@ export function detectWeightLevel(text: string): WeightLevel {
  */
 export function escalateLevel(level: WeightLevel): WeightLevel {
   switch (level) {
-    case 'C': return 'B';
-    case 'D': return 'B';
-    case 'B': return 'A';
-    case 'A': return 'S';
-    case 'S': return 'S';
+    case 'debug': return 'normal';
+    case 'normal': return 'critical';
+    case 'critical': return 'critical';
   }
 }
 
@@ -318,8 +316,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.40, minStepGap: 4, interceptThreshold: 3 },
 
   // ── Phase 12: 反馈信号闭环 variants ────────────────────────────
-  // Rule 1 (阻断) 不走 inject() 路径，无需 VARIANT_META
-  guard_feedback_rule_1:      { weight: 0.9, decayPerStep: 0.90, threshold: 0.30, minStepGap: 3, interceptThreshold: 2 },
+  // Note: guard_feedback_rule_1 不走 inject() 路径，在 Phase12 实施时已清理
   guard_feedback_rule_2:      { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   guard_feedback_rule_3:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 2 },
   feedback_positive:          { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
@@ -336,8 +333,8 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   // ── Phase 21: 痛点感知（stuck 检测 → 文档导航）────────────────
   system_ref_stuck:          { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 5 },
 
-  // ── Phase 24: 截断数据强制恢复 ────────────────────────────────
-  truncation_recover_guard:  { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 1 },
+  // ── Phase 24: 截断数据强制恢复 — 🗑️ 已废弃 v3（蒸馏塔归档层替代）
+  // truncation_recover_guard 依赖 Micro Compaction 已废弃，不再产生需要恢复的截断数据
 
   // ── Phase 26: 错误审计（FAA）──────────────────────────────────
   'error-audit':              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 2 },
@@ -421,11 +418,9 @@ export function _getVariantLevel(variant: string): WeightLevel {
  * S 级永不冷却；A/B/C 逐级收紧；D 级不注入。
  */
 export const QUOTA_TABLE: Record<string, QuotaConfig> = {
-  S: { maxPerConversation: 999, cooldownSteps: 0, windowSteps: 1000 },
-  A: { maxPerConversation: 30, cooldownSteps: 2, windowSteps: 100 },
-  B: { maxPerConversation: 18, cooldownSteps: 3, windowSteps: 80 },
-  C: { maxPerConversation: 10, cooldownSteps: 5, windowSteps: 50 },
-  D: { maxPerConversation: 0, cooldownSteps: 0, windowSteps: 0 },
+  critical: { maxPerConversation: 30, cooldownSteps: 2, windowSteps: 100 },
+  normal: { maxPerConversation: 10, cooldownSteps: 5, windowSteps: 50 },
+  debug: { maxPerConversation: 0, cooldownSteps: 0, windowSteps: 0 },
 };
 
 // ── Phase22.3: 变体调度器 ─────────────────────────────────────────

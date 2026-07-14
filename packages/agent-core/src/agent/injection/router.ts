@@ -70,7 +70,7 @@ export interface ConfabulationDetectionResult {
  */
 export interface QualityDeviationSignal {
   readonly signal: string;
-  readonly severity: 'C' | 'B' | 'A' | 'S';
+  readonly severity: 'normal' | 'critical';
   readonly message: string;
 }
 

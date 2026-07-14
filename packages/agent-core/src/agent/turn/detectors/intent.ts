@@ -266,7 +266,7 @@ export function detectIntent(input: readonly ContentPart[]): IntentDetection | n
       hasHighMarkers || keywordCount >= rule.highConfidenceThreshold;
 
     const confidence: IntentConfidence = isHigh ? 'high' : 'low';
-    const weightLevel: WeightLevel = isHigh ? 'A' : 'B';
+    const weightLevel: WeightLevel = isHigh ? 'critical' : 'normal';
     const guidanceText = isHigh
       ? (A_LEVEL_GUIDANCE[rule.variant] ?? '')
       : (B_LEVEL_GUIDANCE[rule.variant] ?? '');
