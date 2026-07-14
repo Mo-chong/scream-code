@@ -92,9 +92,23 @@ function getContentText(msg: Message): string {
  * Short results (< 100 chars) are not masked elsewhere, so this only
  * runs on longer content that genuinely needs summarisation.
  */
+/** 缓存已生成的摘要（key=toolCallId）——跨步不重算 */
+const _summaryCache = new Map<string, string>();
+
 function generateSummary(msg: Message): string {
   const raw = getContentText(msg);
-  if (raw.length <= 400) return raw.replace(/\s+/g, ' ').trim();
+  // 短内容直接返回原文（不足100字符不会被遮蔽）
+  if (raw.length <= 100) return raw.replace(/\s+/g, ' ').trim();
+  // 已遮蔽：直接复用已有文本（不变 = 缓存稳定）
+  if (raw.includes('archive_recover(')) {
+    return raw.replace(/\s+/g, ' ').trim();
+  }
+
+  // 摘要缓存：相同原始内容输出相同摘要
+  if (msg.toolCallId) {
+    const cached = _summaryCache.get(msg.toolCallId);
+    if (cached) return cached;
+  }
 
   // Split into lines for semantic analysis (preserve original line structure)
   const lines = raw.split('\n');
@@ -131,13 +145,16 @@ function generateSummary(msg: Message): string {
   if (selectedLines.length > 0) {
     let summary = selectedLines.join(' | ').trim();
     if (summary.length > 400) summary = summary.slice(0, 397) + '...';
+    if (msg.toolCallId) _summaryCache.set(msg.toolCallId, summary);
     return summary;
   }
 
-  // Fallback: first non-empty lines (current behavior)
+  // Fallback: first non-empty lines
   const firstLines = lines.map(l => l.trim()).filter(Boolean).slice(0, 5);
   const fallback = firstLines.join(' ').replace(/\s+/g, ' ').trim();
-  return fallback.length <= 400 ? fallback : fallback.slice(0, 397) + '...';
+  const result = fallback.length <= 400 ? fallback : fallback.slice(0, 397) + '...';
+  if (msg.toolCallId) _summaryCache.set(msg.toolCallId, result);
+  return result;
 }
 
 /**
