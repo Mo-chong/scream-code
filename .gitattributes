@@ -1,0 +1,12 @@
+# 强制 LF 换行符（所有文件）
+# 根因：Windows core.autocrlf=true 导致 CRLF↔LF 混合，
+# Read/Write/Edit 三工具间换行符不匹配 → old_string not found
+* text=auto eol=lf
+
+# 二进制文件不转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
