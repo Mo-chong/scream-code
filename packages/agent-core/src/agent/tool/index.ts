@@ -15,6 +15,7 @@ import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import { LspTool } from '../../tools/builtin/lsp-tool';
+import { CodeGraphTool } from '../../tools/builtin/codegraph';
 import { LspRegistry } from '../../lsp/registry';
 import type { GoalGraderFn } from '../../tools/builtin/goal/update-goal';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
@@ -688,6 +689,7 @@ export class ToolManager {
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         this.lspRegistry && new LspTool(this.agent, workspace, this.lspRegistry),
+        new CodeGraphTool(this.agent),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
