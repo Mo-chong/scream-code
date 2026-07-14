@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-11
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -205,7 +205,7 @@ class InjectionManager {
 `turn/index.ts` → `interception.execute(ctx)` → `InterceptionMessage[]` → `manager.ts inject()` Step 0 预批准优先占 budget 槽。
 拦截消息跳过残差（递进替代），共享 `maxInjectionsPerStep` 上限。
 
-### 3.2 17 个注入器（全部注册，统一管线 Phase37）
+### 3.2 15 个注入器（全部注册，统一管线 Phase37）
 <!-- ref: injectors -->
 
 | 注入器 | 源文件 | 变体数 | 位置 | 触发条件 | 注册 | 备注 |
@@ -215,22 +215,23 @@ class InjectionManager {
 | IntentGuidanceInjector | `agent/injection/intent-injector.ts` | 1 | AFTER_SYSTEM | 意图检测命中 | ✅ | |
 | PlanModeInjector | `agent/injection/plan-mode.ts` | 1 | AFTER_SYSTEM | 计划模式 step | ✅ | |
 | PermissionModeInjector | `agent/injection/permission-mode.ts` | 1 | AFTER_SYSTEM | 权限模式切换 | ✅ | |
-| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | MID_CONTEXT | working set 变化 | ✅ | |
-| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | MID_CONTEXT | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** | ✅ | Phase37 |
+| WorkingSetInjector | `agent/injection/working-set.ts` | 1 | AFTER_TOOL_CALL | working set 变化 | ✅ | |
+| ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | AFTER_TOOL_CALL | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** | ✅ | Phase37 |
 | SessionSummaryInjector 🆕 | `agent/injection/session-summary.ts` | 1 | MID_CONTEXT | step=1 / compaction 后 | ✅ | Phase33 |
 | ToolResultRecoveryInjector 🆕 | `agent/injection/tool-result-recovery.ts` | 1 | MID_CONTEXT | ILR>0.3 + hasHighValue | ✅ | Phase37 |
-| GoalInjector | `agent/injection/goal.ts` | 1 | MID_CONTEXT | 计划模式 step | ✅ | |
-| TodoListInjector | `agent/injection/todo-list.ts` | 1 | MID_CONTEXT | todo 列表变化 | ✅ | |
-| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | MID_CONTEXT | WolfPack 调用 | ✅ | |
-| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | MID_CONTEXT | 插件会话启动 | ✅ | |
+| GoalInjector | `agent/injection/goal.ts` | 1 | AFTER_TOOL_CALL | 计划模式 step | ✅ | |
+| TodoListInjector | `agent/injection/todo-list.ts` | 1 | AFTER_TOOL_CALL | todo 列表变化 | ✅ | |
+| WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | AFTER_TOOL_CALL | WolfPack 调用 | ✅ | |
+| PluginSessionStartInjector | `agent/injection/plugin-session-start.ts` | 1 | AFTER_TOOL_CALL | 插件会话启动 | ✅ | |
 | AntiConfabulationInjector | ~~`agent/injection/anti_confabulation.ts`~~ **已删除** Phase38c | — | — | — | ❌ | — |
 | QualityInjector | ~~`agent/injection/quality.ts`~~ 🗑️ **已删除** Phase38j | — | — | — | ❌ | 由 qualityDegradeDetector 替代 |
 | StuckInjector | `agent/injection/stuck.ts` | 1 | AFTER_TOOL_CALL | 同文件编辑≥3步（weight 30→0.6） | ✅ | Phase37 |
 | GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ | Phase37 |
+| ArchivalSummaryInjector 🆕 | `agent/injection/archival-summary.ts` | 1 | AFTER_TOOL_CALL | <50K不触发/50K-100K每3轮/>100K每轮 | ✅ | v3 蒸馏塔归档层 |
 
 > 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
 > `MemoryRulesInjector` 不存在（早期概念文件）。
-> Phase37（07-11）：新增 DecisionTraceInjector + ToolResultRecoveryInjector + SessionSummaryInjector。stuck weight=30→0.6。guard-injector minStepGap=0→3。error-audit 删除分析瘫痪支柱。
+> Phase37（07-11）：新增 DecisionTraceInjector + SessionSummaryInjector。stuck weight=30→0.6。guard-injector minStepGap=0→3。error-audit 删除分析瘫痪支柱。
 > **完整变体列表见** `variant-registry.ts:288-345`。
 
 ### 3.3 VariantScheduler（残差调度，取代旧 QUOTA_TABLE）
@@ -711,7 +712,7 @@ interface AuditLogEntry {
   archiveMiss: number      // ContentArchive 未命中计数（Phase33）
   turnStepCount: number    // 上轮用户消息步数（评估摘要阈值）
   pendingRecoverKeys: number  // 自动恢复失败的截断 key 数
-  summaryTriggered: boolean   // 本轮是否触发了增量 LLM 摘要
+  summaryTriggered: boolean   // ❌ 已废弃 v3（incremental LLM summary 已移除）
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics

@@ -1,6 +1,6 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
-keywords: [知识库, knowledge, chunk, 向量检索, FTS5]
+keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD]
 updated: 2026-07-14
 ---
 
