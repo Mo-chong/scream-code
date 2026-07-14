@@ -134,18 +134,32 @@ function buildArchivalSummary(history: readonly ContextMessage[]): string | unde
   // 文件操作（Read/Write/Edit）
   const fileOps = (byType.get('Read') ?? []).concat(byType.get('Write') ?? []).concat(byType.get('Edit') ?? []);
   if (fileOps.length > 0) {
-    // 去重同文件
-    const seen = new Set<string>();
-    const unique: ToolOp[] = [];
+    // 按路径分组，同路径合并 reasoning
+    const byPath = new Map<string, ToolOp[]>();
     for (const op of fileOps) {
       const key = op.path ?? op.desc ?? '';
-      if (!seen.has(key)) { seen.add(key); unique.push(op); }
+      const list = byPath.get(key) ?? [];
+      list.push(op);
+      byPath.set(key, list);
     }
-    lines.push(`📂 文件操作（共 ${unique.length} 条）`);
-    for (const op of unique.slice(-5)) { // 最多 5 条
-      lines.push(`  · ${op.desc ?? op.type}`);
+    lines.push(`📂 文件操作（共 ${fileOps.length} 条）`);
+    const entries = Array.from(byPath.entries());
+    for (const [key, ops] of entries.slice(-5)) {
+      if (ops.length === 1) {
+        lines.push(`  · ${ops[0].desc ?? ops[0].type}`);
+      } else {
+        // 同一文件多次操作 → 合并 reasoning 后缀
+        const reasons: string[] = [];
+        for (const op of ops) {
+          const parts = (op.desc ?? '').split(' — ');
+          if (parts.length > 1) reasons.push(parts.slice(1).join(' — ').trim());
+          else reasons.push(parts[0]?.trim() ?? op.type);
+        }
+        const uniqueReasons = [...new Set(reasons)];
+        lines.push(`  · ${key} (${ops.length}次)${uniqueReasons.length > 1 ? ' — ' + uniqueReasons.filter(Boolean).join(' / ') : ''}`);
+      }
     }
-    if (unique.length > 5) lines.push(`  · ... 及另外 ${unique.length - 5} 条`);
+    if (entries.length > 5) lines.push(`  · ... 及另外 ${entries.length - 5} 组`);
   }
 
   // Bash 操作

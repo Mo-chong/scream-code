@@ -91,6 +91,71 @@ function getCompressedText(text: string, toolName?: string): string {
   return `[${toolName ?? 'tool'}] ${truncated}`;
 }
 
+// ─── 错误已解决检测（自动降级） ──────────────────────────
+
+/** 从工具结果文本中提取文件路径 */
+function extractPath(text: string): string | null {
+  // Edit/Bash 输出通常包含文件路径
+  const m = text.match(/(?:in|at|for)\s+['\"]?([^'\"\s]+\.[a-zA-Z]{1,4})['\"]?/i);
+  return m?.[1] ?? null;
+}
+
+/** 从 tool_use block 提取路径（参数中的 path） */
+function extractPathFromToolCall(toolCallId: string | undefined, messages: readonly Message[], msgIndex: number): string | null {
+  if (!toolCallId) return null;
+  // 找到对应的 assistant message
+  for (let j = msgIndex - 1; j >= 0; j--) {
+    const prev = messages[j];
+    if (!prev || prev.role !== 'assistant') continue;
+    for (const tc of prev.toolCalls ?? []) {
+      if (tc.id !== toolCallId && tc.name !== 'Edit') continue;
+      try {
+        const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+        if (args?.path) return args.path;
+      } catch { /* ignore */ }
+    }
+  }
+  return null;
+}
+
+/**
+ * 检查在 error index 之后是否有同一路径的成功操作
+ */
+function isErrorResolved(
+  currentText: string,
+  currentToolCallId: string | undefined,
+  currentIndex: number,
+  messages: readonly Message[],
+): boolean {
+  const path = extractPath(currentText) ?? extractPathFromToolCall(currentToolCallId, messages, currentIndex);
+  if (!path) return false;
+
+  // 向后扫描，找同一路径的成功操作
+  for (let j = currentIndex + 1; j < messages.length; j++) {
+    const later = messages[j];
+    if (!later) continue;
+
+    if (later.role === 'tool') {
+      const laterText = getContentText(later.content);
+      // 同一路径的 Edit 成功 → 已解决
+      if (laterText.includes(path) && /applied \d+ edit/i.test(laterText)) return true;
+      // 同一路径的 Write 成功 → 已解决
+      if (laterText.includes(path) && /written successfully|file written|created/i.test(laterText.toLowerCase())) return true;
+    }
+
+    if (later.role === 'assistant') {
+      for (const tc of later.toolCalls ?? []) {
+        if (tc.name !== 'Edit') continue;
+        try {
+          const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+          if (args?.path && args.path === path) return true; // 后续有同路径的 Edit 调用 = 已尝试过
+        } catch { /* ignore */ }
+      }
+    }
+  }
+  return false;
+}
+
 // ─── 遮蔽文本 ──────────────────────────────────────────────
 
 function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
@@ -127,9 +192,15 @@ export function maskToolObservations(
     const text = getContentText(msg.content);
     const toolName = msg.toolCallId ? toolNameMap?.get(msg.toolCallId) : undefined;
 
-    // 保真层：错误 → 保留完整（单条预算上限）
+    // 保真层：错误 → 保留完整（单条预算上限，已解决降级）
     const error = classifyError(text);
     if (error) {
+      // 已解决 → 降级为简短说明
+      if (isErrorResolved(text, msg.toolCallId, i, messages)) {
+        const path = extractPath(text) ?? extractPathFromToolCall(msg.toolCallId, messages, i) ?? '';
+        const resolved = path ? `Edit ${path}: resolved ✓` : 'Error: resolved ✓';
+        return { ...msg, content: [{ type: 'text' as const, text: resolved }] };
+      }
       if (text.length <= error.budget) return msg;
       const truncated = text.slice(0, error.budget) + '\n[content truncated - use Read to re-read if needed]';
       return { ...msg, content: [{ type: 'text' as const, text: truncated }] };
