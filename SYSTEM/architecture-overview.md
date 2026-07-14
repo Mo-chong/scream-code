@@ -76,7 +76,7 @@ L4 独立层 —— 不参与执行，独立参考
 |:-----------|---------|
 | turn-control.md | `turn/` (+`detectors/` +`injection/`) |
 | attention-system.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
-| injection-system.md | `injection/` (17 injector + router + manager) |
+| injection-system.md | `injection/` (15 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
 | interception-system.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
 
@@ -411,7 +411,7 @@ Layer 0: 位置策略 InsertPosition (position-strategy.ts) ← 注入锚点
 Cross:   VariantScheduler (variant-registry.ts)   ← 30 变体残差调度
 ```
 
-### 6.2 17 个注册注入器（Phase37）
+### 6.2 15 个注册注入器（Phase37 后）
 
 | 文件 | 变体 | 等级 | 触发 |
 |------|------|------|------|

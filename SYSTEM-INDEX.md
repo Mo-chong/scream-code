@@ -159,8 +159,8 @@
 | 问题 | 先查这个文件 |
 |------|-------------|
 | 收敛门怎么拦住 AI | `SYSTEM/turn-control.md` §收敛门 |
-| Guard 什么时候触发 | `SYSTEM/guard-engine.md` §触发时机 |
-| AI 编造怎么检测 | `SYSTEM/guard-engine.md` §反事实检测 |
+| Guard 什么时候触发 | `SYSTEM/interception-system.md` §permission-enforcer |
+| AI 编造怎么检测 | `SYSTEM/interception-system.md` §confabulation |
 | 回合生命周期 | `SYSTEM/turn-control.md` §生命周期 |
 | 代码探索用什么工具优先 | `SYSTEM/turn-control.md` §工具优先级 |
 | LSP 报 spawn EINVAL / npx fallback 失败 | `SYSTEM/pitfalls.md` §LSP 故障 #2：bundle 环境双重 fallback 失败 |
@@ -234,7 +234,7 @@
     agent/index.ts                → Agent 类（所有子系统的容器）
     agent/turn/index.ts           → 回合控制核心（1737 行）
     agent/context/index.ts        → appendUserMessage / appendSystemReminder
-    agent/injection/manager.ts    → InjectionManager（17 个 DynamicInjector，Phase22 路径 B 清零）
+    agent/injection/manager.ts    → InjectionManager（15 个 DynamicInjector，Phase22 路径 B 清零）
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
     agent/injection/session-summary.ts → SessionSummaryInjector（Phase36 新增，接管 session memory 注入）

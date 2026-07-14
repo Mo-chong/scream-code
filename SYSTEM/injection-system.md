@@ -10,7 +10,7 @@ updated: 2026-07-14
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 17 个 DynamicInjector（原 14 个 + Phase37 新增 3 个：ToolResultRecovery / DecisionTrace / SessionSummary）。
+> 15 个 DynamicInjector（Phase37 新增 DecisionTrace / SessionSummary，ToolResultRecovery 未注册）。
 > **演变**：路径 B 已清零（Phase22）。路径 C (GuardInjector) 已完成迁移（Phase33）。
 > Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱。
 > **v3 (2026-07-14)**：PersistentSummaryInjector→废弃（被 ArchivalSummaryInjector 归档层替代）。
@@ -360,7 +360,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 ## 6. 注入器清单 (Injector Catalog)
 
 > 别名：注入器列表 / DynamicInjector 清单
-> 对应代码：DynamicInjector (injection/injector.ts) + 17 个子类（17 注册）
+> 对应代码：DynamicInjector (injection/injector.ts) + 15 个注册子类
 
 ### 当前注入器
 
@@ -384,7 +384,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
 | `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | **Phase38j 精简为仅 R1 阻断**（R2/R3/R4 由 permissionEnforcerDetector 接管） | ✅ |
 
-> **注册总数**: 17 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
+> **注册总数**: 15 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
 > Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
@@ -420,7 +420,7 @@ export abstract class DynamicInjector {
 - 注册状态: ✅ 已注册 `manager.ts` → `router.register('guard-feedback', guardInjector)`
 - 位置等级: C（AFTER_TOOL_CALL）
 - 数据流:
-  1. `turn/index.ts:runGuardDetection()` 调用 `guard-engine.ts:checkGuard()`
+  1. `turn/index.ts:runGuardDetection()` 调用 `guard-injector.ts:checkGuard()`
   2. Rule 2/3/4 观察结果 → `guardInjector.setGuardData(rule, feedback)`
   3. 下一轮 `injection.inject()` → `router.dispatch()` → `GuardInjector.getInjection()`
   4. 走统一残差/配额/去重管线
@@ -472,7 +472,7 @@ const injectors: [string, DynamicInjector][] = [
 injectors.forEach(([id, inj]) => this.router.register(id, inj));
 ```
 
-> **注册总数**: 17 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
+> **注册总数**: 15 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、SessionSummaryInjector（会话摘要）。ToolResultRecoveryInjector 未注册（死代码保留但无注册）。
 > Phase37 调整：stuck weight=30→0.6 + context.history 替代 stuckContext | guard-injector minStepGap=0→3 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化。
 
 ### 运行时停用/启用
