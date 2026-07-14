@@ -241,7 +241,7 @@ export class InjectionRouter {
       // ④ [优化C] 缓存感知路由：缓存命中率过低时跳过低优先级变体
       const level = _getVariantLevel(id);
       const predictedHR = context.predictedHitRatio;
-      if (predictedHR !== undefined && predictedHR < 0.3 && (level === 'B' || level === 'C')) {
+      if (predictedHR !== undefined && predictedHR < 0.3 && (level === 'normal')) {
         continue;
       }
 

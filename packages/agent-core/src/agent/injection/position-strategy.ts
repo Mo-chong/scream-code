@@ -27,11 +27,9 @@ export enum InsertPosition {
  * 注意力权重等级 → InsertPosition 映射
  */
 export const POSITION_ATTENTION: Record<string, InsertPosition> = {
-  S: InsertPosition.AFTER_SYSTEM,
-  A: InsertPosition.AFTER_SYSTEM,
-  B: InsertPosition.MID_CONTEXT,
-  C: InsertPosition.AFTER_TOOL_CALL,
-  D: InsertPosition.AFTER_TOOL_CALL,
+  critical: InsertPosition.AFTER_SYSTEM,
+  normal: InsertPosition.AFTER_TOOL_CALL,
+  debug: InsertPosition.AFTER_TOOL_CALL,
 };
 
 /**
@@ -70,8 +68,7 @@ export class AttentionPositionStrategy implements PositionStrategy {
   private warnedVariants = new Set<string>();
 
   decidePosition(variant: string, level: WeightLevel): InsertPosition {
-    if (level === 'S') return InsertPosition.AFTER_SYSTEM;
-    if (level === 'A') return InsertPosition.AFTER_SYSTEM;
+    if (level === 'critical') return InsertPosition.AFTER_SYSTEM;
 
     // feedback_/post_ 类变体是步级实时反馈，末尾追加
     if (

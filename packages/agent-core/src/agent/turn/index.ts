@@ -1739,7 +1739,7 @@ export class TurnFlow {
 
     // 注册到 VariantRegistry（残差系统依赖）
     if (variant) {
-      this.variantRegistry.record(variant, 'D' as any, this.currentStep);
+      this.variantRegistry.record(variant, 'debug' as any, this.currentStep);
     }
 
     // Phase22.3: 记录到 VariantScheduler
@@ -1992,7 +1992,7 @@ export class TurnFlow {
       this.variantRegistry.updateLevel(qualityIssue.targetVariant, qualityIssue.suggestedLevel, this.currentStep);
 
       // 🆕 Phase15: S→S 追踪 — 升级前已是 S 级 = S→S 升级
-      if (currentLevel === 'S') {
+      if (currentLevel === 'critical') {
         this.trackBehaviorViolation(qualityIssue.targetVariant);
       }
     }
@@ -2156,7 +2156,7 @@ export class TurnFlow {
     if (typeof meta !== 'object' || !('variant' in meta)) return defaultLevel;
     const record = this.variantRegistry.get(meta.variant as string);
     if (record?.behaviorObserved === true) {
-      return 'C';
+      return 'normal';
     }
     return defaultLevel;
   }

@@ -404,13 +404,12 @@ export interface QuotaConfig {
 /** 根据 weight 确定 weight level */
 export function _getVariantLevel(variant: string): WeightLevel {
   const meta = VARIANT_META[variant];
-  if (!meta) return 'D';
+  if (!meta) return 'normal';
   const w = meta.weight;
-  if (w >= 0.95) return 'S';
-  if (w >= 0.75) return 'A';
-  if (w >= 0.55) return 'B';
-  if (w >= 0.35) return 'C';
-  return 'D';
+  if (w >= 0.75) return 'critical';
+  if (w >= 0.35) return 'normal';
+  return 'debug';
+  
 }
 
 /**

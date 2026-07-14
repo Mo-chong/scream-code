@@ -229,7 +229,7 @@ export class EventSnapshotBuffer {
           if (event.kind === 'injection_delivered') detail.delivered++;
           else if (event.kind === 'injection_skipped') detail.skipped++;
           if (event.level) {
-            const lv = event.level as 'S' | 'A' | 'B' | 'C' | 'D';
+            const lv = event.level as WeightLevel;
             detail.byLevel[lv] = (detail.byLevel[lv] ?? 0) + 1;
           }
         }
