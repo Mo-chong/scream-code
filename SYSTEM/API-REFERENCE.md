@@ -1215,7 +1215,7 @@ class KnowledgeLookupTool implements StepTool
 
 ## 10. All Registered Variants
 
-参考源文件：`variant-registry.ts:288-345`。34 个变体（VARIANT_META 注册）。
+参考源文件：`variant-registry.ts:288-345`。30 个变体（VARIANT_META 注册）。
 
 | 键 | 类型 | 参数说明 | 源文件 |
 |----|------|---------|--------|
