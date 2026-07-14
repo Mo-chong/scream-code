@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/architecture, status/final]
-keywords: [架构, architecture, 全景, 子系统, 数据流]
-updated: 2026-07-08
+keywords: [架构, architecture, 全景, 子系统, 数据流, 蒸馏塔, v3]
+updated: 2026-07-14
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -55,7 +55,7 @@ L1 核心执行层 —— 同一执行引擎的 4 个视图
   turn-control.md
   └─ 回合调度：runOneTurn → afterStep → convergenceGate
      ├── attention-system.md — 注意力决策（残差→预算→位置→检测）
-     ├── injection-system.md — 内容执行（17 injector + router + manager）
+     ├── injection-system.md — 内容执行（15 injector + router + manager）
      └── context-management.md — 数据管理（存档·审计·截断恢复）
 
 L2 支撑层 —— 被 L1 调用的功能模块
@@ -103,10 +103,10 @@ L4 独立层 —— 不参与执行，独立参考
 
 AI Agent 本质上是一个「注入运行时」：每步对话必须向 prompt 追加 system-reminder（注入），以控制 AI 行为。Scream Code 的注入系统提供了：
 
-- **Plugin 化 DynamicInjector** — 11 个注入器，每个文件负责一种行为控制
+- **Plugin 化 DynamicInjector** — 15 个注入器，每个文件负责一种行为控制
 - **残差注意力门控** — 公式 `R = W × D^Δs`，避免同一变体重注入、控制注入频率
 - **三层调度** — InjectionRouter → VariantScheduler（频率） → PositionStrategy（位置）
-- **三路径架构**（A/B/C，A 已受控，B/C 待迁移）
+- **三路径架构**（A→C 全部已统一为 A）
 
 详见 SYSTEM/injection-system.md。
 
@@ -132,10 +132,13 @@ runOneTurn()
 
 **文件**: `packages/agent-core/src/agent/context/` | **系统说明书**: `SYSTEM/context-management.md`
 
-三层上下文管理：
+三层上下文管理（v3 — 蒸馏塔架构）：
 1. **ContentArchive** — LRU 2000 条 / 4h+24h 双窗口 TTL，存完整的 tool result + 文件缓存一致性校验（statSync）
-2. **MicroCompaction** — 轻量压缩，移除旧 tool result + 遮蔽 tool observations
-3. **FullCompaction** — LLM 总结压缩，75% headroom 触发，含 `_maxTries` 安全门控
+2. **maskToolObservations** — 每步 LLM 调用前执行：保真层（错误按预算保留，已解决降级）+ 压缩层（成功→一行）+ 结构化保护（JSON/代码/表格保留完整）+ 遮蔽
+3. **ArchivalSummaryInjector** — 上下文 >50K 触发归档摘要（尾部 append，任务聚合）
+4. **FullCompaction** — LLM 总结压缩，75% headroom 触发，含 `_maxTries` 安全门控
+
+> 🗑️ **MicroCompaction 已废弃**（0.01% token 换 44% 缓存断裂）。**Incremental LLM Summary 已废弃**（splice 断缓存），用归档层替代。
 
 ### 2.4 Guard 引擎 (Guard Engine)
 
@@ -156,7 +159,7 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 
 **文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-system.md`
 
-- **34 个变体**，分级 S/A/B/C/D（S 最高优先级）
+- **30 个变体**，分级 critical/normal/debug（critical=最高优先级，不跳过）
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
 - **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
 - **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
@@ -208,16 +211,16 @@ packages/agent-core/src/
 │   │   ├── variation-tracker.ts← 变体状态机
 │   │   ├── guard-engine.ts    ← 4 条 AI 行为 Guard + 反事实检测
 │   │   ├── variant-registry.ts← VariantScheduler（残差公式 R=W×D^Δs）
-│   │   ├── truncation-tracker.ts ← 截断自动恢复 + 步级竞争保护
+│   │   ├── truncation-tracker.ts ← ❌ 已废弃 v3（依赖 Micro/ArchiveRecover 皆废弃）
 │   │   └── injectors/         ← 传统注入器（stuck.ts 等）
 │   ├── context/
 │   │   ├── index.ts           ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
 │   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条 / 4h+24h 双窗口 TTL）
-│   │   ├── masking.ts         ← maskToolObservations（遮蔽旧 tool result，keepLastN 可配，短输出保护）
+│   │   ├── mask-tool-observations.ts ← maskToolObservations（三层蒸馏塔核心：保真/压缩/结构化/遮蔽）
 │   │   ├── stabilize.ts       ← stabilizePrefix（KV-cache 命中率提升）
 │   │   └── compaction/
-│   │       ├── micro.ts       ← MicroCompaction
-│   │       ├── summary.ts     ← 增量 LLM 摘要（上轮 ≥ 8 步时触发）
+│   │       ├── micro.ts       ← ❌ 已废弃 v3（0.01% token 换 44% 缓存断裂）
+│   │       ├── summary.ts     ← ❌ 已废弃 v3（splice 断缓存，归档层替代）
 │   │       └── full.ts        ← FullCompaction（含 _maxTries 安全门控）
 │   ├── injection/
 │   │   ├── manager.ts         ← InjectionManager（DynamicInjector 注册表）
@@ -225,7 +228,8 @@ packages/agent-core/src/
 │   │   ├── router.ts          ← InjectionRouter + InjectContext 类型
 │   │   ├── position-strategy.ts ← system-reminder 位置策略
 │   │   ├── guard-injector.ts  ← GuardInjector（✅ 注册，统一管线完成）
-│   │   └── 11 个注入器文件（goal/user-prefs/plan-mode/memory-rules/...）
+│   │   ├── archival-summary.ts 🆕 ← 蒸馏塔归档层（>50K触发，尾部append，任务聚合）
+│   │   └── 15 个注入器文件（goal/user-prefs/plan-mode/...）
 │   ├── detection/
 │   │   ├── scene-memory.ts    ← SceneMemoryDetector
 │   │   ├── code-ref.ts        ← CodeRefDetector
@@ -306,7 +310,7 @@ tools/builtin/
   → turn/index.ts runOneTurn()
       → perTurnSetup()         重置状态 + 清空注入预算
       → appendUserMessage()    追加用户消息到 context
-      → 增量 LLM 摘要注入（上轮 ≥ 8 步时 → appendSystemReminder → 尾部）
+      → ❌ 增量 LLM 摘要注入（已废弃 v3）（上轮 ≥ 8 步时 → appendSystemReminder → 尾部）
       → 意图注入 (Phase 4)
 
       → applyUserPromptHook()  用户消息 hook
@@ -404,7 +408,7 @@ Layer 3: TurnFlow 集成 (turn/index.ts inject())   ← 注入前预处理
 Layer 2: 编排层 (router.ts + manager.ts)          ← 路由/调度/预算
 Layer 1: 抽象基类 DynamicInjector (injector.ts)   ← 接口契约
 Layer 0: 位置策略 InsertPosition (position-strategy.ts) ← 注入锚点
-Cross:   VariantScheduler (variant-registry.ts)   ← 34 变体残差调度
+Cross:   VariantScheduler (variant-registry.ts)   ← 30 变体残差调度
 ```
 
 ### 6.2 17 个注册注入器（Phase37）
