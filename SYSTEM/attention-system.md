@@ -120,10 +120,11 @@ Header 标签：`[拦截/CRIT]` / `[拦截/NORM]` / `[拦截/DBG]`
 - 调一次 codegraph 永久放行（可作弊）
 
 新机制（2026-07-14）：
-- `explorationDebt`：探索 Read/Grep +1（同主题 +0.5），codegraph -2，非探索衰减 -0.1
+- `explorationDebt`：探索 Read/Grep +1（同主题 +0.5）。**codegraph 不直接减债**（防作弊），非探索每 3 步 -1
 - 阈值：debt ≥ carryover+4 提醒 / +7 警告 / +10 阻断
 - 语义重复检测：`extractExplorationKeywords()` 提取 Grep/Read 路径关键词，近 4 步快照比对
-- 跨回合 carryover = min(3, floor(debt))，防重启洗白
+- 跨回合 carryover = min(2, floor(debt))，防重启洗白
+- 文档/配置（.md/.json/.yaml/.toml/.txt）Read 不计数
 - 详见 `turn-control.md`
 
 ---

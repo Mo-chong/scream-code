@@ -120,12 +120,14 @@ runOneTurn()
 ```
 
 **代码级提醒**（turn/index.ts:983-991）：
-- 探索债务模型。每次探索 Read/Grep +1（同主题 +0.5），调 codegraph -2，5 步无探索自然 -0.1
+- 探索债务模型。每次探索 Read/Grep +1（同主题 +0.5）。**codegraph 不直接减债**（防 dummy call 作弊）
+- 非探索型工具每 3 步自动 -1（自然衰减替代 codegraph 减债）
+- 文档/配置（.md/.json/.yaml/.toml/.txt）Read 不计入探索
 - debt ≥ carryover+4 → 注入 `step_code_explore` 提醒（含 maxFiles 三档引导）
 - debt ≥ carryover+7 → 警告并接近阻断
 - debt ≥ carryover+10 → 阻断（syntheticResult）
 - codegraph MCP 不可用时（断开等），从不触发提醒
-- 跨回合 carryover = min(3, floor(debt))，防止重启洗白
+- 跨回合 carryover = min(2, floor(debt))，防止重启洗白
 - 提醒只是建议，不阻断执行
 
 **收敛门条件更新**（line 1787）：
