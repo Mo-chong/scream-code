@@ -1239,13 +1239,19 @@ class KnowledgeLookupTool implements StepTool
 | truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
 | error-audit | variant | weight:0.5, decay:0.85, thr:0.2, minStepGap:2（Phase37: 分析瘫痪已砍） | error-audit-injector.ts |
 | session_summary | variant | weight:0.8, decay:0.88, thr:0.3 | session-summary.ts |
-| tool_result_recovery 🆕 | variant | weight:0.6, decay:0.85, thr:0.15, minStepGap:3 + hasHighValue过滤 | tool-result-recovery.ts |
+| tool_result_recovery 🆕 | variant | ✅ 文件存在但**未注册**（死代码）。weight:0.6, decay:0.85, thr:0.15, minStepGap:3 | tool-result-recovery.ts |
 | decision_trace 🆕 | variant | weight:0.5, decay:0.85, thr:0.15, minStepGap:5 | decision-trace.ts |
-| persistent_summary | variant | ❌ 已替换为 tool_result_recovery | persistent-summary.ts（保留可回退） |
+| persistent_summary | variant | ❌ 已退役（tool_result_recovery 死代码未注册，无替代） | persistent-summary.ts |
 
 > Phase37 (2026-07-11): stuck weight 30→0.6; guard-injector minStepGap 0→3; error-audit 删分析瘫痪支柱;
-> 新增 tool_result_recovery + decision_trace; persistent_summary 退役。
+> 新增 decision_trace; tool_result_recovery 文件保留但未注册；persistent_summary 退役。
 
 | archival_summary | variant | weight:0, decay:0, thr:0, minStepGap:0（自身频率控制：<50K不触发/50K-100K每3轮/>100K每轮） | archival-summary.ts |
 | edit_failure_loop | detector | rootCause:'stuck_loop', priority:'critical', phase:'post_step' | detectors/edit-failure-loop.ts |
 > v3 (2026-07-14): 新增 archival_summary（归档层）+ edit_failure_loop（Edit循环检测）；persistent_summary 正式退役；archive_recover 注销注册
+
+### 内建工具（tools/builtin）
+
+| 工具 | 来源 | 描述 | 接口 |
+|------|------|------|------|
+| codegraph 🆕 | tools/builtin/codegraph.ts | 通过 codegraph 索引查函数内部调用链(callees)、重构影响(impact)、关联测试(affected)。比 explore 更精准省 token。 | command: "callees"\|"impact"\|"affected", target: string（符号名或文件路径） |

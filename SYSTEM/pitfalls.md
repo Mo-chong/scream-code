@@ -363,6 +363,16 @@ spawn → ENOENT（PATH 无 cmd，Bug 1 僵尸）
 
 **教训**：小改动（只改方法体内部字符串）改完后用一次 LSP.references 确认调用方不受影响。批量 Edit 后必须加验证步骤：Read 确认 + LSP.diagnostics + LSP.references。
 
+### finalizeToolResult hook 中引用类属性必须用 this.（2026-07-14）
+
+**现象**：`Read` 工具持续报 `finalizeToolResult hook failed: currentStep is not defined`，所有工具都受影响（但错误消息总是显示第一个触发 hook 的工具名 Read，容易误判为 Read 独有）。
+
+**根因**：探索债务模型的 `afterStep` 计数中写了裸 `currentStep` 而不是 `this.currentStep`。`finalizeToolResult` 闭包作用域无 `currentStep` 局部变量，`ReferenceError` 冒泡导致 hook 失败。
+
+**解决**：`turn/index.ts:1381,1397` → `this.currentStep`。
+
+**教训**：闭包中访问类属性时永远用 `this.` 前缀。仅在解构 `const { currentStep } = this` 或函数参数中才能用裸名。`finalizeToolResult` hook 失败的症状会出现在第一个触发 hook 的工具上（Read），但实际所有工具都受影响。
+
 ### 多个 Edit 到同一文件时锚点过期（2026-06-27）
 
 **现象**：第 2 个及后续 Edit 因第一个 Edit 改了锚点而失败。

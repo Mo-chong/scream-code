@@ -360,6 +360,33 @@ updated: 2026-07-11
 - `DECISIONS/分析-拦截系统正收益审计.md` — 13 detectors 逐项 + 外部 7 论文 8 开源验证 + AI 消费角色四维评分
 - `DECISIONS/方案-3-codegraph智能触发机制重设计.md` — 完整方案，749 行（含附录 A 智能压缩 + B 工具对比）
 
+
+### Phase40 — 拦截审计+CodeGraphTool内建+债务模型bugfix（2026-07-14）
+
+**拦截系统正收益审计+执行：**
+- 删除4 detector（verifyPass/toolDedup/interceptionSummary/budgetNotify），13→9，-31%
+- Priority 5→3：P0/P1→critical, P2/P3→normal, P4→debug，10文件全清零
+- 新增 CodeGraphTool 内建工具：callees(内部调用链)/impact(重构影响)/affected(关联测试)，66行
+- Bash redirect 新增 find/fd→Glob 规则
+- deviation-chain T1 尾部加 codegraph_node 引导
+
+**codegraph 智能压缩：**
+- mask-tool-observations.ts: isCodegraphResult+getCodegraphSummary，旧结果~4,000→~300 tokens（-93%）
+
+**探索债务模型（替换二进制门控）：**
+- debt+1(同主题+0.5)/codegraph-2/非探索衰减-0.1
+- debt≥carryover+4(suggest)/+7(warn)/+10(block)
+- extractExplorationKeywords语义重复检测，跨回合carryover
+
+**Bugfix：**
+- turn/index.ts:1381,1397 裸currentStep→this.currentStep
+- 此bug导致所有finalizeToolResult hook抛ReferenceError，Read/Grep等工具全部失效
+
+**SYSTEM说明书同步（第2轮）：**
+- SYSTEM-INDEX: guard-engine→interception-system/注入器17→15
+- MAP/injection-system/architecture-overview: 注入器计数统一15
+- pitfalls: 新增currentStep踩坑
+
 ### Phase33 — Context Facts 尾部聚合 + 内容哈希埋点 + toolCalls TypeError 修（2026-07-10）
 
 #### 新功能
