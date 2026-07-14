@@ -11,10 +11,11 @@ import type { FlagDefinitionInput } from './types';
  * not equal the master switch 'SCREAM_CODE_EXPERIMENTAL_FLAG'; `id` must not be 'flag'.
  */
 export const FLAG_DEFINITIONS = [
+  /** @deprecated 废弃 v3 — 蒸馏塔归档层替代。0.1% token 换 6.5-44% 缓存断裂，ROI 负 */
   {
     id: 'micro-compaction',
     env: 'SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION',
-    default: true,
+    default: false,
     surface: 'both',
   },
   {

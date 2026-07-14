@@ -653,7 +653,8 @@ export class ToolManager {
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidatePlanTool(this.agent),
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidateApplyTool(this.agent),
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryWriteTool(this.agent),
-	        this.agent.contentArchive && new b.ArchiveRecoverTool(this.agent.contentArchive),
+        // ❌ 废弃: ArchiveRecover（5 天零调用，训练分布不支持 AI 主动取回。蒸馏塔归档层替代）
+        // this.agent.contentArchive && new b.ArchiveRecoverTool(this.agent.contentArchive),
         this.agent.type === 'main' && this.agent.knowledgeStore && new b.KnowledgeLookupTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),

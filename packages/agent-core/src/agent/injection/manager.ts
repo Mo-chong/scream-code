@@ -13,9 +13,11 @@ import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
-import { PersistentSummaryInjector } from './persistent-summary';
+// ❌ 废弃: PersistentSummaryInjector（用 ToolResultRecoveryInjector 替代）
+// import { PersistentSummaryInjector } from './persistent-summary';
 import { ToolResultRecoveryInjector } from './tool-result-recovery';
 import { DecisionTraceInjector } from './decision-trace';
+import { ArchivalSummaryInjector } from './archival-summary';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -49,6 +51,8 @@ export class InjectionManager {
       // 旧文件 persistent-summary.ts 保留不动，可回退
       ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
       ['decision-trace', new DecisionTraceInjector(agent)],
+      // 归档层（蒸馏塔第三层）：上下文 >50K 时触发式结构化摘要，尾部 append
+      ['archival-summary', new ArchivalSummaryInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);

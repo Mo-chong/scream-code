@@ -45,7 +45,8 @@ import { AttentionPositionStrategy, InsertPosition } from '../injection/position
 import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
 import type { CacheMetrics } from '../usage/audit-log';
-import { summarizeWithLLM } from '../compaction/summary';
+// ❌ 废弃: incremental LLM summary（splice 断缓存 + 异步 LLM 浪费，蒸馏塔归档层替代）
+// import { summarizeWithLLM } from '../compaction/summary';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -113,8 +114,9 @@ export function getSummaryLevel(ilr: number): SummaryLevel {
   return 'none';
 }
 
-export function shouldTriggerPersistentSummary(history: readonly any[], _stepCount: number): boolean {
-  return getSummaryLevel(computeILR(history, 3)) !== 'none';
+/** @deprecated 废弃 v3 — 蒸馏塔归档层替代。保留空壳避免测试 break */
+export function shouldTriggerPersistentSummary(_history: readonly any[], _stepCount: number): boolean {
+  return false;
 }
 
 /** Phase 14: 收敛条件接口 — 每个条件是一个 check 函数 + 优先级 */
@@ -138,7 +140,6 @@ export class TurnFlow {
   private currentStepHadContent = false;
   private lastToolFailure: { toolName: string; isExploratory: boolean } | null = null;
   private readonly MAX_CONVERGENCE_INJECTIONS = 5;
-  private summaryGuardInjected = false;
   private turnStartWorkingSetPathCount = 0;
   private turnStartVerificationCount = 0;
   private verificationFailureInjected = false;
@@ -212,7 +213,6 @@ export class TurnFlow {
 
   // ── Phase 14: 正反馈每回合一次 ─────────────────────────────────
   private positiveFeedbackGivenThisTurn = false;
-  private _summaryTriggered = false;
 
   // ── Phase 24: 截断数据强制恢复 ─────────────────────────────────
   readonly turnTruncation = new TruncationTracker({ maxConsecutiveBlocks: 3 });
@@ -1856,7 +1856,7 @@ export class TurnFlow {
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedEvents.length);
       const archiveStats = this.agent.contentArchive?.getStats();
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, this._summaryTriggered);
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, false);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态
@@ -2137,57 +2137,7 @@ export class TurnFlow {
     }
   }
 
-  private updatePersistentSummary(): void {
-    // 每轮开始时重置——确保 buildAuditEntry 读取的是本轮事实，而非上轮残留
-    this._summaryTriggered = false;
-
-    const history = this.agent.context.history;
-    if (!shouldTriggerPersistentSummary(history, this.lastTurnStepCount)) return;
-    this._summaryTriggered = true;
-
-    const SUMMARY_KEY = 'summary';
-    const existingSummary = this.agent.contentArchive?.recover(SUMMARY_KEY) as string | undefined;
-    const existingText = typeof existingSummary === 'string' ? existingSummary : '';
-    // Remove old [summary] messages from history to prevent tail decay
-    const summaryPrefix = '[summary]';
-    this.agent.context.removeSystemRemindersByPrefix(summaryPrefix);
-    const recentAssistantTexts: string[] = [];
-
-    // Phase34: 收集会被 maskToolObservations 遮蔽的 tool result（keepLastN=3 之后的旧结果）
-    // mask 只改 projected 列表，history 保留原文，所以从 history 取最旧的 tool 消息
-    let toolCount = 0;
-    for (let i = 0; i < history.length && recentAssistantTexts.length < 30; i++) {
-      const msg = history[i]!;
-      if (msg.role === 'tool') {
-        toolCount++;
-        // 保留最后 3 条（不被遮蔽），之前的才需要摘要
-        if (toolCount > 3) {
-          let text = '';
-          const content = msg.content;
-          if (typeof content === 'string') {
-            text = (content as string).slice(0, 500);
-          } else if (Array.isArray(content)) {
-            text = content.map((p: any) => ('text' in p ? p.text : '')).join('').slice(0, 500);
-          }
-          if (text) recentAssistantTexts.push(text);
-        }
-      }
-    }
-
-    // 调 LLM 做摘要，不阻塞主流程（_summaryTriggered 已同步设为 true 记录触发事实）
-    summarizeWithLLM(this.agent.llm, existingText, recentAssistantTexts, Math.max(0, this.currentStep - 30))
-      .then((textContent: string) => {
-        if (!textContent) return;
-        const formattedText = "[summary]\n" + textContent;
-        this.inject(formattedText, { kind: 'system_trigger', name: 'summary' });
-        this.agent.contentArchive?.archive("summary", formattedText, { source: 'summary' });
-      })
-      .catch((err: unknown) => {
-        console.warn("[summary] LLM summarization failed:", err);
-      });
-    }
-
-    /** CodeRefDetector — 检测代码块是否缺路径/行号 */
+  /** CodeRefDetector — 检测代码块是否缺路径/行号 */
   private detectCodeRefIssue(): void {
     const codeRefAssistantText = extractLastAssistantText(this.agent.context.history);
     if (codeRefAssistantText.length > 100 && this.currentStep > 1) {
