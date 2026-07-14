@@ -9,27 +9,27 @@ import type { WeightLevel } from '../../src/agent/turn/variant-registry';
 describe('Phase 1: Position-aware injection strategy', () => {
   it('S-level variant inserts at head', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('feedback_positive', 'S' as WeightLevel)).toBe('AFTER_SYSTEM');
-    expect(strat.decidePosition('any_variant', 'S' as WeightLevel)).toBe('AFTER_SYSTEM');
+    expect(strat.decidePosition('feedback_positive', 'critical' as WeightLevel)).toBe('AFTER_SYSTEM');
+    expect(strat.decidePosition('any_variant', 'critical' as WeightLevel)).toBe('AFTER_SYSTEM');
   });
 
   it('A-level variant inserts at near_head', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('intent_fix_bug', 'A' as WeightLevel)).toBe('AFTER_SYSTEM');
+    expect(strat.decidePosition('intent_fix_bug', 'critical' as WeightLevel)).toBe('AFTER_SYSTEM');
   });
 
   it('feedback_/post_/step_after_ variants insert at near_head regardless of level', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('feedback_positive', 'B' as WeightLevel)).toBe('AFTER_TOOL_CALL');
-    expect(strat.decidePosition('step_after_tool_call', 'C' as WeightLevel)).toBe('AFTER_TOOL_CALL');
-    expect(strat.decidePosition('post_compaction', 'D' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('feedback_positive', 'normal' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('step_after_tool_call', 'normal' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('post_compaction', 'debug' as WeightLevel)).toBe('AFTER_TOOL_CALL');
   });
 
   it('B/C/D-level non-special variants insert at tail', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('content_audit', 'B' as WeightLevel)).toBe('AFTER_TOOL_CALL');
-    expect(strat.decidePosition('soft_reminder', 'C' as WeightLevel)).toBe('AFTER_TOOL_CALL');
-    expect(strat.decidePosition('low_priority_note', 'D' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('content_audit', 'normal' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('soft_reminder', 'normal' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('low_priority_note', 'debug' as WeightLevel)).toBe('AFTER_TOOL_CALL');
   });
 });
 

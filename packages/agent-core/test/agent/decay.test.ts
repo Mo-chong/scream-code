@@ -44,27 +44,27 @@ describe('bypassBudget', () => {
   it('bypassBudget makes canInject return true once', () => {
     const budget = new InjectBudget();
     budget.record(20000); // far over any limit
-    expect(budget.canInject(100, 'D')).toBe(false); // blocked
+    expect(budget.canInject(100, 'debug')).toBe(false); // blocked
 
     budget.bypassBudget();
-    expect(budget.canInject(100, 'D')).toBe(true); // bypassed
+    expect(budget.canInject(100, 'debug')).toBe(true); // bypassed
 
-    expect(budget.canInject(100, 'D')).toBe(false); // bypass consumed
+    expect(budget.canInject(100, 'debug')).toBe(false); // bypass consumed
   });
 
   it('bypassBudget does not persist state', () => {
     const budget = new InjectBudget();
     budget.record(9999);
     budget.bypassBudget();
-    budget.canInject(100, 'D'); // consume bypass
-    expect(budget.canInject(100, 'D')).toBe(false); // back to normal
+    budget.canInject(100, 'debug'); // consume bypass
+    expect(budget.canInject(100, 'debug')).toBe(false); // back to normal
   });
 });
 
 function makeRecord(triggerCount: number, behaviorObserved: boolean | null): VariantRecord {
   return {
     variant: 'test',
-    level: 'B',
+    level: 'normal',
     stepInjected: 1,
     turnStep: 1,
     behaviorObserved,

@@ -21,83 +21,68 @@ describe('InjectBudget', () => {
   it('canInject returns true when under perTurn limit', () => {
     const budget = new InjectBudget();
     budget.beginStep(1); // stepNorm=1.50
-    expect(budget.canInject(100, 'B')).toBe(true);
+    expect(budget.canInject(100, 'normal')).toBe(true);
   });
 
-  it('canInject returns false when over perTurn limit (B)', () => {
+  it('canInject returns false when over perTurn limit (normal)', () => {
     const budget = new InjectBudget();
     budget.beginStep(1); // stepNorm=1.50, perStep cap = 225
-    budget.record(490);  // B perTurn = 500
-    // perTurn cap = 500 × degradation(0) = 500
-    // turnTokens=490, adding 20 = 510 > 500
-    expect(budget.canInject(20, 'B')).toBe(false);
+    budget.record(490);  // normal perTurn = 500
+    expect(budget.canInject(20, 'normal')).toBe(false);
   });
 
   it('canInject returns false when over perStep limit', () => {
     const budget = new InjectBudget();
     budget.beginStep(1);
-    // stepNorm=1.50, degradation=1.0
-    // B perStep cap = floor(150 × 1.50 × 1.0) = 225
     budget.record(220);
-    // 220 + 20 = 240 > 225
-    expect(budget.canInject(20, 'B')).toBe(false);
+    expect(budget.canInject(20, 'normal')).toBe(false);
   });
 
   // ── Weight level differentiation ──
-  it('S level can inject more than D level', () => {
+  it('critical level can inject more than debug level', () => {
     const budget = new InjectBudget();
     budget.beginStep(1);
-    // S: perTurn=800, perStep = floor(250×1.5) = 375
-    // D: perTurn=200, perStep = floor(80×1.5) = 120
-    expect(budget.canInject(250, 'S')).toBe(true);  // 250 < 800 && 250 < 375
-    expect(budget.canInject(250, 'D')).toBe(false); // 250 > 200 perTurn
+    expect(budget.canInject(250, 'critical')).toBe(true);
+    expect(budget.canInject(250, 'debug')).toBe(false);
   });
 
   it('higher step number tightens perStep cap', () => {
     const budget = new InjectBudget();
     budget.beginStep(1);
-    // B perStep effective = floor(150 × 1.50 × 1.0) = 225
     budget.record(200);
-    expect(budget.canInject(50, 'B')).toBe(false); // 250 > 225
+    expect(budget.canInject(50, 'normal')).toBe(false);
 
-    // step 10: perStep effective = floor(150 × 1.09 × 1.0) = 163
     budget.beginStep(10);
     budget.record(150);
-    expect(budget.canInject(20, 'B')).toBe(false); // 170 > 163
+    expect(budget.canInject(20, 'normal')).toBe(false);
   });
 
   it('step 1 has higher perStep cap than step 5', () => {
     const budget = new InjectBudget();
-    // step 1: factor=1.50, cap=225
     budget.beginStep(1);
-    expect(budget.canInject(200, 'B')).toBe(true);  // 200 < 225
-    expect(budget.canInject(250, 'B')).toBe(false);
+    expect(budget.canInject(200, 'normal')).toBe(true);
+    expect(budget.canInject(250, 'normal')).toBe(false);
 
-    // step 5: factor=1.17, cap=175
     budget.beginStep(5);
-    expect(budget.canInject(200, 'B')).toBe(false); // 200 > 175
+    expect(budget.canInject(200, 'normal')).toBe(false);
   });
 
   // ── degradationFactor ──
-  it('degradationFactor reduces B perTurn cap at variantCount=6', () => {
+  it('degradationFactor reduces normal perTurn cap at variantCount=6', () => {
     const budget = new InjectBudget();
     budget.beginStep(1);
     budget.syncVariantCount(6);
-    // B perTurn effective = floor(500 × 0.4) = 200
-    // B perStep effective = floor(150 × 1.50 × 0.4) = 90
-    budget.record(90);  // perStep now at 90
-    expect(budget.canInject(110, 'B')).toBe(false); // perStep 90+110=200 > 90 → blocked by step cap
+    budget.record(90);
+    expect(budget.canInject(110, 'normal')).toBe(false);
   });
 
   it('degradationFactor at variantCount=0 does not reduce caps', () => {
     const budget = new InjectBudget();
     budget.beginStep(1);
     budget.syncVariantCount(0);
-    // B perTurn = 500, B perStep = floor(150 × 1.5) = 225
-    // perTurn already checked above; test perStep
     budget.record(200);
-    expect(budget.canInject(50, 'B')).toBe(false); // 250 > 225
-    expect(budget.canInject(20, 'B')).toBe(true);  // 220 <= 225
+    expect(budget.canInject(50, 'normal')).toBe(false);
+    expect(budget.canInject(20, 'normal')).toBe(true);
   });
 
   // ── beginStep resets step counter ──
@@ -109,8 +94,8 @@ describe('InjectBudget', () => {
     expect(budget.turnUsage).toBe(100);
 
     budget.beginStep(2);
-    expect(budget.stepUsage).toBe(0);  // reset
-    expect(budget.turnUsage).toBe(100); // preserved
+    expect(budget.stepUsage).toBe(0);
+    expect(budget.turnUsage).toBe(100);
   });
 
   // ── reset resets everything ──
@@ -130,14 +115,12 @@ describe('InjectBudget', () => {
   // ── Custom config ──
   it('accepts custom perTurn config overrides', () => {
     const budget = new InjectBudget({
-      perTurnMax: { S: 100, A: 80, B: 60, C: 40, D: 20 },
+      perTurnMax: { critical: 100, normal: 60, debug: 20 },
     });
     budget.beginStep(1);
-    // B perTurn = 60, B perStep = floor(150 × 1.5) = 225
-    expect(budget.canInject(50, 'B')).toBe(true);  // 50 < 60 && 50 < 225
-    expect(budget.canInject(70, 'B')).toBe(false); // 70 > 60
-    // S perTurn = 100, S perStep = floor(250 × 1.5) = 375
-    expect(budget.canInject(90, 'S')).toBe(true);  // 90 < 100 && 90 < 375
-    expect(budget.canInject(150, 'S')).toBe(false); // 150 > 100
+    expect(budget.canInject(50, 'normal')).toBe(true);
+    expect(budget.canInject(70, 'normal')).toBe(false);
+    expect(budget.canInject(90, 'critical')).toBe(true);
+    expect(budget.canInject(150, 'critical')).toBe(false);
   });
 });
