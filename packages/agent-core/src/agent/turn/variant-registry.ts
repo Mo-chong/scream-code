@@ -201,25 +201,11 @@ export class VariantRegistry {
  * 纯函数。不涉及 NL 理解。
  */
 export function detectWeightLevel(text: string): WeightLevel {
-  if (
-    text.startsWith('<system-reminder') ||
-    text.includes('<|im_start|>')
-  ) {
-    return 'S';
-  }
-  if (/\b(MUST|NEVER|ALWAYS|REQUIRED)\b/.test(text)) {
-    return 'A';
-  }
-  if (
-    /^Step \d|^\d+\.|^-\s|^In one sentence/.test(text) ||
-    /\bIf\s+.+\bthen\b/i.test(text)
-  ) {
-    return 'B';
-  }
-  if (/\b(DO NOT|不要|Never|不得)\b/i.test(text)) {
-    return 'C';
-  }
-  return 'D';
+  if (text.startsWith('<system-reminder') || text.includes('<|im_start|>')) return 'critical';
+  if (/\b(MUST|NEVER|ALWAYS|REQUIRED)\b/.test(text)) return 'critical';
+  if (/^Step \d|^\d+\.|^-\s|^In one sentence/.test(text) || /\bIf\s+.+\bthen\b/i.test(text)) return 'normal';
+  if (/\b(DO NOT|不要|Never|不得)\b/i.test(text)) return 'critical';
+  return 'debug';
 }
 
 /**
