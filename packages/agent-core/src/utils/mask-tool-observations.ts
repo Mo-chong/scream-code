@@ -43,34 +43,19 @@ function inferPriority(toolName?: string): number {
 }
 
 /**
- * Build natural-language replacement for a masked tool result.
+ * 字节级恒定遮蔽文本 — 所有工具遮蔽后输出完全相同。
  *
- * Produces AI-readable text that describes what the tool returned and how to
- * retrieve the full content. No opaque markers like [已遮蔽] — the model
- * can immediately understand the summary and act on it.
+ * DeepSeek KV Cache 要求前缀完整字节匹配。旧版 buildMaskContent 每步生成
+ * 不同的 {toolName} 返回 {summary} → 公共前缀无法落盘 → 缓存率 2.2%。
+ * 任何包含变量（工具名、key、摘要）的格式都会导致缓存断裂。
+ *
+ * AI 看到 role:tool 已知这是工具结果，此文本仅作"已执行+去尾部索引区"
+ * 的确认信号。详情与取回KEY 统一在尾部 <masked-tools> 索引区呈现。
  */
-function buildMaskContent(
-  toolCallId?: string,
-  toolNameMap?: ReadonlyMap<string, string>,
-  summary?: string,
-): string {
-  const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
-  const key = toolCallId ? `tool:${toolCallId}` : '';
+const MASKED_TOOL_TEXT = '此工具结果已执行。完整结果见消息尾部 <masked-tools> 索引区（含每步取回KEY）。archive_recover(KEY) 可取回完整内容。';
 
-  // Best case: we have tool name AND a content summary
-  if (toolName && key && summary) {
-    return `${toolName} 返回 ${summary}。完整内容已存档，可调用 archive_recover("${key}") 取回全文。`;
-  }
-  // Partial: tool name only
-  if (toolName && key) {
-    return `${toolName} 已执行。完整内容已存档，可调用 archive_recover("${key}") 取回全文。`;
-  }
-  // Fallback: just the key
-  if (key) {
-    return `工具结果已存档，可调用 archive_recover("${key}") 取回全文。`;
-  }
-  // No identifiers at all
-  return '工具结果已存档，可调用 archive_recover 取回全文。';
+function buildMaskContent(): string {
+  return MASKED_TOOL_TEXT;
 }
 
 function getContentText(msg: Message): string {
@@ -155,6 +140,60 @@ function generateSummary(msg: Message): string {
   const result = fallback.length <= 400 ? fallback : fallback.slice(0, 397) + '...';
   if (msg.toolCallId) _summaryCache.set(msg.toolCallId, result);
   return result;
+}
+
+// ── L2: 遮蔽索引区格式化 ──
+
+/** 最新 N 条详细索引行的窗口大小 */
+const TIER1_MAX = 3;
+
+/**
+ * 格式化完整 <masked-tools> 索引区块。
+ *
+ * Tier1: 最新 N 条详细行（当前注意力区）
+ * Tier2: 较旧条目的压缩统计行（扫一眼即过，按需取回）
+ *
+ * 输出字节级前缀缓存（`<masked-tools>` 固定头）稳定命中，
+ * 仅 Tier1 数据行尾部少量变化。
+ *
+ * @param records 全部未过时的 RecoverableRecord（按时间先后排列）
+ * @returns 完整的 <masked-tools> 区块文本
+ */
+export function formatMaskedIndexBlock(records: RecoverableRecord[]): string {
+  if (records.length === 0) return '';
+
+  const lines: string[] = [];
+  lines.push('<masked-tools>');
+
+  // ── Tier1: 最新 N 条详细 ──
+  const tier1 = records.slice(-TIER1_MAX);
+  const tier2Count = records.length - tier1.length;
+
+  // 表头（恒定前缀，缓存落盘）
+  lines.push('# | 工具 | 状态 | 摘要 | 取回KEY');
+  lines.push('--|------|------|------|---------');
+
+  for (const rec of tier1) {
+    const truncatedSummary = rec.summary.length > 40
+      ? rec.summary.slice(0, 39) + '…'
+      : rec.summary;
+    lines.push(
+      `${rec.priority} | ${rec.toolName} | OK | ${truncatedSummary} | ${rec.key}`,
+    );
+  }
+
+  // ── Tier2: 旧条目压缩统计 ──
+  if (tier2Count > 0) {
+    lines.push('');
+    lines.push(`前 ${tier2Count} 个工具结果已归档。archive_recover("history") 可取回全部。`);
+  }
+
+  // 统一取回指引（恒定文本）
+  lines.push('');
+  lines.push('使用方法: archive_recover("tool:call_xxx") 可取回对应步骤的完整输出。');
+
+  lines.push('</masked-tools>');
+  return lines.join('\n');
 }
 
 /**
@@ -242,7 +281,7 @@ export function maskToolObservations(
         priority: inferPriority(toolName),
       });
     }
-    const maskText = buildMaskContent(msg.toolCallId, toolNameMap, summary);
+    const maskText = buildMaskContent();
     return { ...msg, content: [{ type: 'text' as const, text: maskText }] };
   });
 
