@@ -62,12 +62,13 @@ export abstract class DynamicInjector {
     return InsertPosition.AFTER_TOOL_CALL;
   }
 
-  /** 子类兼容别名，同 getTargetPosition */
+  /** 子类兼容别名，同 getTargetPosition — 所有注入器默认尾部追加 */
   getPosition(): InsertPosition {
     return this.getTargetPosition();
   }
 
   /**
+   * [缓存优化] 同一步内连续调用只注入一次：
    * 残差注意力配置。
    * 覆写此方法返回配置后，router dispatch 会在每次注入前
    * 检查残差注意力 R = weight × decayPerStep^Δstep，

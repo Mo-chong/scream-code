@@ -33,6 +33,17 @@ export class ErrorAuditInjector extends DynamicInjector {
     return InsertPosition.AFTER_TOOL_CALL;
   }
 
+  /** 内容预览：返回审计摘要哈希，内容不变时跳过注入去读队列 */
+  override getContentPreview(): string | undefined {
+    const audit = (this.agent as any).fileActionAudit as
+      | { getRecentEntries: (n: number) => FileActionAuditEntry[] }
+      | undefined;
+    if (!audit) return undefined;
+    const entries = audit.getRecentEntries(5);
+    if (entries.length === 0) return undefined;
+    return `error-audit:${entries[0]?.action ?? ''}:${entries.length}`;
+  }
+
   /** 残差控制：降低每轮注入频率 */
   override getResidualConfig(): ResidualConfig | undefined {
     return { weight: 0.4, decayPerStep: 0.9, minStepGap: 3, threshold: 0.15 };

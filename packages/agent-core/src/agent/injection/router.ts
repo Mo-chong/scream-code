@@ -262,8 +262,11 @@ export class InjectionRouter {
         continue;
       }
 
-      // ⑦ 执行注入
+      // ⑦ 内容去重+执行注入
       try {
+        if (!injector.hasContentChanged()) {
+          continue;
+        }
         await injector.inject(context);
         this.scheduler.record(id, context.currentStep);
         results.push({
