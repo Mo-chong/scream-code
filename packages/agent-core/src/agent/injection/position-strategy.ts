@@ -27,9 +27,10 @@ export enum InsertPosition {
  * 注意力权重等级 → InsertPosition 映射
  */
 export const POSITION_ATTENTION: Record<string, InsertPosition> = {
-  S: InsertPosition.AFTER_SYSTEM,
-  A: InsertPosition.AFTER_SYSTEM,
-  B: InsertPosition.MID_CONTEXT,
+  // S/A 级现在也改末尾追加，保持前缀缓存一致（2026-07-13 cache-audit 数据）
+  S: InsertPosition.AFTER_TOOL_CALL,
+  A: InsertPosition.AFTER_TOOL_CALL,
+  B: InsertPosition.AFTER_TOOL_CALL,
   C: InsertPosition.AFTER_TOOL_CALL,
   D: InsertPosition.AFTER_TOOL_CALL,
 };
@@ -41,8 +42,8 @@ export const POSITION_ATTENTION: Record<string, InsertPosition> = {
 export function getPositionPriorityBoost(pos: InsertPosition): number {
   switch (pos) {
     case InsertPosition.AFTER_SYSTEM: return 1000;
-    case InsertPosition.MID_CONTEXT: return 500;
     case InsertPosition.AFTER_TOOL_CALL: return 0;
+    default: return 0;
   }
 }
 
@@ -70,8 +71,10 @@ export class AttentionPositionStrategy implements PositionStrategy {
   private warnedVariants = new Set<string>();
 
   decidePosition(variant: string, level: WeightLevel): InsertPosition {
-    if (level === 'S') return InsertPosition.AFTER_SYSTEM;
-    if (level === 'A') return InsertPosition.AFTER_SYSTEM;
+    // S/A 级过去直接插入头部，但实证证明每轮头部注入使 DeepSeek 前缀缓存从
+    // 97% 退化到 37%（2026-07-13 实测数据）。全部改为末尾追加：
+    // 保留注入内容的同时保持缓存前缀稳定，利用近因效应弥补首位损失。
+    if (level === 'S' || level === 'A') return InsertPosition.AFTER_TOOL_CALL;
 
     // feedback_/post_ 类变体是步级实时反馈，末尾追加
     if (

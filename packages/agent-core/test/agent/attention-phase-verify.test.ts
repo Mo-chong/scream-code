@@ -7,15 +7,17 @@ import { AttentionPositionStrategy } from '../../src/agent/injection/position-st
 import type { WeightLevel } from '../../src/agent/turn/variant-registry';
 
 describe('Phase 1: Position-aware injection strategy', () => {
-  it('S-level variant inserts at head', () => {
+  // 实证：S/A 级 head 注入使 DeepSeek 前缀缓存从 97% 退化到 37%
+  // 全部收归尾部以保持缓存前缀稳定（2026-07-13 cache-audit 数据）
+  it('S-level variant inserts at tail (cache preservation)', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('feedback_positive', 'S' as WeightLevel)).toBe('AFTER_SYSTEM');
-    expect(strat.decidePosition('any_variant', 'S' as WeightLevel)).toBe('AFTER_SYSTEM');
+    expect(strat.decidePosition('feedback_positive', 'S' as WeightLevel)).toBe('AFTER_TOOL_CALL');
+    expect(strat.decidePosition('any_variant', 'S' as WeightLevel)).toBe('AFTER_TOOL_CALL');
   });
 
-  it('A-level variant inserts at near_head', () => {
+  it('A-level variant inserts at tail (cache preservation)', () => {
     const strat = new AttentionPositionStrategy();
-    expect(strat.decidePosition('intent_fix_bug', 'A' as WeightLevel)).toBe('AFTER_SYSTEM');
+    expect(strat.decidePosition('intent_fix_bug', 'A' as WeightLevel)).toBe('AFTER_TOOL_CALL');
   });
 
   it('feedback_/post_/step_after_ variants insert at near_head regardless of level', () => {

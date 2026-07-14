@@ -52,7 +52,8 @@ export class GuardInjector extends DynamicInjector {
   }
 
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.AFTER_SYSTEM;
+    // FIX 2026-07-13: head 注入破坏前缀缓存（96%→37%），改用末尾 append
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   protected shouldInject(): boolean {

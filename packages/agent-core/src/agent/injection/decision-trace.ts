@@ -21,8 +21,9 @@ export class DecisionTraceInjector extends DynamicInjector {
 
   protected readonly injectionVariant = 'decision_trace';
 
+  /** 缓存修复 2026-07-13：头部注入破坏前缀缓存改用末尾 */
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.AFTER_SYSTEM;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   override getResidualConfig(): ResidualConfig | undefined {

@@ -124,15 +124,10 @@ export class ContextMemory {
 
   appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
-    // 合并注入：检查 _history / deferredMessages 最后一条是否也是 user role system-reminder，
-    // 是则追加到已有内容，避免连续多条 user role 违反 LLM API 交替约束。
-    const lastMsg = this.deferredMessages.length > 0
-      ? this.deferredMessages[this.deferredMessages.length - 1]
-      : this._history[this._history.length - 1];
-    if (lastMsg?.role === 'user' && lastMsg.content[0]?.type === 'text' && lastMsg.content[0].text.startsWith('<system-reminder>')) {
-      lastMsg.content[0].text += '\n' + text;
-      return;
-    }
+    // FIXED 2026-07-14: 禁止跨轮次 merge，每条独立追加以保缓存前缀。
+    // 旧逻辑（132-134行）将新内容追加到最后一条 system-reminder 后面 → 内容 mutate →
+    // DeepSeek 前缀缓存从该消息开始全失效 → 缓存率 98%→2.6%。
+    // 改为：每轮追加独立消息。近因效应使最新提醒最醒目，缓存仅最后一条受影响。
     this.appendMessage({
       role: 'user',
       content: [{ type: 'text', text }],

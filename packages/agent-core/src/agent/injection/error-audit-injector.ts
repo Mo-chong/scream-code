@@ -28,9 +28,9 @@ export class ErrorAuditInjector extends DynamicInjector {
     super(agent);
   }
 
-  /** 注入到上下文中间位置（靠近尾部，不干扰决策） */
+  /** FIXED 2026-07-13: 注入到末尾，保持缓存前缀稳定（MID_CONTEXT 使缓存从 97% 退化到 37%） */
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   /** 残差控制：降低每轮注入频率 */

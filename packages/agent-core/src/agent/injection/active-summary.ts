@@ -22,7 +22,8 @@ export class ActiveSummaryInjector extends DynamicInjector {
   protected readonly injectionVariant = 'active_summary';
 
   override getTargetPosition(): InsertPosition {
-    return InsertPosition.MID_CONTEXT;
+    // MID_CONTEXT 破坏前缀缓存（97%→37%，2026-07-13数据），改用末尾
+    return InsertPosition.AFTER_TOOL_CALL;
   }
 
   override getResidualConfig(): ResidualConfig | undefined {

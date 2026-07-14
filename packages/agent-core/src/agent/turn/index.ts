@@ -1810,9 +1810,8 @@ export class TurnFlow {
       const pos = new AttentionPositionStrategy().decidePosition(variant ?? '', effectiveLevel as WeightLevel);
       if (pos === InsertPosition.AFTER_SYSTEM) {
         this.agent.context.insertSystemReminderAtHead(text, meta, true);
-      } else if (pos === InsertPosition.MID_CONTEXT) {
-        this.agent.context.insertSystemReminderAtNearHead(text, meta, true);
       } else {
+        // 全部末尾追加，不破坏前缀缓存
         this.agent.context.appendSystemReminder(text, meta);
       }
     } else {
@@ -1923,7 +1922,7 @@ export class TurnFlow {
       const vRegNames = this.variantRegistry.getStepVariants(this.currentStep);
       const vRegSet = new Set(vRegNames);
       const vRegOnly = [...vRegSet].filter(v => !routerInjects.some((r: any) => r.variant === v));
-      const posAbbr = (pos: string): string => pos === 'AFTER_SYSTEM' ? 'H' : pos === 'MID_CONTEXT' ? 'M' : 'T';
+      const posAbbr = (pos: string): string => pos === 'AFTER_SYSTEM' ? 'H' : 'T';
       const injectedEvents: import('../usage/audit-log').InjectionEvent[] = [
         ...routerInjects.map((r: any) => ({
           variant: r.variant,
