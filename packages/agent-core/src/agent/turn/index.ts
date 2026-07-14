@@ -1378,7 +1378,7 @@ export class TurnFlow {
                     this.explorationDebt += isSameTopic ? 0.5 : 1;
                     // 记录关键词（最多 4 条）
                     if (keywords.size > 0) {
-                      this.recentExplorationKeywords.push({ step: currentStep, keywords });
+                      this.recentExplorationKeywords.push({ step: this.currentStep, keywords });
                       if (this.recentExplorationKeywords.length > 4) this.recentExplorationKeywords.shift();
                     }
                   } else {
@@ -1394,7 +1394,7 @@ export class TurnFlow {
                   this.explorationDebt = Math.max(0, this.explorationDebt - 2);
                   const codegraphKeywords = this.extractExplorationKeywords(ctx);
                   if (codegraphKeywords.size > 0) {
-                    this.recentExplorationKeywords.push({ step: currentStep, keywords: codegraphKeywords });
+                    this.recentExplorationKeywords.push({ step: this.currentStep, keywords: codegraphKeywords });
                     if (this.recentExplorationKeywords.length > 4) this.recentExplorationKeywords.shift();
                   }
                   // 后置校验：记下此时的 debt，3 步后比较
