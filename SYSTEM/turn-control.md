@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/turn, status/final]
-keywords: [回合, turn, TurnController, afterStep, runOneTurn]
-updated: 2026-07-08
+keywords: [回合, turn, TurnController, afterStep, runOneTurn, 债务模型, 收敛门, 偏差链, 墨克尔]
+updated: 2026-07-15
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -9,7 +9,7 @@ updated: 2026-07-08
 
 > **参见：** [`injection-system.md`](injection-system.md)（注入管线） | [`interception-system.md`](interception-system.md)（行为矫正） | [`interception.md`](interception.md)（拦截日志） | [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`API-REFERENCE.md`](API-REFERENCE.md)（API 签名）
 >
-> 源码: `packages/agent-core/src/agent/turn/index.ts` (1737 行)
+> 源码: `packages/agent-core/src/agent/turn/index.ts`
 
 ---
 
@@ -22,10 +22,10 @@ updated: 2026-07-08
 runOneTurn()
   │
   ├── perTurnSetup()              ← 重置所有状态
-  │   ├── confabulationBlocked = false    (line 442)
-  │   ├── eventLog.clear()                (line 451)
-  │   ├── appendUserMessage(input)        (line 454)
-  │   └── Phase 4: 意图注入               (line 456-464)
+  │   ├── debtd/carryover/keyword 重置
+  │   ├── eventLog.clear()
+  │   ├── appendUserMessage(input)
+  │   └── Phase 4: 意图注入
   │
   ├── applyUserPromptHook()       ← 用户消息 hook
   │
@@ -34,115 +34,191 @@ runOneTurn()
        ├── generate()             ← AI 生成回复
        │
        ├── afterStep()            ← 每一步结束后的处理
-       │   ├── 偏差链检测
-       │   ├── 反事实检测 (line 704-722)
-       │   │   └── confidence >= 3 → confabulationBlocked = true
-       │   ├── 质量升级检测
-       │   ├── 工具后注入 (line 990+)
-       │   ├── 健康检查 (line 772-778)
-       │   └── resetInjectorStepState (line 780)
+       │   ├── 偏差链检测（4 条件：Edit≥3未查LSP / 行为变体跨回合累计 / 代码质量违规）
+       │   ├── 反事实检测（confidence >= 3 → confabulationBlocked = true）
+       │   ├── 质量升级检测（C→B→A→S）
+       │   ├── 工具后注入（C5: step_after_edit / step_after_verify_fail）
+       │   ├── 探索债务计数（Read/Grep +1，同主题+0.5）
+       │   └── 健康检查 + resetInjectorStepState
        │
-       ├── shouldContinueAfterStop()  ← 收敛门 (line 783-891)
-       │   ├── 检查 confabulationBlocked
-       │   ├── 检查偏差链
-       │   ├── 检查验证假通过
-       │   └── 有拦截 → inject() → return { continue: true }
+       ├── prepareToolExecution() ← 工具执行前阻断
+       │   ├── H1 dedup
+       │   ├── H2 Bash error loop
+       │   ├── H3 债务 ≥10 → 阻断
+       │   ├── H4 偏差链+代码质量 → 阻断 Write/Edit
+       │   └── H5 截断恢复
        │
-       └── finalizeToolResult()  ← 工具结果返回（注入点 B 组）
+       ├── shouldContinueAfterStop()  ← 收敛门（8 条件 + confabulation + pending-doc）
+       │   ├── HIGH severity（先注入）：工具报错 / 验证失败 / 偏差链 / LSP ≥3Edit
+       │   ├── LOW severity（后注入）：无内容生成 / 未更新TodoList / 假通过
+       │   ├── 有拦截 → inject() → return { continue: true }
+       │   └── MAX_CONVERGENCE_INJECTIONS = 3 → 上限后放行
+       │
+       └── finalizeToolResult()  ← 工具结果返回
+           ├── isError → addDebt(工具名, 0.5)（Bash 超时除外）
+           ├── inject codegraph/keyword 记录
+           └── FAA 记录
 ```
 
 ---
 
 ## 关键状态字段
 
-| 字段 | 类型 | 位置 | 作用 |
-|------|------|:----:|------|
-| `confabulationBlocked` | boolean | line 442 | Guard 和反事实检测设置，收敛门消费 |
-| `deviationChainActive` | boolean | line 438 | 偏差链激活标志 |
-| `verifyFailStep` | number | line 443 | 验证假通过检测 |
-| `convergenceInjections` | number | line 814 | 收敛注入计数器，上限 5 |
-| `MAX_CONVERGENCE_INJECTIONS` | 5 | line 91 | 收敛门最大注入次数 |
-| `stepInjectedVariants` | Set | line 99 | 步级注入去重 |
-| `injectBudget` | object | — | token 预算管理 |
-| `variantRegistry` | object | — | 变体注册 + 残差注意力 |
+| 字段 | 类型 | 作用 |
+|------|------|------|
+| `confabulationBlocked` | boolean | Guard 和反事实检测设置，收敛门消费 |
+| `deviationChainActive` | boolean | 偏差链激活标志 |
+| `verifyFailStep` | number | 验证假通过检测 |
+| `convergenceInjections` | number | 收敛注入计数器，上限 3 |
+| `MAX_CONVERGENCE_INJECTIONS` | 3 | 收敛门最大注入次数 |
+| `explorationDebt` | float | 探索债务（+1/+0.5，不归零） |
+| `carryover` | number | 跨回合债务延续，min(2, floor(debt)) |
+| `nonExploreStepsSinceLastExplore` | number | 非探索步计数器（每 3 步 -1） |
+| `recentExplorationKeywords` | Set[] | 近 4 步关键词快照（语义重复检测） |
 
 ---
 
 ## 三个关键方法
 
-### inject() (line 1351-1435)
+### inject()
 
 注入中枢。优先级从高到低：
+1. `extraInterceptions` → 拦截系统预批准消息，优先占 budget 槽
+2. 普通 `injection` → 经过 5 重过滤：重复衰减 → 残差注意力 → 步级去重 → 预算检查 → 注册 VariantRegistry
 
-1. `extraInterceptions` → 拦截系统预批准消息（Phase38b），优先占 budget 槽（line 1356-1359）
-2. 普通 `injection` → 经过 5 重过滤：
-   - 重复衰减（line 1369-1372）
-   - 残差注意力（line 1375-1392）
-   - 步级去重（line 1395-1403）
-   - 预算检查（line 1412-1419）
-   - 注册 VariantRegistry（line 1425-1428）
+### afterStep()
 
-### afterStep() (line 633-781)
+每次 AI 生成完一步后执行。包含所有检测和注入逻辑：
+- 偏差链 4 条件（C1: Edit≥3未查LSP / C3: 行为变体累计 / C4: 代码质量）
+- 探索债务计数
+- 语义重复检测 + 后置校验
+- C5 工具后注入
 
-每次 AI 生成完一步后执行。包含所有检测和注入逻辑。
+### shouldContinueAfterStop()
 
-### shouldContinueAfterStop() (line 783-891)
+收敛门。HIGH 条件先注入（工具报错 / 验证失败 / 偏差链 / LSP ≥3Edit），LOW 条件后注入（无内容 / TodoList / 假通过）。上限 3 次后放行。
 
-收敛门。决定是否让 AI 继续。6 种拦住理由（line 817-874）：
-- 无内容生成
-- 有 Goal 但没更新 TodoList
-- 工具失败未修复
-- 验证失败未修复
-- **反事实阻断**（confabulationBlocked）
-- 偏差链未修复
-- 验证假通过
-- 无 LSP 但改了 3+ 文件（仅限代码文件，文档不触发）
+### addDebt(reason, amount)
+
+**Phase40 新增** — 统一债务累积接口。所有工具报错（Bash 超时除外）通过此接口加债 0.5，债务达 carryover+4/+7 时触发针对性提醒，尾部追加 `FIX_SUFFIX` 修复路径。
 
 ---
 
-## 注入预算 (injectBudget)
+## 偏差链系统
 
-- 每个回合有 token 预算上限
-- extraInterceptions 优先占 budget 槽（Phase38b，拦截消息跳过残差由递进替代）
-- 偏差链激活时 bypassBudget()
-- 预算不足 → eventLog.record('skipped_budget')
+### 激活条件（4 个 → 当前）
+
+| # | 条件 | 激活 reason |
+|---|------|------------|
+| C1 | Edit ≥3 未查 LSP.references | "连续多次 Edit 未查 LSP.references" |
+| C3 | 行为变体跨回合超标（3 种） | "行为变体 ${variant} 连续 ${count} 回合 S→S 升级" |
+| C4 | 代码质量违规 | "代码质量违规：存在 N 个未修正的规范违反" |
+
+### 已删除
+
+| 原条件/变体 | 删除原因 |
+|------------|---------|
+| C2（验证失败→偏差链） | 冗余（工具结果+收敛门G2已覆盖） |
+| T1 毒性拦截（收敛门前） | 冗余（与收敛门 G3 重复） |
+| `scene_memory_recall` 变体 | 已有 scene-memory detector |
+| `step_after_edit` / `step_after_verify_fail` 变体 | 与其他机制重复 |
+
+### 3 个跨回合跟踪变体（INTERCEPT_VARIANTS）
+
+| 变体 | 阈值 | 检测什么 |
+|------|------|---------|
+| `guard_feedback_rule_2` | 3 | 声称无证据 |
+| `guard_feedback_rule_3` | 2 | 声称已修改无 Edit |
+| `guard_feedback_rule_4` | 3 | 用记忆不查代码 |
+
+### 3 个介入点
+
+| 介入点 | 触发条件 | 效果 |
+|--------|---------|------|
+| G3 收敛门（HIGH） | AI 说"完成"时偏差链活跃未解决 | 注入 reason + 阻止回合结束 |
+| H4 硬阻断 | 偏差链活跃 + reason 含代码质量 + 写/Edit | syntheticResult.isError 阻断 |
+
+### 偏差链解析条件
+
+`tryResolveDeviationChain()`：
+- C1 偏差链 → 当前步调了 LSP.references → 已修复
+- C4 代码质量偏差链 → codeQualityViolationsThisTurn = 0 → 已修复
+- C3 行为变体偏差链 → 当前步有验证工具调用 → 已修复
 
 ---
 
-## 工具优先级（Phase16：代码探索三阶路由）
+## 收敛门 severity 分区（Phase40）
+
+| 条件 | severity | 触发条件 |
+|------|----------|---------|
+| 工具报错 | HIGH | lastToolFailure 且未验证通过 |
+| 验证失败 | HIGH | workingSet 验证未通过 |
+| 偏差链 | HIGH | deviationChainActive 未解决 |
+| Edit≥3 无 LSP | HIGH | totalCodeFileEditsThisTurn ≥ 3 且无 LSP |
+| 无内容生成 | LOW | currentStepHadContent 为 false |
+| 待办未更新 | LOW | goal active 但 todoSeenThisTurn 为 false |
+| 假通过 | LOW | verifyFailStep ≥ 0 |
+
+收敛门注入消息的顺序是 HIGH 全部在先，LOW 全部在后。
+
+---
+
+## 探索债务模型
+
+| 机制 | 规格 | 说明 |
+|------|------|------|
+| 债务积累 | 探索 Read/Grep +1（同主题 +0.5）| 文档 Read 不计数 |
+| 债务衰减 | 非探索每 3 步 -1 | 替代 codegraph 直接减债 |
+| codegraph 减债 | **移除** | 防 dummy call 作弊，仅靠自然衰减 |
+| 触发阈值 | debt ≥ carryover+4 / +7 / +10 | 提醒 / 警告 / 阻断 |
+| 跨回合 | carryover = min(2, floor(debt)) | 防重启洗白 |
+| 统一债务 addDebt | 工具报错加债 0.5 | Bash 超时除外（Win11 环境问题） |
+| FIX_SUFFIX | 消息尾部追加修复路径 | Edit→/edit-fix, Read→node, Grep→explore |
+
+---
+
+## 墨克尔审计链（Phase40）
+
+`turn/event-log.ts`：
+
+- `computeEventHash(prevHash, event)` — 每次 `record()` 记录事件时计算 SHA256 hash
+- `verifyMerkleChain(events)` — 验证整条链完整性，发现篡改时返回 `brokenAt` 下标
+- 模块级 `lastMerkleHash` 跨回合串联，重置用 `resetMerkleChain()`
+
+每一条拦截事件记录形如 `{ ...event, seq, prevHash }`。
+
+---
+
+## 工具优先级（system.md Phase40）
 
 ```
-代码探索和修改前，按此顺序：
-
-1. mcp__codegraph__codegraph_explore  — 新文件/未知符号/调用链（PRIMARY）
-2. LSP.references / LSP.definition     — 已知符号精确定位
-3. Read / Grep / Glob                  — 以上不够时 fallback
+codegraph_explore: unknown structure / broad scope (maxFiles: 12 broad, 3 known)
+codegraph_node: known symbol / precise lookup
+codegraph: callees(function) / impact(symbol) / affected(path)
+LSP.references/definition: precise targeting
+Read / Grep / Glob: fallback
 ```
 
-**代码级提醒**（turn/index.ts:983-991）：
-- 探索债务模型。每次探索 Read/Grep +1（同主题 +0.5）。**codegraph 不直接减债**（防 dummy call 作弊）
-- 非探索型工具每 3 步自动 -1（自然衰减替代 codegraph 减债）
-- 文档/配置（.md/.json/.yaml/.toml/.txt）Read 不计入探索
-- debt ≥ carryover+4 → 注入 `step_code_explore` 提醒（含 maxFiles 三档引导）
-- debt ≥ carryover+7 → 警告并接近阻断
-- debt ≥ carryover+10 → 阻断（syntheticResult）
-- codegraph MCP 不可用时（断开等），从不触发提醒
-- 跨回合 carryover = min(2, floor(debt))，防止重启洗白
-- 提醒只是建议，不阻断执行
+格式：无序列表（对齐 `<format>` 的 `No cross-segment ordering dependencies`），全英文。
 
-**收敛门条件更新**（line 1787）：
-- `totalCodeFileEditsThisTurn >= 3` 才触发（原 `totalStepsWithEditsThisTurn` 含文档）
-- 文档 .md 编辑不再触发"无 LSP"收敛门
+---
 
-**LSP 双层 fallback 修复**（registry.ts + client.ts）：
-- `_resolveCmd()` 3 重 fallback：npm → npm.cmd → nodeBin/npm.cmd
-- `npx fallback` Windows 上改为 cmd.exe 包装 spawn
+## quality-degrade 消息改写（Phase40）
 
-**Phase36: ILR 触发取代步数阈值**（`turn/index.ts:93-107`）：
-- `shouldTriggerPersistentSummary(stepCount >= 8)` → `computeILR(history, keepLastN=3) > 0`
-- 新增纯函数：`computeILR()` / `getSummaryLevel()` / 重写 `shouldTriggerPersistentSummary()`
-- 新签名：`shouldTriggerPersistentSummary(history: readonly any[], _stepCount: number): boolean`
-- 触发基于实际被 maskToolObservations 遮蔽的信息量（字节比例），而非步数
-- 两步分级：ILR > 0→factual（事实摘要）、ILR > 0.6→full（完整上下文恢复）
-- 审计日志 7008 条 tool 记录验证：67.6% > 100 字符被遮蔽，ILR 覆盖率显著优于步数阈值
-- 解决 bundle 环境 PATH 极简下 LSP 不可用的问题
+消息嵌入 `bestMessage`（具体质量偏差描述），替代"考虑改用结构化方法"等空话。加保护：`bestMessage` 长度 10-80 字时才嵌入，否则回退通用消息。
+
+C 级: `${bestMessage} — 建议用工具验证代替手动推断。`
+B 级: `${bestMessage}（已重复多步）— 请 Read 当前内容后再操作。`
+A 级: `${bestMessage} — 必须修正后继续，否则回合终止。建议换方法或缩小范围。`
+S 级: `${bestMessage} — 已触发上限，违反系统规则。`
+
+---
+
+## 关键常量变化（Phase40）
+
+| 常量 | 旧值 | 新值 | 备注 |
+|------|------|------|------|
+| `MAX_CONVERGENCE_INJECTIONS` | 5 | 3 | 收敛门上限 |
+| `carryover` 取值 | min(3, debt) | min(2, debt) | 降低跨回合敏感度 |
+| codegraph 减债 | debt -2 | **移除** | 防作弊 |
+| 自然衰减 | -0.1/步 | -1/3步 | 加速 |

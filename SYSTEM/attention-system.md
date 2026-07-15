@@ -81,6 +81,20 @@ AI 自主调用工具，无系统干预。
 
 本轮检测→反馈的摘要进入下轮的历史计数，用于递进升级。
 
+### ⑥ 统一债务累积（addDebt，Phase40）
+
+工具报错时通过 `addDebt(reason, amount)` 统一加债 0.5，债务达阈值时触发提醒并附带修复路径：
+
+| 工具报错 | 修复路径 |
+|---------|---------|
+| Edit | `/edit-fix` |
+| Bash | 换内置工具或 `codegraph_explore` |
+| Read | 换 `Glob` 或已知符号用 `codegraph_node` |
+| Grep | 换 `codegraph_explore`（省 80% token） |
+| Write | `Glob` 确认目录 |
+
+> Bash 超时通常由 Win11 环境问题引起，不扣 AI 债务。
+
 ---
 
 ## 3 级优先级（对齐全系统 WeightLevel）

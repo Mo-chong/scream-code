@@ -116,6 +116,19 @@ powershell -Command "Get-Process node | Where-Object { \$_.StartTime -lt (Get-Da
 ---
 
 
+
+### Bash 超时通常是 Win11 环境问题（2026-07-15）
+
+**现象**：Bash 工具反复 `grace timeout` / `Premature close`，但 Read/Grep 等内置工具正常。
+
+**根因**：Win11 下 Git Bash 进程启动慢 + 安全软件扫描 + PATH 解析延迟。不是 AI 写错了命令。
+
+**系统处理**：`addDebt()` 排除了 Bash 超时（检测 `timeout` / `grace timeout` / `Premature close`），不扣 AI 债务。
+
+**教训**：遇到 Bash 超时先确认其他工具是否正常。如果 Read/Grep 正常、仅 Bash 超时，就是环境问题，不是 AI 做错了。换内置工具（Read/Grep/Glob）或大面积未知用 `codegraph_explore` 绕过 Bash。
+
+---
+
 ### Edit old_string not found — 一劳永逸修复方案
 
 - 根因：文件换行符混合（CRLF+LF）

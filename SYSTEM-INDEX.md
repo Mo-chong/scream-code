@@ -66,7 +66,7 @@
 | **知识系统（knowledge包）** | `SYSTEM/knowledge.md` | 文档→chunk→实体/事件→向量索引，SQLite 6表+3FTS，三级降级搜索 |
 | **知识库维护** 🆕 | `SYSTEM/知识库维护.md` | 按源码逆向分析的分档矩阵：高/中/低/绝对不能放，含自检清单 |
 | **注意力系统** | `SYSTEM/attention-system.md` | **统一大脑**：AI 全流程 5 步 + 3 级优先级(critical/normal/debug 对齐 WeightLevel) + 9 detectors + 探索债务模型 + 决策表 |
-| **回合控制** | `SYSTEM/turn-control.md` | turn/index.ts 2150 行，runOneTurn → afterStep → shouldContinueAfterStop 闭环 |
+| **回合控制** | `SYSTEM/turn-control.md` | 全量重写(07-15)：偏差链4条件/U1-U6/C3 3变体/G3 severity HIGHLOW/addDebt统一债务/FIX_SUFFIX修复路径/墨克尔审计链/quality-degrade消息改写/MAX_CONVERGENCE 3/探索债务模型carryover2+衰减decimals |
 | **注入系统** 🆕 | `SYSTEM/injection-system.md` | 15个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | **v3 三层蒸馏塔**：保真层(错误按预算保留) + 压缩层(成功→一行) + 归档层(>50K触发尾部append) + Edit循环检测。旧功能废弃：MicroCompaction(deprecated)/ArchiveRecover(注销)/incremental LLM summary(移除)。缓存安全基线 cache-stable-v1 ✅ |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | MicroCompaction→已废弃 v3（0.01% token换44%缓存断裂），FullCompaction正常使用 |
