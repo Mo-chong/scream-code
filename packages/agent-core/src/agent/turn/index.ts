@@ -123,6 +123,7 @@ export function shouldTriggerPersistentSummary(_history: readonly any[], _stepCo
 interface ConvergenceCondition {
   readonly check: () => string | null;
   readonly priority: number;
+  readonly severity: 'HIGH' | 'LOW';
 }
 
 export class TurnFlow {
@@ -933,19 +934,25 @@ export class TurnFlow {
               const hasPassedVerificationThisTurn = latestVerification?.passed === true;
 
               if (this.convergenceInjections < this.MAX_CONVERGENCE_INJECTIONS) {
-                const reasons: string[] = [];
+                const highReasons: string[] = [];
+                const lowReasons: string[] = [];
 
-                // — 纯条件（来自数组，按优先级排序）—
+                // — 纯条件（HIGH 在前，LOW 在后）—
                 for (const cond of this.convergenceConditions) {
                   const reason = cond.check();
-                  if (reason) reasons.push(reason);
+                  if (reason) {
+                    if (cond.severity === 'HIGH') highReasons.push(reason);
+                    else lowReasons.push(reason);
+                  }
                 }
 
                 // — 带副作用的条件（confabulation 含 searchBehaviorRules）—
-                this.collectConfabulationBlockReason(reasons);
+                this.collectConfabulationBlockReason(highReasons);
 
                 // — 带 await 的条件（pending-doc 需要异步搜索）—
-                await this.collectPendingDocReason(reasons);
+                await this.collectPendingDocReason(lowReasons);
+
+                const reasons = [...highReasons, ...lowReasons];
 
                 if (reasons.length > 0) {
                   this.convergenceInjections += 1;
@@ -2126,12 +2133,14 @@ export class TurnFlow {
     this.convergenceConditions = [
       {
         priority: 10,
+        severity: 'LOW',
         check: () => !this.currentStepHadContent
           ? 'The last assistant step produced no content or tool calls. Continue the task.'
           : null,
       },
       {
         priority: 9,
+        severity: 'LOW',
         check: () => {
           const goal = this.agent.goal.getGoal().goal;
           return goal?.status === 'active' && !this.todoSeenThisTurn
@@ -2141,6 +2150,7 @@ export class TurnFlow {
       },
       {
         priority: 8,
+        severity: 'HIGH',
         check: () => {
           const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
           const hasPassed = latestVerification?.passed === true;
@@ -2160,6 +2170,7 @@ export class TurnFlow {
       },
       {
         priority: 7,
+        severity: 'HIGH',
         check: () => {
           const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
           if (latestVerification && !latestVerification.passed && !this.verificationFailureInjected) {
@@ -2171,18 +2182,21 @@ export class TurnFlow {
       },
       {
         priority: 6,
+        severity: 'HIGH',
         check: () => this.deviationChainActive && !this.deviationChainResolved
           ? `Deviation chain still active: ${this.deviationChainReason}. Resolve the underlying issue before ending the turn.`
           : null,
       },
       {
         priority: 5,
+        severity: 'LOW',
         check: () => this.verifyFailStep >= 0
           ? 'The last verification pass may be a false pass — no substantive changes were made. Make an actual fix and re-verify.'
           : null,
       },
       {
         priority: 4,
+        severity: 'HIGH',
         check: () => !this.turnHasCalledAnyLsp && this.totalCodeFileEditsThisTurn >= 3
           ? 'Edited ' + this.totalCodeFileEditsThisTurn + '+ code files this turn without any LSP.references call. Verify callers before reporting completion.'
           : null,
