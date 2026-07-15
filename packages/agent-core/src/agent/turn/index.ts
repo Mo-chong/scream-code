@@ -31,6 +31,11 @@ import { compressStep, buildContextSnapshot, extractLastAssistantText } from './
 import { detectConfabulation } from './detectors/confabulation';
 
 import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, getScore, type WeightLevel } from './variant-registry';
+import { checkFaithfulness } from '../../audit/faithfulness';
+import { computeQualityScore } from '../../audit/quality-score';
+import { writeBaseline, readBaseline, getFeedbackInjection } from '../../audit/quality-baseline';
+import { getOutputConstraint } from '../interception/output-constraint';
+import { resolveKnowledgeRequest } from '../injection/knowledge-menu';
 import { TurnEventLog } from './event-log';
 import { EventSnapshotBuffer } from './event-snapshot';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
@@ -184,12 +189,12 @@ export class TurnFlow {
     const d = this.explorationDebt;
     if (d >= this.carryover + 7) {
       this.inject(
-        `债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。${fix}`,
+        `[Debt Monitor] [CRITICAL] 债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。${fix}`,
         { kind: 'injection', variant: 'step_code_explore' },
       );
     } else if (d >= this.carryover + 4) {
       this.inject(
-        `债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。${fix}`,
+        `[Debt Monitor] [WARNING] 债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。${fix}`,
         { kind: 'injection', variant: 'step_code_explore' },
       );
     }
@@ -495,6 +500,7 @@ export class TurnFlow {
       return end;
     } finally {
       this.carryover = Math.min(2, Math.floor(this.explorationDebt)); // 保存跨回合 carryover
+      this.recordQualityBaseline(); // 🆕 P1.5: session-end 质量基线
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
@@ -890,6 +896,15 @@ export class TurnFlow {
                 );
               }
 
+              // 🆕 P2: session-start 质量反馈注入（低分加约束，高分给自由）
+              if (stepNumber === 1) {
+                const baseline = readBaseline();
+                const feedback = getFeedbackInjection(baseline);
+                if (feedback) {
+                  this.inject(feedback, { kind: 'injection', variant: 'quality_feedback' });
+                }
+              }
+
               await this.agent.injection.inject({
                 currentStep: this.currentStep,
                 messageCount: this.agent.context?.history?.length ?? 0,
@@ -992,7 +1007,7 @@ export class TurnFlow {
                     reason: heldReason.length > 120 ? heldReason.slice(0, 117) + '...' : heldReason,
                   });
                   this.inject(
-                    reasons.join('\n') +
+                    '[Convergence Gate]\n' + reasons.join('\n') +
                       '\n\nDo not report completion until the above is resolved.',
                     { kind: 'system_trigger', name: 'convergence_gate' },
                   );
@@ -1010,7 +1025,8 @@ export class TurnFlow {
               ) {
                 this.summaryGuardInjected = true;
                 this.inject(
-                  'Your final response is too brief or only acknowledges completion. ' +
+                  '[Convergence Gate]\n' +
+                    'Your final response is too brief or only acknowledges completion. ' +
                     'Before ending the turn, provide a concise but complete summary: ' +
                     'what was done, which files changed, the verification result, and any ' +
                     'remaining work or blockers.',
@@ -1095,6 +1111,11 @@ export class TurnFlow {
                   { kind: 'injection', variant: 'prepare_edit' },
                 );
               }
+              // 🆕 Phase41: 输出格式约束 — 减认知负荷
+              const constraint = getOutputConstraint(ctx.toolCall.name);
+              if (constraint) {
+                this.inject(constraint, { kind: 'injection', variant: 'output_constraint' });
+              }
               if (ctx.toolCall.name === 'Write') {
                 const path = (ctx.args as { path?: string }).path ?? '';
                 const text = path.endsWith('.md')
@@ -1153,12 +1174,12 @@ export class TurnFlow {
                   }
                   if (d >= this.carryover + 7) {
                     this.inject(
-                      `探索债务 ${d.toFixed(1)} 点（接近上限）。连续低效探索将触发阻断。建议用 codegraph_explore（大面积未知用 maxFiles=12，已知模块用 maxFiles=3）。`,
+                      `[Debt Monitor] [WARNING] 探索债务 ${d.toFixed(1)} 点（接近上限）。连续低效探索将触发阻断。建议用 codegraph_explore（大面积未知用 maxFiles=12，已知模块用 maxFiles=3）。`,
                       { kind: 'injection', variant: 'step_code_explore' },
                     );
                   } else if (d >= this.carryover + 4) {
                     this.inject(
-                      '检测到连续 Read/Grep 探索。试试用 codegraph_explore 查符号关联和调用路径。大面积未知探索用 maxFiles=12，已知模块探细节用 maxFiles=3。如果已知道符号名，node/callees 更精准。',
+                      '[Debt Monitor] [INFO] 连续 Read/Grep 探索。试试用 codegraph_explore 查符号关联和调用路径。大面积未知探索用 maxFiles=12，已知模块探细节用 maxFiles=3。如果已知道符号名，node/callees 更精准。',
                       { kind: 'injection', variant: 'step_code_explore' },
                     );
                   }
@@ -1834,6 +1855,7 @@ export class TurnFlow {
       });
     }
     this.runQualityDetection(sig);
+    this.checkFaithfulness();
 
     // 🆕 Phase15: 行为已观察的变体 → 重置跨回合违规计数
     this.resetObservedBehaviorViolations();
@@ -2005,6 +2027,85 @@ export class TurnFlow {
         this.trackBehaviorViolation(qualityIssue.targetVariant);
       }
     }
+  }
+
+  /** P0.5: 被动忠实性检测 — 检查推理动词是否与实际工具调用一致 */
+  private checkFaithfulness(): void {
+    const text = extractLastAssistantText(this.agent.context.history);
+    const result = checkFaithfulness(text, this.stepToolCounts);
+    if (!result.consistent) {
+      this.eventLog.record({
+        kind: 'faithfulness',
+        variant: result.mismatches[0]?.desc ?? 'unknown',
+        action: 'mismatch',
+        step: this.currentStep,
+        turnId: this.currentTurnId,
+        reason: `推理说"${result.mismatches[0]?.verb ?? '?'}"但未调用期望工具 [${result.mismatches[0]?.expectedTools.join(', ') ?? ''}], 实际调了 [${result.mismatches[0]?.actualTools.join(', ') ?? ''}]`,
+        agentType: this.agent.type,
+      });
+    }
+
+    // 🆕 P1.6: REQUEST: 知识主动请求处理
+    const knowledge = resolveKnowledgeRequest(text);
+    if (knowledge) {
+      this.inject(knowledge, { kind: 'injection', variant: 'knowledge_request' });
+      this.eventLog.record({
+        kind: 'knowledge_request',
+        variant: 'request_resolved',
+        action: 'active',
+        step: this.currentStep,
+        turnId: this.currentTurnId,
+        reason: 'AI 主动请求知识域并已注入',
+        agentType: this.agent.type,
+      });
+    }
+  }
+
+  /** P1.5: session-end 质量基线记录 */
+  private recordQualityBaseline(): void {
+    const events = this.eventLog?.events;
+    if (!events || events.length === 0) return;
+
+    const toolErrEvents = this.agent.sessionMemory?.toolExecutions ?? [];
+    const totalToolCalls = toolErrEvents.length;
+    const toolErrors = toolErrEvents.filter((e: any) => e.isError).length;
+
+    const deviationHits = events.filter(
+      (e: any) => e.kind === 'detector_fired' && e.action === 'active',
+    ).length;
+    const convergenceHits = events.filter(
+      (e: any) => e.kind === 'interception_delivery' || e.variant === 'convergence_gate',
+    ).length;
+    const faithCount = events.filter((e: any) => e.kind === 'faithfulness').length;
+    const faithMismatches = events.filter(
+      (e: any) => e.kind === 'faithfulness' && e.action === 'mismatch',
+    ).length;
+
+    const score = computeQualityScore({
+      totalSteps: this.currentStep,
+      deviationCount: deviationHits,
+      convergenceCount: convergenceHits,
+      toolErrorCount: toolErrors,
+      toolTotalCount: totalToolCalls,
+      faithfulnessMismatchCount: faithMismatches,
+      faithfulnessTotalCount: faithCount,
+      finalDebt: this.explorationDebt,
+      debtCap: this.carryover + 7,
+    });
+
+    // 记录到 event-log
+    this.eventLog.record({
+      kind: 'quality_score',
+      variant: 'session_baseline',
+      action: 'recorded',
+      step: this.currentStep,
+      turnId: this.currentTurnId,
+      reason: `qualityIndex=${score.qualityIndex} dev=${score.scores.deviation} conv=${score.scores.convergence} tool=${score.scores.toolAccuracy} faith=${score.scores.faithfulness} debt=${score.scores.debtHealth}`,
+      agentType: this.agent.type,
+    });
+
+    // 🆕 P2: 持久化 qualityIndex → 下个 session 反馈回路使用
+    writeBaseline(score.qualityIndex);
   }
 
   /** 偏差链修复跟踪 */

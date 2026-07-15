@@ -63,6 +63,7 @@ export class AttentionPositionStrategy implements PositionStrategy {
     'system_', 'intent_', 'prepare_', 'post_', 'step_after_',
     'guard_feedback_', 'feedback_', 'scene_memory_', 'step_code_',
     'code_quality_', 'system_ref_', 'truncation_recover_',
+    'knowledge_', 'output_', 'convergence_',
   ];
 
   private warnedVariants = new Set<string>();

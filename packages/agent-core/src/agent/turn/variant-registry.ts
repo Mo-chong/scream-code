@@ -202,7 +202,8 @@ export class VariantRegistry {
  */
 export function detectWeightLevel(text: string): WeightLevel {
   if (text.startsWith('<system-reminder') || text.includes('<|im_start|>')) return 'critical';
-  if (/\b(MUST|NEVER|ALWAYS|REQUIRED)\b/.test(text)) return 'critical';
+  if (/\b(MUST|NEVER|ALWAYS|REQUIRED|CRITICAL)\b/.test(text)) return 'critical';
+  if (text.startsWith('[Convergence Gate]')) return 'critical';
   if (/^Step \d|^\d+\.|^-\s|^In one sentence/.test(text) || /\bIf\s+.+\bthen\b/i.test(text)) return 'normal';
   if (/\b(DO NOT|不要|Never|不得)\b/i.test(text)) return 'critical';
   return 'debug';

@@ -185,13 +185,17 @@ function isCodegraphResult(toolName: string | undefined, text: string): boolean 
   return false;
 }
 
-/** 压缩 codegraph 结果：保留 L1+L2（摘要+调用关系），去掉 L3 源码块 */
+/** 压缩 codegraph 结果：保留 L1+L2（摘要+调用关系），去掉 L3 源码块
+ *
+ * codegraph 三层架构:
+ *   L1(文件/符号索引) + L2(调用关系) 在第1个 ``` 前
+ *   L3(源码块) 在第1个 ``` 后 — 有意设计的可裁剪内容，需时重新查询
+ */
 function getCodegraphSummary(text: string): string {
   const codeBlockStart = text.indexOf('\n```');
-  if (codeBlockStart === -1) return text;
-  const summary = text.slice(0, codeBlockStart).trim();
-  if (summary.split('\n').length < 3) return text;
-  return summary;
+  if (codeBlockStart === -1) return text; // 纯文本，无 L3 需裁剪
+  const l1l2 = text.slice(0, codeBlockStart).trim();
+  return l1l2 || text; // L1+L2 为空时保全文（极少发生）
 }
 
 // ─── 入口 ─────────────────────────────────────────────────
