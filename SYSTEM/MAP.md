@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/index, status/final]
 keywords: [地图, map, 模块, 文件索引]
-updated: 2026-07-11
+updated: 2026-07-15
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -16,16 +16,16 @@ updated: 2026-07-11
 
 ```
 ├─ ☑ AI 全景入口（优先读）
-│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制/上下文/Guard/数据流/阅读顺序
+│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制(收敛门severity+addDebt)/上下文/偏差链+债务模型/数据流(Phase40)
 
 ├─ 接口手册
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门/探索债务模型
+│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/addDebt统一债务+FIX_SUFFIX/墨克尔链(Phase40)
 │   ├─ injection-system.md        — ☑ 注入系统：15个注入器/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
-│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级(Phase38/39)
-│   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors(Phase38/39)
+│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + addDebt+FIX_SUFFIX修复路径(Phase38/39/40)
+│   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors + quality-degrade消息改写(Phase38/39/40)
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
 
 ├─ AGENTS 架构
