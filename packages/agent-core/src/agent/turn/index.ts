@@ -1933,13 +1933,7 @@ export class TurnFlow {
       this.deviationChainReason = '连续多次 Edit 未查 LSP.references：已触发偏差拦截。';
     }
 
-    // 条件 2: 验证失败（已有）
-    if (!this.deviationChainActive && this.verifyFailedThisStep) {
-      this.deviationChainActive = true;
-      this.deviationChainReason = '验证失败：已触发偏差拦截。';
-    }
-
-    // 🆕 条件 3: 行为违规累积 → 偏差拦截
+    // 条件 2: 行为违规累积 → 偏差拦截
     if (!this.deviationChainActive) {
       for (const [variant, count] of Object.entries(this.crossTurnFlags.behaviorViolations)) {
         const meta = VARIANT_META[variant];
@@ -1964,9 +1958,6 @@ export class TurnFlow {
     'guard_feedback_rule_2',
     'guard_feedback_rule_3',
     'guard_feedback_rule_4',
-    'scene_memory_recall',
-    'step_after_edit',
-    'step_after_verify_fail',
   ]);
 
   /** 🆕 Phase15: 追踪行为变体的跨回合 S→S 违规计数 */
@@ -1994,9 +1985,6 @@ export class TurnFlow {
       guard_feedback_rule_2: '— 系统检测到你声称"检查发现"但实际无 Read/Grep/LSP 调用。',
       guard_feedback_rule_3: '— 系统检测到你声称"已修改"但实际无 Edit/Write 调用。',
       guard_feedback_rule_4: '— 系统检测到你依赖记忆替代了实际代码验证。',
-      scene_memory_recall:   '— 系统检测到用户提"上次/以前"但你未查 MemoryLookup。',
-      step_after_edit:       '— 系统检测到 Edit 后未查 LSP.references。',
-      step_after_verify_fail:'— 系统检测到验证失败后未按要求修复。',
     };
     const specificGuidance = variantGuidance[variant] ?? '— 系统检测到重复行为违规。';
     const count = this.crossTurnFlags.behaviorViolations[variant] ?? 0;
@@ -2030,10 +2018,6 @@ export class TurnFlow {
     if (!this.deviationChainActive || this.deviationChainResolved) return;
     if (this.deviationChainReason.includes('Edit 未查 LSP.references')) {
       if (this.hasCalledLspReferencesThisStep) this.deviationChainResolved = true;
-    } else if (this.deviationChainReason.includes('验证失败')) {
-      const lastText = extractLastAssistantText(this.agent.context.history);
-      const sig = compressStep(this.stepToolCounts, lastText);
-      if (sig.hasVerificationTools) this.deviationChainResolved = true;
     }
     // Phase 18: 代码质量偏差链 — 违规消失则已修复
     if (this.deviationChainReason.includes('代码质量')) {
