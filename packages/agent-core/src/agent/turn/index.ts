@@ -166,6 +166,24 @@ export class TurnFlow {
   private deviationChainActive = false;
   private deviationChainReason = '';
 
+  /** 🆕 Phase40: 统一债务累积 — 各类重复错误通过此接口加债 */
+  private addDebt(reason: string, amount: number = 0.5): void {
+    this.explorationDebt += amount;
+    // 每次加债都生成一次提醒（不等到 debt 累计到 4/7/10 才有反馈）
+    const d = this.explorationDebt;
+    if (d >= this.carryover + 7) {
+      this.inject(
+        `债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。`,
+        { kind: 'injection', variant: 'step_code_explore' },
+      );
+    } else if (d >= this.carryover + 4) {
+      this.inject(
+        `债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。`,
+        { kind: 'injection', variant: 'step_code_explore' },
+      );
+    }
+  }
+
   // ── Deviation chain: resolved tracking (Phase 8) ─────────────
   private deviationChainResolved = false;
 
@@ -1203,6 +1221,11 @@ export class TurnFlow {
                 ctx.result,
               );
               const { isError, output } = finalResult;
+
+              // 🆕 Phase40: 通用债务累积 — 任何工具报错都加债
+              if (isError) {
+                this.addDebt(`${ctx.toolCall.name} 报错`, 0.5);
+              }
 
               // FAA: 记录所有工具操作（全部工具类型、成功+失败、结果预览前500字符）
               const raw = typeof output === 'string' ? output : String(output ?? '');
