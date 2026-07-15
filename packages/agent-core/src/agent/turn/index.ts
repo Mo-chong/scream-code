@@ -167,18 +167,29 @@ export class TurnFlow {
   private deviationChainReason = '';
 
   /** 🆕 Phase40: 统一债务累积 — 各类重复错误通过此接口加债 */
+  /** 🆕 Phase40: 高频工具修复路径映射 */
+  private static readonly FIX_SUFFIX: Record<string, string> = {
+    Edit: ' 修复: /edit-fix',
+    Bash: ' 修复: 检查参数或换内置工具 Read/Grep/Glob',
+    Read: ' 修复: 检查路径或改用 Glob 搜索',
+    Grep: ' 修复: 调整 pattern 或改用 codegraph_explore',
+    Write: ' 修复: 目录是否存在？用 Glob 确认',
+  };
+
   private addDebt(reason: string, amount: number = 0.5): void {
     this.explorationDebt += amount;
-    // 每次加债都生成一次提醒（不等到 debt 累计到 4/7/10 才有反馈）
+    // 根据工具名尾部追加修复路径
+    const toolName = reason.replace(' 报错', '');
+    const fix = TurnFlow.FIX_SUFFIX[toolName] ?? '';
     const d = this.explorationDebt;
     if (d >= this.carryover + 7) {
       this.inject(
-        `债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。`,
+        `债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。${fix}`,
         { kind: 'injection', variant: 'step_code_explore' },
       );
     } else if (d >= this.carryover + 4) {
       this.inject(
-        `债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。`,
+        `债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。${fix}`,
         { kind: 'injection', variant: 'step_code_explore' },
       );
     }
