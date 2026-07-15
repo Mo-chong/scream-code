@@ -54,14 +54,20 @@ export const qualityDegradeDetector: DetectorFn = (ctx): RawSignal | null => {
     : 'critical' as const;
 
   // 根据严重级别生成不同消息
+  // 保护：只有当 bestMessage 在合理长度范围内才嵌入具体描述，否则回退通用消息
   const severityLabel = highestSeverity;
-  const baseMsg = bestMessage || `质量偏差升级至 ${severityLabel} 级`;
+  const hasGoodMessage = bestMessage.length >= 10 && bestMessage.length <= 80;
+  const baseMsg = hasGoodMessage ? bestMessage : `质量偏差升级至 ${severityLabel} 级`;
 
   const messageMap: Record<Severity, string> = {
-    C: `${baseMsg}\n- 考虑改用结构化方法。`,
-    B: `${baseMsg}\n- 请遵循结构化方式推进。`,
-    A: `${baseMsg}\n- 必须在继续前修正此问题。`,
-    S: `${baseMsg}\n- 禁止重复此模式，违反系统规则。`,
+    C: hasGoodMessage ? `${baseMsg} — 建议用工具验证代替手动推断。`
+       : `${baseMsg}\n- 考虑改用结构化方法。`,
+    B: hasGoodMessage ? `${baseMsg}（已重复多步）— 请 Read 当前内容后再操作。`
+       : `${baseMsg}\n- 请遵循结构化方式推进。`,
+    A: hasGoodMessage ? `${baseMsg} — 必须修正后继续，否则回合终止。建议换方法或缩小范围。`
+       : `${baseMsg}\n- 必须在继续前修正此问题。`,
+    S: hasGoodMessage ? `${baseMsg} — 已触发上限，违反系统规则。`
+       : `${baseMsg}\n- 禁止重复此模式，违反系统规则。`,
   };
 
   return {
