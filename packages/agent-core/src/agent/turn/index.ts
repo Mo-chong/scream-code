@@ -164,7 +164,6 @@ export class TurnFlow {
   // ── Toxicity early interception fields ───────────────────────
   private deviationChainActive = false;
   private deviationChainReason = '';
-  private deviationChainBypassUsed = false;
 
   // ── Deviation chain: resolved tracking (Phase 8) ─────────────
   private deviationChainResolved = false;
@@ -222,7 +221,9 @@ export class TurnFlow {
 
   // ── Phase 14: 跨回合标记 ───────────────────────────────────────
   private crossTurnFlags: {
+    /** 上回合 guard rule 1 触发 */
     lastTurnHadGuardRule1: boolean;
+    /** 上回合偏差链活跃 */
     lastTurnHadDeviation: boolean;
     /** 🆕 Phase15: 跨回合 S→S 升级计数（跨回合累积，behaviorObserved 时单个变体重置） */
     behaviorViolations: Record<string, number>;
@@ -590,7 +591,6 @@ export class TurnFlow {
     this.editWithoutLookupCount = 0;
     this.deviationChainActive = false;
     this.deviationChainReason = '';
-    this.deviationChainBypassUsed = false;
     this.deviationChainResolved = false;
     this.confabulationBlocked = false;
     this.verifyFailStep = -1;
@@ -926,30 +926,6 @@ export class TurnFlow {
             shouldContinueAfterStop: async ({ signal }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
-
-              // ── 毒性早期拦截：偏差链打断（优先级高于 convergence gate）─
-              if (this.deviationChainActive && !this.deviationChainBypassUsed) {
-                this.deviationChainBypassUsed = true;
-                this.eventLog.record({
-                  kind: 'deviation_chain', variant: 'deviation_chain_intercept', action: 'gate_held',
-                  step: this.currentStep, turnId: this.currentTurnId,
-                  reason: this.deviationChainReason,
-                });
-                // 🆕 Phase15: 差异化拦截消息 — 行为违规 vs 代码级条件
-                let interceptMsg: string;
-                if (this.deviationChainReason.includes('行为变体')) {
-                  // 行为违规累积触发
-                  const violatingVariant = this.detectTriggerVariant();
-                  interceptMsg = this.buildBehaviorInterceptMsg(violatingVariant);
-                } else {
-                  interceptMsg = '偏差链检测到：' + this.deviationChainReason + '\n' +
-                    '- MUST verify all claims with tool calls.\n' +
-                    '- NEVER fabricate outputs. Each claim needs tool evidence.\n' +
-                    '- Fix the root cause. Do NOT work around.';
-                }
-                this.inject(interceptMsg, { kind: 'injection', variant: 'deviation_chain_intercept' });
-                return { continue: true };
-              }
 
               // Convergence gate: runs all conditions; pure conditions use the
               // convergenceConditions array, async/side-effect conditions use named methods.
@@ -1967,33 +1943,6 @@ export class TurnFlow {
     // 递增计数（首次设为 1）
     this.crossTurnFlags.behaviorViolations[variant] =
       (this.crossTurnFlags.behaviorViolations[variant] || 0) + 1;
-  }
-
-  /** 🆕 Phase15: 检测触发拦截的具体变体 */
-  private detectTriggerVariant(): string {
-    for (const [variant, count] of Object.entries(this.crossTurnFlags.behaviorViolations)) {
-      const meta = VARIANT_META[variant];
-      const threshold = meta?.interceptThreshold ?? 0;
-      if (threshold > 0 && count >= threshold) return variant;
-    }
-    return 'unknown';
-  }
-
-  /** 🆕 Phase15: 生成行为违规拦截的指导消息 */
-  private buildBehaviorInterceptMsg(variant: string): string {
-    const variantGuidance: Record<string, string> = {
-      guard_feedback_rule_2: '— 系统检测到你声称"检查发现"但实际无 Read/Grep/LSP 调用。',
-      guard_feedback_rule_3: '— 系统检测到你声称"已修改"但实际无 Edit/Write 调用。',
-      guard_feedback_rule_4: '— 系统检测到你依赖记忆替代了实际代码验证。',
-    };
-    const specificGuidance = variantGuidance[variant] ?? '— 系统检测到重复行为违规。';
-    const count = this.crossTurnFlags.behaviorViolations[variant] ?? 0;
-    return [
-      `偏差链检测到：行为变体 ${variant} 连续 ${count} 回合 S→S 升级但行为未见改善。`,
-      specificGuidance,
-      '- 要求：MUST 用工具调用验证所有声明。NEVER 声称有证据但实际没有。',
-      '- 修正前本回合将持续拦截。',
-    ].join('\n');
   }
 
   /** 质量升级检测 */
