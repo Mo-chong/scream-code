@@ -405,6 +405,57 @@ updated: 2026-07-11
 - `DECISIONS/方案-3-codegraph智能触发机制重设计.md` — 完整方案，749 行（含附录 A 智能压缩 + B 工具对比）
 
 
+### Phase42 — 智能上下文注入：域门控 + 分类债务账本 DebtLedger（2026-07-15）
+
+**新文件（4）：**
+- `audit/debt-ledger.ts` — 分类债务账本，替代 explorationDebt 一锅烩
+- `injection/domain-analyzer.ts` — 域分析引擎 + INJECTOR_DOMAIN_MAP + shouldSkipByDomain
+- `injection/knowledge-menu.ts` — KnowledgeMenuInjector + REQUEST: 协议
+- `interception/output-constraint.ts` — 输出格式约束注册表
+
+**分类债务账本 DebtLedger：**
+- 4 分类：exploration / tool_error / reasoning / gate，各自记债
+- 分类阻断：exploration 超限→封 Read/Grep，tool_error 超限→封 Edit/Write，total≥25→全阻断
+- 3 种偿还：每次正确调用 repayAll()、连续3次正确奖励、收敛门解决 repayGate()
+- toolToCategory() 工具名自动映射，FIX_SUFFIX 分类引导（不再一刀切"用 codegraph"）
+
+**域门控 + 优先级提升：**
+- analyzeActiveDomains() 从推理文本关键词+工具调用推断活跃域
+- 域门控跳过不相关注入器（shouldSkipByDomain），噪音减少
+- 域匹配注入器自动提升优先级（debug→normal, normal→critical）
+- user-prefs 位置 8→2（紧跟 plugin-session-start，利用 Attention Sink）
+
+**qualityIndex 反馈回路：**
+- audit/quality-baseline.ts：session-end 写 ~/.scream-code/quality-baseline.json
+- session-start 读取并注入反馈
+- 修复 2 bug：convergenceHits 过滤条件错 + faithfulness 只记不一致
+
+**关联改动：** turn/index.ts（DebtLedger 替换 9 处 explorationDebt/carryover）、manager.ts（user-prefs 第 8→2）、router.ts（域门控 + level boost）、variant-registry.ts（CRITICAL 识别）。已清：`explorationDebt` 字段。
+
+**Phase42b — 工具智能 + 路径豁免 + 批量标记（2026-07-15）：**
+- **工具别名映射（TOOL_ALIAS）**：turn/index.ts A组，`codegraph_explore`→`mcp__codegraph__codegraph_explore`，`codegraph_node`→`mcp__codegraph__node`。AI 调短名自动转 MCP 全名，不再报"Tool not found"。
+- **knownPaths 路径豁免**：codegraph/LSP 返回的文件路径自动记录到 `knownPaths: Set<string>`，Read 匹配这些路径不算探索债。验证性读取不再扣币。
+- **\[BulkRead\] 批量标记**：AI 声明 `[BulkRead: src/auth/*.ts]` 后，前缀匹配的 Read 全部豁免探索债。计划性批量审计不被打断。
+- **isExploratoryReadGrep 增强**：增加 knownPaths + bulkReadPatterns 两项豁免检查。
+
+
+### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
+
+**P0 — 信息结构优化：**
+- user-prefs.md：新增 Work Style 6 条 + [InsufficientContext] MUST 指令
+- mask-tool-observations.ts：三层感知蒸馏（L1+L2 完整保，L3 源码块砍）
+- AGENTS.md 冲突清理（全局→个人风格迁入 /like，双写零冲突）
+
+**P1 — 注意力增强 + 定量 baseline：**
+- 角色前缀 + severity 标签（[Debt Monitor] [CRITICAL/WARNING/INFO]）
+- output-constraint.ts（Edit/Write/Bash 格式约束）
+- audit/quality-score.ts（5 维评分）
+- QualityScore session-end hook → quality-baseline.ts 持久化 + session-start 反馈注入
+- CRITICAL 规则进开头 10%（detectWeightLevel + KNOWN_PREFIXES）
+
+**新文件（5）：** faithfullness.ts | quality-score.ts | quality-baseline.ts | knowledge-menu.ts | output-constraint.ts
+
+
 ### Phase40 — 拦截审计+CodeGraphTool内建+债务模型bugfix（2026-07-14）
 
 **拦截系统正收益审计+执行：**

@@ -22,7 +22,7 @@ updated: 2026-07-15
 runOneTurn()
   │
   ├── perTurnSetup()              ← 重置所有状态
-  │   ├── debtd/carryover/keyword 重置
+  │   ├── DebtLedger/carryover 重置
   │   ├── eventLog.clear()
   │   ├── appendUserMessage(input)
   │   └── Phase 4: 意图注入
@@ -38,13 +38,15 @@ runOneTurn()
        │   ├── 反事实检测（confidence >= 3 → confabulationBlocked = true）
        │   ├── 质量升级检测（C→B→A→S）
        │   ├── 工具后注入（C5: step_after_edit / step_after_verify_fail）
-       │   ├── 探索债务计数（Read/Grep +1，同主题+0.5）
+       │   ├── DebtLedger分类债务账本（exploration/tool_error/reasoning/gate）+ 偿还机制
+       │   ├── 忠实性检测（faithfulness：被动，无 token 开销）
+       │   ├── REQUEST 知识请求（protocol + step 1 inject）
        │   └── 健康检查 + resetInjectorStepState
        │
        ├── prepareToolExecution() ← 工具执行前阻断
        │   ├── H1 dedup
        │   ├── H2 Bash error loop
-       │   ├── H3 债务 ≥10 → 阻断
+       │   ├── H3 DebtLedger分类阻断（exploration超限→封Read/Grep, tool_error超限→封Edit/Write, total≥25→全阻断）
        │   ├── H4 偏差链+代码质量 → 阻断 Write/Edit
        │   └── H5 截断恢复
        │
@@ -67,14 +69,9 @@ runOneTurn()
 | 字段 | 类型 | 作用 |
 |------|------|------|
 | `confabulationBlocked` | boolean | Guard 和反事实检测设置，收敛门消费 |
+| `debtLedger` | DebtLedger | 分类债务账本（exploration/tool_error/reasoning/gate） |
+| `maxConvergenceInjections` | 3 | 收敛门最大注入次数 |
 | `deviationChainActive` | boolean | 偏差链激活标志 |
-| `verifyFailStep` | number | 验证假通过检测 |
-| `convergenceInjections` | number | 收敛注入计数器，上限 3 |
-| `MAX_CONVERGENCE_INJECTIONS` | 3 | 收敛门最大注入次数 |
-| `explorationDebt` | float | 探索债务（+1/+0.5，不归零） |
-| `carryover` | number | 跨回合债务延续，min(2, floor(debt)) |
-| `nonExploreStepsSinceLastExplore` | number | 非探索步计数器（每 3 步 -1） |
-| `recentExplorationKeywords` | Set[] | 近 4 步关键词快照（语义重复检测） |
 
 ---
 
@@ -90,7 +87,9 @@ runOneTurn()
 
 每次 AI 生成完一步后执行。包含所有检测和注入逻辑：
 - 偏差链 4 条件（C1: Edit≥3未查LSP / C3: 行为变体累计 / C4: 代码质量）
-- 探索债务计数
+- DebtLedger分类债务账本 + 偿还机制
+- 忠实性检测（faithfulness：被动无感，不占 token budget）
+- REQUEST 知识请求（协议：LLM → system 发 REQUEST，step 1 注入回答）
 - 语义重复检测 + 后置校验
 - C5 工具后注入
 
@@ -100,7 +99,9 @@ runOneTurn()
 
 ### addDebt(reason, amount)
 
-**Phase40 新增** — 统一债务累积接口。所有工具报错（Bash 超时除外）通过此接口加债 0.5，债务达 carryover+4/+7 时触发针对性提醒，尾部追加 `FIX_SUFFIX` 修复路径。
+**Phase40 新增，Phase42 起重构为 DebtLedger 分类账本（`audit/debt-ledger.ts`）**。
+`addDebt(reason, amount)` 通过 `toolToCategory(toolName)` 自动映射到 4 个分类（exploration/tool_error/reasoning/gate），不再使用 `carryover`。
+见 §DebtLedger 分类债务账本。
 
 ---
 
@@ -147,6 +148,63 @@ runOneTurn()
 
 ---
 
+## DebtLedger 分类债务账本（Phase42，替代 explorationDebt）
+
+从 Phase42 起，`explorationDebt` 单一债务升级为 **DebtLedger** 分类账本（`audit/debt-ledger.ts`）：
+4 类单独记债、单独引导、分类阻断。**有偿还债**（每步正确调用自动减债）。
+
+### 债务分类
+
+| 分类 | 加债场景 | 金额 | 加债入口 |
+|------|---------|:----:|---------|
+| `exploration` | 低效 Read/Grep/Glob/WebSearch | +0.5 | `addDebt('Read 报错')` → `toolToCategory('Read')` → exploration |
+| `tool_error` | Edit/Write/Bash 报错 | +0.5 | `addDebt('Edit 报错')` → `toolToCategory('Edit')` → tool_error |
+| `reasoning` | faithfulness mismatch（推理动词≠工具调用） | +0.3 | `checkFaithfulness()` → mismatch → `debtLedger.addDebt('reasoning')` |
+| `gate` | 收敛门 G3 拦截 | +1.0 | 收敛门触发时 `debtLedger.addDebt('gate', '收敛门拦截', 1.0)` |
+
+### 偿还机制
+
+| 机制 | 触发 | 金额 |
+|------|------|:----:|
+| `repayAll()` | 每次正确工具调用（在 handleAfterStep 中） | -0.05/类，总计 -0.2/步 |
+| streak bonus | 连续 3 次正确调用（某分类无加债） | 额外 -0.3（该分类），连胜计数器归零 |
+| `repayGate()` | 收敛门解决（流程完成） | -0.5（gate 分类）|
+
+### 定向阻断
+
+统一阈值 12.0（gate 8.0），安全网 total ≥ 25。在 B 组 prepareToolExecution 中由 `shouldBlockTool()` 直接阻断：
+
+| 条件 | 阻断范围 | 消息模板 |
+|------|---------|---------|
+| exploration ≥ 12 | 封 Read / Grep / Glob / WebSearch | "探索债务已达 N 点。用 codegraph_explore。" |
+| tool_error ≥ 12 | 封 Edit / Write | "工具错误债务 N 点。检查格式约束。" |
+| reasoning ≥ 12 | 无工具阻断（仅警告注入） | "推理不一致债务 N 点。" |
+| gate ≥ 8 | 全工具阻断 | "拦截债务高，需全面修正策略。" |
+| total ≥ 25 | 全阻断（安全网） | "总债务达上限，报告用户请求介入。" |
+
+> 与旧机制的差异：阻断不通过 InjectionRouter，不走 ToolPatternDetector（DebtLedger 直接阻断，不经过检测器管线）。阻断消息由 `DebtLedger.getGuidance()` 生成，**仅阻断超限分类的工具**，其他工具可正常还债。
+
+### ② Phase42b：工具别名 + 路径豁免 + 批量标记
+
+#### 工具别名映射（turn/index.ts A组）
+
+| AI 说的短名 | 系统转为 | 解决 |
+|-------------|---------|------|
+| `codegraph_explore` | `mcp__codegraph__codegraph_explore` | system.md 写短名，MCP 注册长名，AI 不混淆 |
+| `codegraph_node` | `mcp__codegraph__node` | 同上 |
+
+A组 prepareToolExecution 前：`TOOL_ALIAS[ctx.toolCall.name] ?? ctx.toolCall.name`，匹配到的直接改写 `ctx.toolCall.name`。
+
+#### knownPaths 路径豁免
+
+**机制：** codegraph/LSP 调用成功 → 提取输出中的源码路径（`.ts/.js/.tsx/.jsx/.py/.go/.rs`）→ 写入 `knownPaths: Set<string>` → `isExploratoryReadGrep()` 检查 Read 路径是否匹配 → 匹配则不算探索债。每 session newTurn 清空。
+
+#### [BulkRead] 批量标记
+
+**机制：** AI 在推理文本中声明 `[BulkRead: src/auth/*.ts]` → `checkFaithfulness()` 检测 → `bulkReadPatterns[]` 记录 → `isExploratoryReadGrep()` 前缀匹配（`src/auth/`）→ 豁免。
+
+---
+
 ## 收敛门 severity 分区（Phase40）
 
 | 条件 | severity | 触发条件 |
@@ -161,9 +219,18 @@ runOneTurn()
 
 收敛门注入消息的顺序是 HIGH 全部在先，LOW 全部在后。
 
+### 质量基线（Phase41）
+
+| 机制 | 时机 | 说明 |
+|------|------|------|
+| recordQualityBaseline | session-end | 记录当前回合的质量指标（偏差链触发次数、债务峰值、收敛注入次数、反事实次数）|
+| getFeedbackInjection | session-start | 读取上一 session 的质量基线，若存在未解决的偏差模式则在首回合注入反馈 |
+
 ---
 
-## 探索债务模型
+## [DEPRECATED] 探索债务模型（旧，被 DebtLedger 取代 2026-07-15）
+
+> ⚠️ 已废弃。替代为 `DebtLedger.exploration` 分类（见 §DebtLedger 分类债务账本）。以下保留仅供历史参考。
 
 | 机制 | 规格 | 说明 |
 |------|------|------|
@@ -214,11 +281,13 @@ S 级: `${bestMessage} — 已触发上限，违反系统规则。`
 
 ---
 
-## 关键常量变化（Phase40）
+## [DEPRECATED] 关键常量变化（旧探索债务模型，Phase40 → 已废弃）
+
+> ⚠️ 已废弃。以下常量来自旧 `explorationDebt` 模型，已被 **DebtLedger** 替换。保留仅供参考。
 
 | 常量 | 旧值 | 新值 | 备注 |
 |------|------|------|------|
-| `MAX_CONVERGENCE_INJECTIONS` | 5 | 3 | 收敛门上限 |
-| `carryover` 取值 | min(3, debt) | min(2, debt) | 降低跨回合敏感度 |
-| codegraph 减债 | debt -2 | **移除** | 防作弊 |
-| 自然衰减 | -0.1/步 | -1/3步 | 加速 |
+| `MAX_CONVERGENCE_INJECTIONS` | 5 | 3 | 收敛门上限（仍有效）|
+| `carryover` 取值 | min(3, debt) | min(2, debt) | 旧探索债务模型，已失效 |
+| codegraph 减债 | debt -2 | **移除** | 旧探索债务模型，已失效 |
+| 自然衰减 | -0.1/步 | -1/3步 | 旧探索债务模型，已失效 |

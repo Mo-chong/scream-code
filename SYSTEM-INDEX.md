@@ -19,6 +19,11 @@
 ├─ 接口手册        API-REFERENCE.md
 ├─ AGENTS 架构
 │   └─ 三层加载链  agents-hierarchy.md
+├─ 审计系统
+│   ├─ 分类债务    audit/debt-ledger.ts
+│   ├─ 忠实性检测  audit/faithfulness.ts
+│   ├─ 质量评分    audit/quality-score.ts
+│   └─ 质量基线    audit/quality-baseline.ts
 ├─ 执行架构
 │   ├─ 回合控制    turn-control.md
 │   ├─ 注入系统    injection-system.md
@@ -65,9 +70,9 @@
 | **Dream 整理系统** | `SYSTEM/dream.md` | 自动去重合并/清理过期/保护标签（baohu）免疫 |
 | **知识系统（knowledge包）** | `SYSTEM/knowledge.md` | 文档→chunk→实体/事件→向量索引，SQLite 6表+3FTS，三级降级搜索 |
 | **知识库维护** 🆕 | `SYSTEM/知识库维护.md` | 按源码逆向分析的分档矩阵：高/中/低/绝对不能放，含自检清单 |
-| **注意力系统** | `SYSTEM/attention-system.md` | **统一大脑**：AI 全流程 5 步 + 3 级优先级(critical/normal/debug 对齐 WeightLevel) + 9 detectors + 探索债务模型 + 决策表 |
-| **回合控制** | `SYSTEM/turn-control.md` | 全量重写(07-15)：偏差链4条件/U1-U6/C3 3变体/G3 severity HIGHLOW/addDebt统一债务/FIX_SUFFIX修复路径/墨克尔审计链/quality-degrade消息改写/MAX_CONVERGENCE 3/探索债务模型carryover2+衰减decimals |
-| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 15个注入器/三路径统一/budget绕过/残差公式 R=W×D^Δs + 阈值衰减 + Phase36 session_summary+persistent_summary接管摘要注入 |
+| **注意力系统** | `SYSTEM/attention-system.md` | **统一大脑**：AI 全流程 5 步 + 3 级优先级(critical/normal/debug) + DebtLedger分类债务(4类+偿还+分类阻断) + 域门控 + 知识菜单REQUEST + 忠实性检测 + qualityIndex反馈(Phase41/42) |
+| **回合控制** | `SYSTEM/turn-control.md` | 全量重写(07-15)：偏差链4条件/U1-U6/C3 3变体/G3 severity HIGHLOW/addDebt→DebtLedger(4类+偿还)+faithfulness+知识菜单REQUEST+墨克尔审计链/quality-degrade/探索债务模型carryover2+衰减 |
+| **注入系统** 🆕 | `SYSTEM/injection-system.md` | 16注入器(Phase41新增KnowledgeMenuInjector+域门控+output-constraint)/三路径统一/budget绕过/残差公式/domain-analyzer域门控(关键词+工具名→活跃域→跳过低优优先级) |
 | **上下文管理** 🆕 | `SYSTEM/context-management.md` | **v3 三层蒸馏塔**：保真层(错误按预算保留) + 压缩层(成功→一行) + 归档层(>50K触发尾部append) + Edit循环检测。旧功能废弃：MicroCompaction(deprecated)/ArchiveRecover(注销)/incremental LLM summary(移除)。缓存安全基线 cache-stable-v1 ✅ |
 | **上下文压缩**（旧版） | `SYSTEM/compaction.md` | MicroCompaction→已废弃 v3（0.01% token换44%缓存断裂），FullCompaction正常使用 |
 | **AGENTS 分层设计** 🆕 | `SYSTEM/agents-hierarchy.md` | 三层加载链(findProjectRoot→dirsRootToLeaf→collectAgentsFiles→budget) + 四维评估框架 + 语言设计规范 + 55KB 提取方法论 |
@@ -234,7 +239,7 @@
     agent/index.ts                → Agent 类（所有子系统的容器）
     agent/turn/index.ts           → 回合控制核心（1737 行）
     agent/context/index.ts        → appendUserMessage / appendSystemReminder
-    agent/injection/manager.ts    → InjectionManager（15 个 DynamicInjector，Phase22 路径 B 清零）
+    agent/injection/manager.ts    → InjectionManager（16 个 DynamicInjector，Phase41 新增 KnowledgeMenuInjector+domain-analyzer 域门控，Phase22 路径 B 清零）
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
     agent/injection/session-summary.ts → SessionSummaryInjector（Phase36 新增，接管 session memory 注入）

@@ -103,7 +103,7 @@ L4 独立层 —— 不参与执行，独立参考
 
 AI Agent 本质上是一个「注入运行时」：每步对话必须向 prompt 追加 system-reminder（注入），以控制 AI 行为。Scream Code 的注入系统提供了：
 
-- **Plugin 化 DynamicInjector** — 15 个注入器，每个文件负责一种行为控制
+- **Plugin 化 DynamicInjector** — 16 个注入器，每个文件负责一种行为控制
 - **残差注意力门控** — 公式 `R = W × D^Δs`，避免同一变体重注入、控制注入频率
 - **三层调度** — InjectionRouter → VariantScheduler（频率） → PositionStrategy（位置）
 - **三路径架构**（A→C 全部已统一为 A）
@@ -157,14 +157,21 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 
 ### 2.5 注意力管理 + 债务模型 (Attention + Debt)
 
-**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `turn/index.ts` (addDebt) | **系统说明书**: `SYSTEM/attention-system.md`
+**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `agent/audit/debt-ledger.ts` + `agent/injection/domain-analyzer.ts` | **系统说明书**: `SYSTEM/attention-system.md`
 
 - **30 个变体**，分级 critical/normal/debug（critical=最高优先级，不跳过）
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
 - **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
 - **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
-- **统一债务累积**（addDebt）：所有工具报错（Bash 超时除外）加 debt 0.5，达阈值触发提醒并附加修复路径（FIX_SUFFIX）
-- **quality-degrade 消息改写**：嵌入具体偏差描述替代泛化提示，10-80 字保护
+- **DebtLedger 分类债务账本**（Phase42，替代旧 addDebt）：4 类（exploration/tool_error/reasoning/gate）各自记债、各自偿还、分类阻断。正确调用自动还债。见 `attention-system.md` §⑥。
+- **域门控 Domain Gating**（Phase42）：推理关键词+工具调用→活跃域→跳过不相关注入器+域匹配优先级提升。见 `attention-system.md` §⑥。
+- **知识菜单 REQUEST:**（Phase42）：step 1 注入 8 域菜单，AI 主动请求知识。见 `knowledge-menu.ts`。
+- **忠实性检测 FaithfulnessCheck**（Phase42）：被动离线检查推理动词 vs 工具调用一致性。0 token 成本。见 `faithfulness.ts`。
+- **qualityIndex 质量反馈**（Phase42）：5 维评分 + session-end 持久化 + session-start 按分注入反馈。见 `quality-score.ts` + `quality-baseline.ts`。
+- **工具别名映射 TOOL_ALIAS**（Phase42b）：`codegraph_explore`→MCP 全名，消除 "Tool not found" 报错。
+- **路径豁免 knownPaths + [BulkRead]**（Phase42b）：codegraph/LSP 返回的路径及批量读取豁免探索债。
+
+> ~~旧 `addDebt` 已废弃~~，被 DebtLedger 替代。
 
 ---
 
@@ -231,7 +238,7 @@ packages/agent-core/src/
 │   │   ├── position-strategy.ts ← system-reminder 位置策略
 │   │   ├── guard-injector.ts  ← GuardInjector（✅ 注册，统一管线完成）
 │   │   ├── archival-summary.ts 🆕 ← 蒸馏塔归档层（>50K触发，尾部append，任务聚合）
-│   │   └── 15 个注入器文件（goal/user-prefs/plan-mode/...）
+│   │   └── 16 个注入器文件（goal/user-prefs/plan-mode/knowledge-menu/...）
 │   ├── detection/
 │   │   ├── scene-memory.ts    ← SceneMemoryDetector
 │   │   ├── code-ref.ts        ← CodeRefDetector

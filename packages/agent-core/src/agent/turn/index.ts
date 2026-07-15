@@ -207,6 +207,10 @@ export class TurnFlow {
   private nonExploreStepsSinceLastExplore = 0;
   /** Paths edited/written this turn — Read of these = verification (not exploratory). */
   private recentlyModifiedPathsThisTurn: Set<string> = new Set();
+  /** Phase42: codegraph/LSP 已返回的文件路径 — Read 这些路径不算探索债 */
+  private knownPaths: Set<string> = new Set();
+  /** Phase42: [BulkRead] 标记模式 — 批量读取豁免 */
+  private bulkReadPatterns: string[] = [];
 
   // ── Phase 18: 代码质量追踪 ─────────────────────────────────
   /** 本回合代码质量违规记录列表 */
@@ -621,6 +625,8 @@ export class TurnFlow {
     this.nonExploreStepsSinceLastExplore = 0;
     this.recentExplorationKeywords = [];   // 新回合清空关键词（新任务不保留旧主题）
     this.recentlyModifiedPathsThisTurn = new Set();
+    this.knownPaths.clear();
+    this.bulkReadPatterns = [];
     this.variantRegistry.reset();
     this.currentStep = 0;
     this.injectBudget.reset();
@@ -1095,6 +1101,15 @@ export class TurnFlow {
                 }
               }
 
+              // 🆕 Phase42: 工具别名映射 — 短名→MCP 全名
+              {
+                const alias: Record<string, string> = {
+                  'codegraph_explore': 'mcp__codegraph__codegraph_explore',
+                  'codegraph_node': 'mcp__codegraph__node',
+                };
+                const mapped = alias[ctx.toolCall.name];
+                if (mapped) ctx.toolCall.name = mapped;
+              }
               // 🆕 A组: 工具执行前注入 — prepareToolExecution
               if (ctx.toolCall.name === 'Edit') {
                 this.inject(
@@ -1438,6 +1453,23 @@ export class TurnFlow {
                   // 后置校验：记下此时的 debt，3 步后比较
                   // TODO: 后置校验需要存储 debtBefore 和 3 步后在 afterStep 比较
                   // 简版：直接 debt-2 + 关键词记录，不做跨步比较（减少复杂度）
+                }
+                // 🆕 Phase42: 从 codegraph/LSP 结果提取文件路径 → knownPaths
+                if (isError !== true) {
+                  if (ctx.toolCall.name === 'mcp__codegraph__codegraph_explore' || ctx.toolCall.name === 'mcp__codegraph__node' || ctx.toolCall.name === 'codegraph') {
+                    const output = typeof ctx.result === 'object' && ctx.result !== null ? (ctx.result as any)['output'] : '';
+                    if (output && typeof output === 'string') {
+                      const fileMatches = output.match(/[a-zA-Z0-9_\-./]+\.(ts|js|tsx|jsx|py|go|rs)\b/g);
+                      if (fileMatches) fileMatches.forEach(f => this.knownPaths.add(f.replace(/\\/g, '/')));
+                    }
+                  }
+                  if (ctx.toolCall.name === 'LSP') {
+                    const output = typeof ctx.result === 'object' && ctx.result !== null ? (ctx.result as any)['output'] : '';
+                    if (output && typeof output === 'string') {
+                      const fileMatches = output.match(/[a-zA-Z0-9_\-./]+\.(ts|js|tsx|jsx|py|go|rs):\d+/g);
+                      if (fileMatches) fileMatches.forEach(m => this.knownPaths.add(m.replace(/:\d+$/, '').replace(/\\/g, '/')));
+                    }
+                  }
                 }
                 if (ctx.toolCall.name === 'Edit') {
                   this.editCalledSuccessThisStep = true;
@@ -2051,6 +2083,15 @@ export class TurnFlow {
         agentType: this.agent.type,
       });
     }
+
+    // 🆕 Phase42: [BulkRead] 标记 — 计划性批量读取豁免
+    const bulkMatch = text.match(/\[BulkRead:\s*(.+?)\]/i);
+    if (bulkMatch) {
+      const pattern = bulkMatch[1].trim();
+      if (!this.bulkReadPatterns.includes(pattern)) {
+        this.bulkReadPatterns.push(pattern);
+      }
+    }
   }
 
   /** P1.5: session-end 质量基线记录 */
@@ -2514,6 +2555,19 @@ export class TurnFlow {
       }
       // 文档/配置文件的 Read 不是探索（不需要 codegraph 来理解结构）
       if (/\.(md|json|yaml|yml|toml|txt)$/i.test(readPath)) return false;
+      // 🆕 Phase42: knownPaths — codegraph/LSP 已返回的文件不算探索
+      {
+        const normalized = readPath.replace(/\\/g, '/');
+        for (const known of this.knownPaths) {
+          if (normalized.endsWith(known) || known.endsWith(normalized)) return false;
+        }
+        for (const pattern of this.bulkReadPatterns) {
+          // 取第一个 * 前的路径前缀 → 以此为根目录的 Read 都豁免
+          const starIdx = pattern.indexOf('*');
+          const prefix = starIdx >= 0 ? pattern.slice(0, starIdx) : pattern;
+          if (normalized.startsWith(prefix)) return false;
+        }
+      }
       // 其他 → 探索（查看未知代码路径）
       return true;
     }

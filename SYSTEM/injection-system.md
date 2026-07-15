@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-14
+updated: 2026-07-15
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -10,8 +10,9 @@ updated: 2026-07-14
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 15 个 DynamicInjector（Phase37 新增 DecisionTrace / SessionSummary，ToolResultRecovery 未注册）。
+> 16 个 DynamicInjector（Phase41 新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控）。
 > **演变**：路径 B 已清零（Phase22）。路径 C (GuardInjector) 已完成迁移（Phase33）。
+> Phase41 (2026-07-15)：新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控 | 注入器达 16 个。
 > Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱。
 > **v3 (2026-07-14)**：PersistentSummaryInjector→废弃（被 ArchivalSummaryInjector 归档层替代）。
 > TruncationTracker→Micro/ArchiveRecover 已废弃，自动恢复走归档层。

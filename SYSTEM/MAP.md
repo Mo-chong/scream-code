@@ -22,11 +22,17 @@ updated: 2026-07-15
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/addDebt统一债务+FIX_SUFFIX/墨克尔链(Phase40)
-│   ├─ injection-system.md        — ☑ 注入系统：15个注入器/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
-│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + addDebt+FIX_SUFFIX修复路径(Phase38/39/40)
+│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/DebtLedger分类债务(4类+偿还+分类阻断)+faithfulness+已知路径豁免+BulkRead(Phase42)
+│   ├─ injection-system.md        — ☑ 注入系统：16个注入器(Phase41新增KnowledgeMenuInjector+域门控)/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
+│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + DebtLedger分类债务+偿还(Phase41)+域门控+知识菜单REQUEST+忠实性检测+质量反馈+knownPaths路径豁免+BulkRead+TOOL_ALIAS(Phase42b)
 │   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors + quality-degrade消息改写(Phase38/39/40)
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
+
+├─ 审计系统
+│   ├─ audit/faithfulness.ts    — 忠实性被动检测(Phase41 P0.5)
+│   ├─ audit/quality-score.ts   — 5维质量评分(Phase41 P1)
+│   ├─ audit/quality-baseline.ts— 质量基线持久化+反馈回路(Phase41 P2)
+│   └─ audit/debt-ledger.ts     — 分类债务账本(4类+偿还+分类阻断)(Phase41 refactor)
 
 ├─ AGENTS 架构
 │   └─ agents-hierarchy.md         — 三层加载链(.git→projectRoot→dirs→collect→budget) + 四维评估 + 语言规范
