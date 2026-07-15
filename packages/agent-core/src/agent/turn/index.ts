@@ -170,9 +170,9 @@ export class TurnFlow {
   /** 🆕 Phase40: 高频工具修复路径映射 */
   private static readonly FIX_SUFFIX: Record<string, string> = {
     Edit: ' 修复: /edit-fix',
-    Bash: ' 修复: 检查参数或换内置工具 Read/Grep/Glob',
-    Read: ' 修复: 检查路径或改用 Glob 搜索',
-    Grep: ' 修复: 调整 pattern 或改用 codegraph_explore',
+    Bash: ' 修复: 检查参数或换内置工具 Read/Grep/Glob | 大面积未知用 codegraph_explore',
+    Read: ' 修复: 检查路径或换 Glob | 已知符号用 codegraph_node 更精准',
+    Grep: ' 修复: 调 pattern 或换 codegraph_explore（省 80% token）',
     Write: ' 修复: 目录是否存在？用 Glob 确认',
   };
 
