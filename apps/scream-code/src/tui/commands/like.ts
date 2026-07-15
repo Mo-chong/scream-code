@@ -56,6 +56,13 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
     items.push(`- Other: ${prefs.other.trim()}`);
   }
+  if (prefs.workStyle !== undefined && prefs.workStyle.trim().length > 0) {
+    lines.push('', `## Work Style`, '');
+    for (const line of prefs.workStyle.trim().split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed) lines.push(trimmed);
+    }
+  }
   if (items.length === 0) return '';
   lines.push('', ...items, '', t('like.priority'));
   return lines.join('\n');
@@ -108,6 +115,17 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     return;
   }
 
+  const workStyle = await promptTextInput(host, t('like.work_style'), {
+    subtitle: t('like.work_style_hint'),
+    placeholder: t('like.work_style_example'),
+    initialValue: current.workStyle,
+    allowEmpty: true,
+  });
+  if (workStyle === undefined) {
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    return;
+  }
+
   const other = await promptTextInput(host, t('like.other'), {
     subtitle: t('like.other_hint'),
     placeholder: t('like.other_example'),
@@ -123,6 +141,7 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     nickname: nickname.trim().length > 0 ? nickname.trim() : undefined,
     tone: tone.trim().length > 0 ? tone.trim() : undefined,
     other: other.trim().length > 0 ? other.trim() : undefined,
+    workStyle: workStyle.trim().length > 0 ? workStyle.trim() : undefined,
   };
 
   await persistLikePreferences(host, prefs);

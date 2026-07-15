@@ -390,6 +390,9 @@ export const zh: Record<string, string> = {
   'like.other': '其他偏好',
   'like.other_hint': '例如：多说例子、先给结论再展开、避免术语等（留空表示不设置）',
   'like.other_example': '例如：请用中文回答，避免缩写',
+  'like.work_style': '工作风格',
+  'like.work_style_hint': '每行一条，描述你的工作偏好（留空表示不设置）',
+  'like.work_style_example': '例如：\n安全 > 可维护 > 性能 > 优雅\n中文对话，术语英文\n结论先行，证据充分',
   'like.cancelled': '已取消 /like 设置',
   'like.saved': '偏好已保存（下次新会话生效）',
 

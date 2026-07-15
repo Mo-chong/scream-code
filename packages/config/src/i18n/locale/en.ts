@@ -390,6 +390,9 @@ export const en: Record<string, string> = {
   'like.other': 'Other preferences',
   'like.other_hint': 'e.g. more examples, conclusion first, avoid jargon (leave empty to skip)',
   'like.other_example': 'e.g. Answer in English, avoid abbreviations',
+  'like.work_style': 'Work style',
+  'like.work_style_hint': 'One line per item, describing your working preferences (leave empty to skip)',
+  'like.work_style_example': 'e.g.\nSafety > Maintainability > Performance > Elegance\nChinese for conversation, English for tech terms\nConclusion first, evidence sufficient',
   'like.cancelled': '/like setup cancelled',
   'like.saved': 'Preferences saved (takes effect in next session)',
 

@@ -28,6 +28,7 @@ export const TuiLikePreferencesSchema = z.object({
   nickname: z.string().optional(),
   tone: z.string().optional(),
   other: z.string().optional(),
+  workStyle: z.string().optional(),
 });
 
 export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;

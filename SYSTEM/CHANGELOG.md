@@ -1,7 +1,8 @@
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 ---
 tags: [type/changelog, status/final, domain/system]
-updated: 2026-07-11
+keywords: [changelog, 开发日志, Phase, CHANGELOG, 更新日志]
+updated: 2026-07-15
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -438,8 +439,11 @@ updated: 2026-07-11
 - **\[BulkRead\] 批量标记**：AI 声明 `[BulkRead: src/auth/*.ts]` 后，前缀匹配的 Read 全部豁免探索债。计划性批量审计不被打断。
 - **isExploratoryReadGrep 增强**：增加 knownPaths + bulkReadPatterns 两项豁免检查。
 
-
-### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
+**Phase42c — `/like` workStyle 字段 + 格式修正（2026-07-15）：**
+- **背景**：Phase41 Work Style 是直接编辑 `user-prefs.md` 加的，`/like` schema 只有 nickname/tone/other 三字段。跑 `/like` 会覆盖丢失。
+- **修复（5 文件）：** `config.ts` — `TuiLikePreferencesSchema` 加 `workStyle: z.string().optional()` | `like.ts` — `handleLikeCommand()` 加第 4 输入框 + `buildRoleAdditionalText()` 加 Work Style 段落输出 | `zh.ts` / `en.ts` — 3 条 i18n 翻译（标题/提示/示例）。
+- **格式修正：** `user-prefs.md` 手动整理为 41 行：Work Style 6 条逐行排列、5 条规则分条、4 示例独立代码块。无中文尾部多余文字。
+- **构建验证：** `agent-core 7.7s + scream-code 5.7s = EXIT 0`### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
 
 **P0 — 信息结构优化：**
 - user-prefs.md：新增 Work Style 6 条 + [InsufficientContext] MUST 指令
