@@ -10,6 +10,7 @@
 
 import { VARIANT_META } from './variant-registry';
 import type { DetectorResult, InterceptionDecision, DeliveryResult, RootCauseTrend, DetectorStats, TurnInterceptionReport } from '../interception/event-types';
+import { createHash } from 'crypto';
 import { recordInterceptionEvents, getRootCauseTrend as _getRootCauseTrend, getDetectorStats as _getDetectorStats, getInterceptionSummary as _getInterceptionSummary } from '../interception/event-log';
 
 export interface InterceptionEvent {
@@ -33,6 +34,32 @@ export interface InterceptionEvent {
 	tokenEstimate?: number;
   /** 🆕 Phase26: 主体类型 — 'main' | 'sub' | 'independent' */
 	agentType?: string;
+  /** 🆕 Phase40: 墨克尔链 — 上一条事件的 hash（防篡改审计） */
+	prevHash?: string;
+}
+/** 模块级上一个事件的 hash（跨回合串联） */
+let lastMerkleHash = '';
+
+/** 计算单条事件的墨克尔 hash */
+function computeEventHash(prevHash: string, event: Omit<InterceptionEvent, 'seq'>): string {
+  const content = `${prevHash}|${event.kind}|${event.variant}|${event.step}|${event.action}|${event.turnId}|${event.reason}`;
+  return createHash('sha256').update(content).digest('hex');
+}
+
+export function resetMerkleChain(): void { lastMerkleHash = ''; }
+export function getCurrentMerkleHash(): string { return lastMerkleHash; }
+
+/** 验证整条墨克尔链完整性 */
+export function verifyMerkleChain(events: InterceptionEvent[]): { valid: boolean; brokenAt?: number } {
+  let hash = '';
+  for (let i = 0; i < events.length; i++) {
+    const expected = hash;
+    hash = events[i].prevHash ?? '';
+    if (i > 0 && hash !== computeEventHash(expected, events[i])) {
+      return { valid: false, brokenAt: i };
+    }
+  }
+  return { valid: true };
 }
 
 const MAX_EVENTS = 200;
@@ -57,7 +84,9 @@ export class TurnEventLog {
 		// W 驱动采样：高频 variant 降采样减少记录量
 		if (!this.shouldSample(event.variant)) return;
 
-		this.events.push({ ...event, seq: this.nextSeq++ });
+		const hash = computeEventHash(lastMerkleHash, event);
+		lastMerkleHash = hash;
+		this.events.push({ ...event, seq: this.nextSeq++, prevHash: hash });
 		if (this.events.length > MAX_EVENTS) {
 		  this.events = this.events.slice(-MAX_EVENTS);
 		}
