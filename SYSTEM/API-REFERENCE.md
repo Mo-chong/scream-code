@@ -779,6 +779,8 @@ function stabilizePrefix(history: ContextMessage[]): ContextMessage[]
 ### 7.2 Observation Masking
 <!-- ref: maskToolObservations -->
 
+> ⚠️ `ArchiveRecover` 已废弃（Phase39 注销，5 天零调用）。常数中的"·已存档·ArchiveRecover可恢复"保持历史兼容。
+
 **文件**: `utils/mask-tool-observations.ts`
 
 ```typescript
@@ -797,8 +799,9 @@ function maskToolObservations(
 
 **无接口变更**（新增可选参数，向下兼容）。
 
-### 7.3 MicroCompaction 批次门控
-<!-- ref: MicroCompactionConfig -->
+### 7.3 MicroCompaction 批次门控 ⚠️ 已废弃
+
+> **Token 节省 <1%，缓存破坏 44%，Phase39 废弃。** 蒸馏塔（`maskToolObservations`）替代 MicroCompaction。详见 `SYSTEM/context-management.md` v3。
 
 ```typescript
 interface MicroCompactionConfig {

@@ -245,7 +245,7 @@ packages/agent-core/src/
 ├── tools/builtin/
 │   ├── code/                  ← Edit/Read/Write/Glob/Grep/Bash/LSP
 │   ├── memory/                ← MemoryLookup/MemoryWrite/MemoryEdit
-│   ├── context/               ← ArchiveRecoverTool
+│   ├── context/               ← ArchiveRecoverTool ❌ 已废弃（Phase39 注销）
 │   └── knowledge/             ← KnowledgeLookupTool
 ├── permission/                ← 权限管理
 └── context/                   ← 上下文类型定义
@@ -282,7 +282,7 @@ Agent 是「容器」——不处理业务逻辑，业务在 `turn/index.ts` 中
 tools/builtin/
 ├── code/        ← Edit / Read / Write / Glob / Grep / Bash / LSP
 ├── memory/      ← MemoryLookup / MemoryWrite / MemoryEdit
-├── context/     ← ArchiveRecoverTool
+├── context/     ← ArchiveRecoverTool ❌ 已废弃（Phase39 注销）
 └── knowledge/   ← KnowledgeLookupTool
 ```
 
@@ -344,7 +344,7 @@ turn/index.ts 注册 context
 
 ```
 context 消息积累（appendUserMessage / tool_calls / tool_results / system-reminders）
-  → headroom < 40%? → MicroCompaction（轻量：移除旧 tool result + 遮蔽）
+  → headroom < 40%? → **蒸馏塔（maskToolObservations：遮蔽旧 tool result + 压缩）** ← MicroCompaction 已废弃
     → 仍不足且 headroom < 25%? → FullCompaction（LLM 总结压缩，最多 _maxTries 次）
       → injectionManager.onContextCompacted() 通知注入器适配
 ```
