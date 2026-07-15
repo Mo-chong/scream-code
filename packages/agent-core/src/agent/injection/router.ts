@@ -14,6 +14,7 @@ import { DynamicInjector, type ResidualConfig } from './injector';
 import { InsertPosition } from './position-strategy';
 import { VariantScheduler, _getVariantLevel } from '../turn/variant-registry';
 import type { InterceptionMessage } from '../interception/types';
+import { shouldSkipByDomain, INJECTOR_DOMAIN_MAP } from './domain-analyzer';
 
 // ─── Step 11a: CacheGroup ──────────────────────────────────────────
 
@@ -103,6 +104,8 @@ export interface InjectContext {
   readonly intentPhase?: string;
   /** Phase38b: 拦截系统预批准消息 — InterceptionManager 的输出，优先占 budget 槽位 */
   readonly extraInterceptions?: readonly InterceptionMessage[];
+  /** Phase41: 当前活跃知识域列表 — 域门控用 */
+  readonly activeDomains?: readonly string[];
 }
 
 /**
@@ -239,7 +242,15 @@ export class InjectionRouter {
       }
 
       // ④ [优化C] 缓存感知路由：缓存命中率过低时跳过低优先级变体
-      const level = _getVariantLevel(id);
+      let level = _getVariantLevel(id);
+      // Domain boost: if activeDomains includes this injector's domain, raise priority
+      if (context.activeDomains && context.activeDomains.length > 0) {
+        const domains = INJECTOR_DOMAIN_MAP[id];
+        if (domains && domains.length > 0 && domains.some(d => context.activeDomains!.includes(d))) {
+          if (level === 'debug') level = 'normal';
+          else if (level === 'normal') level = 'critical';
+        }
+      }
       const predictedHR = context.predictedHitRatio;
       if (predictedHR !== undefined && predictedHR < 0.3 && (level === 'normal')) {
         continue;
@@ -255,6 +266,11 @@ export class InjectionRouter {
           const residual = residualCfg.weight * Math.pow(residualCfg.decayPerStep, stepDelta);
           if (residual >= residualCfg.threshold) continue;
         }
+      }
+
+      // 🆕 域门控：跳过不相关注入器
+      if (context.activeDomains && shouldSkipByDomain(id, [...context.activeDomains])) {
+        continue;
       }
 
       // ⑥ Token 预算检查（residualCfg === undefined 表示不参与预算控制）

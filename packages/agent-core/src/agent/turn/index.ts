@@ -37,6 +37,7 @@ import { writeBaseline, readBaseline, getFeedbackInjection } from '../../audit/q
 import { getOutputConstraint } from '../interception/output-constraint';
 import { resolveKnowledgeRequest } from '../injection/knowledge-menu';
 import { TurnEventLog } from './event-log';
+import { analyzeActiveDomains, clearDomainCache } from '../../agent/injection/domain-analyzer';
 import { EventSnapshotBuffer } from './event-snapshot';
 import { detectQualityIssue, observeBehavior } from './detectors/quality';
 import { detectIntent } from './detectors/intent';
@@ -50,6 +51,7 @@ import { AttentionPositionStrategy, InsertPosition } from '../injection/position
 import { ContentHashCache } from './content-cache';
 import { AuditLogWriter, computeCacheMetrics, buildAuditEntry, detectApiKeySwitch } from '../usage/audit-log';
 import type { CacheMetrics } from '../usage/audit-log';
+import { DebtLedger, toolToCategory } from '../../audit/debt-ledger';
 // ❌ 废弃: incremental LLM summary（splice 断缓存 + 异步 LLM 浪费，蒸馏塔归档层替代）
 // import { summarizeWithLLM } from '../compaction/summary';
 
@@ -135,6 +137,7 @@ export class TurnFlow {
   private steerBuffer: BufferedSteer[] = [];
   private turnId = -1;
   private currentTurnId = -1;
+  private activeDomains: string[] = [];
   private activeTurn: 'resuming' | ActiveTurn | null = null;
   private readonly currentStepByTurn = new Map<number, number>();
   /** keyed by toolCallId, set on authorize → read on finalize for FAA durationMs */
@@ -171,32 +174,13 @@ export class TurnFlow {
   private deviationChainActive = false;
   private deviationChainReason = '';
 
-  /** 🆕 Phase40: 统一债务累积 — 各类重复错误通过此接口加债 */
-  /** 🆕 Phase40: 高频工具修复路径映射 */
-  private static readonly FIX_SUFFIX: Record<string, string> = {
-    Edit: ' 修复: /edit-fix',
-    Bash: ' 修复: 检查参数或换内置工具 Read/Grep/Glob | 大面积未知用 codegraph_explore',
-    Read: ' 修复: 检查路径或换 Glob | 已知符号用 codegraph_node 更精准',
-    Grep: ' 修复: 调 pattern 或换 codegraph_explore（省 80% token）',
-    Write: ' 修复: 目录是否存在？用 Glob 确认',
-  };
-
   private addDebt(reason: string, amount: number = 0.5): void {
-    this.explorationDebt += amount;
-    // 根据工具名尾部追加修复路径
+    // Derive category from reason string (tool name at start)
     const toolName = reason.replace(' 报错', '');
-    const fix = TurnFlow.FIX_SUFFIX[toolName] ?? '';
-    const d = this.explorationDebt;
-    if (d >= this.carryover + 7) {
-      this.inject(
-        `[Debt Monitor] [CRITICAL] 债务 ${d.toFixed(1)} 因 ${reason} 上升（接近上限）。连续低效操作将触发阻断。${fix}`,
-        { kind: 'injection', variant: 'step_code_explore' },
-      );
-    } else if (d >= this.carryover + 4) {
-      this.inject(
-        `[Debt Monitor] [WARNING] 债务 ${d.toFixed(1)} 因 ${reason} 上升。建议检查当前策略是否有效，或换其他方法。${fix}`,
-        { kind: 'injection', variant: 'step_code_explore' },
-      );
+    const category = toolToCategory(toolName);
+    const guidance = this.debtLedger.addDebt(category, reason, amount);
+    if (guidance) {
+      this.inject(guidance.message, { kind: 'injection', variant: `debt_${category}` });
     }
   }
 
@@ -215,10 +199,8 @@ export class TurnFlow {
   private totalCodeFileEditsThisTurn = 0;
 
   // ── Phase 16-17: Code exploration tool priority — 4D smart enforcement ─
-  /** 探索债务（float）。每次探索 Read/Grep +1（同主题 +0.5）。不归零。 */
-  private explorationDebt = 0;
-  /** 跨回合 carryover = min(2, 上回合 debt)。新回合起点。 */
-  private carryover = 0;
+  /** DebtLedger — 分类债务账本（exploration / tool_error / reasoning / gate）。 */
+  private debtLedger: DebtLedger;
   /** 最近 N 步探索的关键词 Set（用于语义重复检测，最多 4 条） */
   private recentExplorationKeywords: { step: number; keywords: Set<string> }[] = [];
   /** 非探索步数计数器（用于衰减窗口：每 3 步 -1） */
@@ -499,12 +481,13 @@ export class TurnFlow {
       }
       return end;
     } finally {
-      this.carryover = Math.min(2, Math.floor(this.explorationDebt)); // 保存跨回合 carryover
+      // DebtLedger 自带 carryover 管理
       this.recordQualityBaseline(); // 🆕 P1.5: session-end 质量基线
       if (ownsActiveTurn()) {
         this.activeTurn = null;
       }
       this.turnTruncation.dispose();
+      clearDomainCache();
     }
   }
 
@@ -634,8 +617,7 @@ export class TurnFlow {
     this.turnHasCalledAnyLsp = false;
     this.totalStepsWithEditsThisTurn = 0;
     this.totalCodeFileEditsThisTurn = 0;
-    this.explorationDebt = this.carryover; // 跨回合 carryover 从 newTurn 注入
-    this.carryover = 0;                    // 年久 carryover 只注入一次，清零
+    this.debtLedger = new DebtLedger(0); // newTurn = fresh session
     this.nonExploreStepsSinceLastExplore = 0;
     this.recentExplorationKeywords = [];   // 新回合清空关键词（新任务不保留旧主题）
     this.recentlyModifiedPathsThisTurn = new Set();
@@ -905,6 +887,14 @@ export class TurnFlow {
                 }
               }
 
+              // 🆕 Phase41: 域分析 — 为域门控提供活跃域列表
+              const activeDomains = analyzeActiveDomains({
+                currentStep: this.currentStep,
+                reasoningText: extractLastAssistantText(this.agent.context.history),
+                toolNames: Object.keys(this.stepToolCounts ?? {}),
+              });
+              this.activeDomains = activeDomains;
+
               await this.agent.injection.inject({
                 currentStep: this.currentStep,
                 messageCount: this.agent.context?.history?.length ?? 0,
@@ -912,6 +902,7 @@ export class TurnFlow {
                 confabulationResult: this._confabResult,
                 qualitySignals: this._qualitySignals,
                 stuckContext: this._stuckContext,
+                activeDomains,
                 extraInterceptions: (() => {
                   try {
                     const ctx = {
@@ -1158,30 +1149,26 @@ export class TurnFlow {
                   );
                 }
               }
-              // 🆕 Phase 17: 探索债务模型 — 语义重复检测 + 后置校验 + 跨回合 carryover
+              // 🆕 Phase 17: 探索债务模型 — 分类债务账本 (DebtLedger)
               if (ctx.toolCall.name === 'Read' || ctx.toolCall.name === 'ReadGroup' || ctx.toolCall.name === 'ReadMediaFile' || ctx.toolCall.name === 'Grep') {
                 const codegraphAvailable = this.agent.tools.data().some(t => t.name.startsWith('mcp__codegraph__codegraph'));
                 if (codegraphAvailable && this.isExploratoryReadGrep(ctx)) {
-                  const d = this.explorationDebt;
-                  if (d >= this.carryover + 10) {
+                  // 分类债务检查：exploration 超限 → 阻断 Read/Grep
+                  const blockReason = this.debtLedger.shouldBlockTool(ctx.toolCall.name);
+                  if (blockReason) {
                     return {
                       syntheticResult: {
                         isError: true,
-                        output: `探索债务已达 ${d.toFixed(1)} 点（上限 = 携带 ${this.carryover.toFixed(0)} + 10）。请用 codegraph_explore 获取相关符号源码+调用路径。如果已查过，继续探索将被终止。`,
+                        output: `探索债务已达 ${this.debtLedger.categoryTotals.exploration.toFixed(1)} 点。${blockReason.fixSuggestion}。如果已查过，继续探索将被终止。`,
                         stopTurn: false,
                       },
                     };
                   }
-                  if (d >= this.carryover + 7) {
-                    this.inject(
-                      `[Debt Monitor] [WARNING] 探索债务 ${d.toFixed(1)} 点（接近上限）。连续低效探索将触发阻断。建议用 codegraph_explore（大面积未知用 maxFiles=12，已知模块用 maxFiles=3）。`,
-                      { kind: 'injection', variant: 'step_code_explore' },
-                    );
-                  } else if (d >= this.carryover + 4) {
-                    this.inject(
-                      '[Debt Monitor] [INFO] 连续 Read/Grep 探索。试试用 codegraph_explore 查符号关联和调用路径。大面积未知探索用 maxFiles=12，已知模块探细节用 maxFiles=3。如果已知道符号名，node/callees 更精准。',
-                      { kind: 'injection', variant: 'step_code_explore' },
-                    );
+
+                  // 非阻断但高债 → 提醒
+                  const guidance = this.debtLedger.addDebt('exploration', `${ctx.toolCall.name} 探索`, 0);
+                  if (guidance) {
+                    this.inject(guidance.message, { kind: 'injection', variant: 'step_code_explore' });
                   }
                 }
               }
@@ -1261,6 +1248,9 @@ export class TurnFlow {
                 if (!isBashTimeout) {
                   this.addDebt(`${ctx.toolCall.name} 报错`, 0.5);
                 }
+              } else {
+                // 正确工具调用 → 偿还所有分类债务
+                this.debtLedger.repayAll();
               }
 
               // FAA: 记录所有工具操作（全部工具类型、成功+失败、结果预览前500字符）
@@ -1420,7 +1410,7 @@ export class TurnFlow {
                     const isSameTopic = keywords.size > 0 && this.recentExplorationKeywords.some(
                       entry => [...entry.keywords].some(k => keywords.has(k))
                     );
-                    this.explorationDebt += isSameTopic ? 0.5 : 1;
+                    this.debtLedger.addDebt('exploration', '重复探索', isSameTopic ? 0.5 : 1);
                     // 记录关键词（最多 4 条）
                     if (keywords.size > 0) {
                       this.recentExplorationKeywords.push({ step: this.currentStep, keywords });
@@ -1430,7 +1420,7 @@ export class TurnFlow {
                     // 非探索型工具调用 → 衰减窗口（每 3 步 -1）
                     this.nonExploreStepsSinceLastExplore++;
                     if (this.nonExploreStepsSinceLastExplore >= 3) {
-                      this.explorationDebt = Math.max(0, this.explorationDebt - 1);
+                      this.debtLedger.repay('exploration', 1);
                       this.nonExploreStepsSinceLastExplore = 0;
                     }
                   }
@@ -2033,14 +2023,16 @@ export class TurnFlow {
   private checkFaithfulness(): void {
     const text = extractLastAssistantText(this.agent.context.history);
     const result = checkFaithfulness(text, this.stepToolCounts);
-    if (!result.consistent) {
+    if (result.reasoningPreview) {
       this.eventLog.record({
         kind: 'faithfulness',
-        variant: result.mismatches[0]?.desc ?? 'unknown',
-        action: 'mismatch',
+        variant: result.consistent ? 'consistent' : (result.mismatches[0]?.desc ?? 'unknown'),
+        action: result.consistent ? 'consistent' : 'mismatch',
         step: this.currentStep,
         turnId: this.currentTurnId,
-        reason: `推理说"${result.mismatches[0]?.verb ?? '?'}"但未调用期望工具 [${result.mismatches[0]?.expectedTools.join(', ') ?? ''}], 实际调了 [${result.mismatches[0]?.actualTools.join(', ') ?? ''}]`,
+        reason: result.consistent
+          ? '推理与工具调用一致'
+          : `推理说"${result.mismatches[0]?.verb ?? '?'}"但未调用期望工具 [${result.mismatches[0]?.expectedTools.join(', ') ?? ''}], 实际调了 [${result.mismatches[0]?.actualTools.join(', ') ?? ''}]`,
         agentType: this.agent.type,
       });
     }
@@ -2074,7 +2066,7 @@ export class TurnFlow {
       (e: any) => e.kind === 'detector_fired' && e.action === 'active',
     ).length;
     const convergenceHits = events.filter(
-      (e: any) => e.kind === 'interception_delivery' || e.variant === 'convergence_gate',
+      (e: any) => e.kind === 'convergence_gate',
     ).length;
     const faithCount = events.filter((e: any) => e.kind === 'faithfulness').length;
     const faithMismatches = events.filter(
@@ -2089,8 +2081,8 @@ export class TurnFlow {
       toolTotalCount: totalToolCalls,
       faithfulnessMismatchCount: faithMismatches,
       faithfulnessTotalCount: faithCount,
-      finalDebt: this.explorationDebt,
-      debtCap: this.carryover + 7,
+      finalDebt: this.debtLedger.total,
+      debtCap: 12, // exploration category block threshold
     });
 
     // 记录到 event-log

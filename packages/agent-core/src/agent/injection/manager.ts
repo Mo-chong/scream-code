@@ -33,13 +33,13 @@ export class InjectionManager {
     // 注册所有 DynamicInjector 至 router
     const injectors: [string, DynamicInjector][] = [
       ['plugin-session-start', new PluginSessionStartInjector(agent)],
+      ['user-prefs', new UserPrefsInjector(agent)], // HIGHEST PRIORITY — 提到第2位（紧跟 plugin-session-start），利用 Attention Sink
       ['wolfpack', new WolfPackModeInjector(agent)],
       ['plan-mode', new PlanModeInjector(agent)],
       ['permission-mode', new PermissionModeInjector(agent)],
       ['todo-list', new TodoListReminderInjector(agent)],
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],
-      ['user-prefs', new UserPrefsInjector(agent)],
       // 路径 B 迁移：原 turn/injectors/{stuck,quality,intent}.ts
       ['system_ref_stuck', new StuckInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],
