@@ -1233,9 +1233,13 @@ export class TurnFlow {
               );
               const { isError, output } = finalResult;
 
-              // 🆕 Phase40: 通用债务累积 — 任何工具报错都加债
+              // 🆕 Phase40: 通用债务累积 — 任何工具报错都加债（排除 Bash 超时，Win11 环境问题不扣 AI）
               if (isError) {
-                this.addDebt(`${ctx.toolCall.name} 报错`, 0.5);
+                const isBashTimeout = ctx.toolCall.name === 'Bash' &&
+                  /timeout|timed.?out|grace timeout|Premature close/i.test(output);
+                if (!isBashTimeout) {
+                  this.addDebt(`${ctx.toolCall.name} 报错`, 0.5);
+                }
               }
 
               // FAA: 记录所有工具操作（全部工具类型、成功+失败、结果预览前500字符）
