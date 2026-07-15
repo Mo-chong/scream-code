@@ -1255,3 +1255,38 @@ class KnowledgeLookupTool implements StepTool
 | 工具 | 来源 | 描述 | 接口 |
 |------|------|------|------|
 | codegraph 🆕 | tools/builtin/codegraph.ts | 通过 codegraph 索引查函数内部调用链(callees)、重构影响(impact)、关联测试(affected)。比 explore 更精准省 token。 | command: "callees"\|"impact"\|"affected", target: string（符号名或文件路径） |
+
+### 回合控制新增接口（Phase40）
+
+| 接口 | 文件 | 签名 | 说明 |
+|------|------|------|------|
+| `addDebt` | turn/index.ts (私有方法) | `addDebt(reason: string, amount?: number): void` | 统一债务累积。所有工具报错（Bash 超时除外）加 debt 0.5。debt ≥ carryover+4/+7 时触发提醒，尾部附加 FIX_SUFFIX 修复路径 |
+| `FIX_SUFFIX` | turn/index.ts (私有常量) | `Record<string, string>` | 高频工具修复路径映射：Edit→/edit-fix, Bash→换内置工具/explore, Read→Glob/node, Grep→explore, Write→Glob |
+
+### quality-degrade 消息改写（Phase40）
+
+| 文件 | 改动 |
+|------|------|
+| quality-degrade.ts | 消息嵌入 `bestMessage`（具体质量偏差描述），长度 10-80 字保护。四级消息：C级"验证代替推断"+B级"Read再操作"+A级"换方法/S级上限违规" |
+
+### 墨克尔审计链（Phase40）
+
+| 接口 | 文件 | 说明 |
+|------|------|------|
+| `computeEventHash(prevHash, event)` | turn/event-log.ts | SHA256 计算单条事件 hash |
+| `verifyMerkleChain(events)` | turn/event-log.ts | 验证整条链完整性，返回 `{ valid, brokenAt? }` |
+| `resetMerkleChain()` | turn/event-log.ts | 测试用重置 |
+| `getCurrentMerkleHash()` | turn/event-log.ts | 当前链尾 hash |
+| `prevHash` | turn/event-log.ts InterceptionEvent | 可选字段，每条记录携带上一条 hash |
+
+### system.md 工具优先级格式（Phase40）
+
+| 行号 | 内容 |
+|------|------|
+| 61-67 | 无序列表（对齐 `<format>` 的 `No cross-segment ordering`）：`codegraph_explore` / `codegraph_node` / `codegraph: callees/impact/affected` / `LSP.references` / `Read/Grep/Glob: fallback`。全英文。 |
+
+### Bash 超时排除（Phase40）
+
+| 文件 | 说明 |
+|------|------|
+| turn/index.ts finalizeToolResult | Bash 超时（output 含 `timeout`/`grace timeout`/`Premature close`）跳过 addDebt。Win11 环境问题不扣 AI 债务。 |

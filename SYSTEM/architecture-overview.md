@@ -78,7 +78,7 @@ L4 独立层 —— 不参与执行，独立参考
 | attention-system.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
 | injection-system.md | `injection/` (15 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
-| interception-system.md | `turn/guard-engine.ts` + `turn/index.ts` (L1551-1555) |
+| interception-system.md | `turn/guard-engine.ts` + `interception/` 9 detectors + `turn/index.ts` (偏差链+收敛门) |
 
 阅读顺序（AI 首次接入按此顺序）：
 
@@ -112,7 +112,7 @@ AI Agent 本质上是一个「注入运行时」：每步对话必须向 prompt 
 
 ### 2.2 回合控制 (Turn Control)
 
-**文件**: `packages/agent-core/src/agent/turn/index.ts` (1737 行) | **系统说明书**: `SYSTEM/turn-control.md`
+**文件**: `packages/agent-core/src/agent/turn/index.ts` (2603 行) | **系统说明书**: `SYSTEM/turn-control.md`
 
 Agent 每步执行的核心循环：
 
@@ -126,7 +126,7 @@ runOneTurn()
       → shouldContinueAfterStop()  ← 收敛门
 ```
 
-**收敛门** (convergence gate) 是核心设计：每次 AI 生成后检查是否需要继续/停止，而非固定轮数。
+**收敛门** (convergence gate) 是核心设计：每次 AI 生成后检查是否需要继续/停止，而非固定轮数。8 条件按 severity(HIGH/LOW) 分区注入，上限 3 次。
 
 ### 2.3 上下文管理 (Context Management)
 
@@ -140,9 +140,9 @@ runOneTurn()
 
 > 🗑️ **MicroCompaction 已废弃**（0.01% token 换 44% 缓存断裂）。**Incremental LLM Summary 已废弃**（splice 断缓存），用归档层替代。
 
-### 2.4 Guard 引擎 (Guard Engine)
+### 2.4 Guard 引擎 + 偏差链 (Deviation Chain)
 
-**文件**: `packages/agent-core/src/agent/turn/guard-engine.ts` | **系统说明书**: `SYSTEM/interception-system.md`
+**文件**: `packages/agent-core/src/agent/turn/guard-engine.ts` + `turn/index.ts` (偏差链 4 条件) | **系统说明书**: `SYSTEM/interception-system.md`
 
 4 条 AI 行为 Guard 规则 + 反事实检测：
 
@@ -155,14 +155,16 @@ runOneTurn()
 
 Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）。
 
-### 2.5 注意力管理 (Attention Management)
+### 2.5 注意力管理 + 债务模型 (Attention + Debt)
 
-**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` | **系统说明书**: `SYSTEM/attention-system.md`
+**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `turn/index.ts` (addDebt) | **系统说明书**: `SYSTEM/attention-system.md`
 
 - **30 个变体**，分级 critical/normal/debug（critical=最高优先级，不跳过）
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
 - **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
 - **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
+- **统一债务累积**（addDebt）：所有工具报错（Bash 超时除外）加 debt 0.5，达阈值触发提醒并附加修复路径（FIX_SUFFIX）
+- **quality-degrade 消息改写**：嵌入具体偏差描述替代泛化提示，10-80 字保护
 
 ---
 
