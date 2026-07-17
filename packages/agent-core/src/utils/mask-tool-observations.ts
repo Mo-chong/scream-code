@@ -8,12 +8,12 @@ import { emptyMaskingStats, type MaskingStats } from './masking-stats';
 function computeKeepLastN(messages: readonly Message[]): number {
   const toolCount = messages.filter(m => m.role === 'tool').length;
   if (toolCount < 5) return 3;
-  // 检查是否有未解决错误（最近 10 条消息中有 error/fail/code 1 等关键词）
+  // 检查是否有未解决错误（最近 10 条消息中有 error/fail/non-zero exit 等关键词）
   const recent = messages.slice(-10);
   const hasError = recent.some(m => {
     if (m.role !== 'tool') return false;
     const text = getContentText(m.content);
-    return /error|fail|exit code \d+|FAILED/i.test(text);
+    return /error|fail|exit code [1-9]\d*|FAILED/i.test(text);
   });
   return hasError ? 6 : 4;
 }
@@ -103,7 +103,7 @@ function classifyError(text: string): ErrorResult | null {
 function isSuccessCompressible(text: string): boolean {
   const lower = text.toLowerCase();
   if (/0 errors.*0 warnings|0 warnings.*0 errors/.test(text)) return true;
-  if (/compilation complete|build complete/i.test(lower)) return true;
+  if ((/compilation complete|build complete/i.test(lower)) && !/error|failed|exit code [1-9]/i.test(text)) return true;
   if (/applied \d+ edit/i.test(text)) return true;
   if (/written successfully|file written|created/i.test(lower)) return true;
   if (/no (matches|references|definition|diagnostics)/i.test(lower)) return true;
@@ -181,7 +181,7 @@ function isErrorResolved(
         if (tc.name !== 'Edit') continue;
         try {
           const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
-          if (args?.path && args.path === path) return true; // 后续有同路径的 Edit 调用 = 已尝试过
+          // 后续有同路径的 Edit 调用不代表已解决——只确认是"尝试过"
         } catch { /* ignore */ }
       }
     }
