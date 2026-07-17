@@ -458,6 +458,17 @@ updated: 2026-07-15
 - **清理：** `turn/index.ts` 删 8 行 step 1 `quality_feedback` 块 + import 清理 `readBaseline/getFeedbackInjection`（只剩 `writeBaseline`）
 - **构建：** `agent-core 5948ms + scream-code 5476ms = EXIT 0`
 
+**Phase42c-ext — 缓存审计增强（2026-07-17）：**
+- **AuditLogEntry** 新增 `prevHitRatio` + `hitRatioDelta` 字段：每轮日志自动带命中率变化对照（负=退化，正=恢复），无需人肉对比。
+- **构建验证**：通过。
+
+**Phase42d-ext — Checkpoint + SnipHinter + edit_error_fix 即时注入（2026-07-17）：**
+- **CheckpointManager**（`utils/checkpoint.ts`）双向快照。`/rewind N`（/rw）`/forward`（/fw）TUI 命令。
+- **SnipHint** 接口 + 5 工具裁剪声明（Bash/Read/LSP/Grep/Glob）。
+- **edit_error_fix** variant：Edit 错误即时注入 fix 指令，不依赖债务累积。
+- **25 文件 ToolAccesses 补齐** + **6 SYSTEM 说明书同步**。
+- **构建验证**：通过。
+
 ### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
 
 **P0 — 信息结构优化：**

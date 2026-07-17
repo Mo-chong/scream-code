@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-14
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -229,7 +229,7 @@ class InjectionManager {
 | GuardInjector | `agent/injection/guard-injector.ts` | 1 | AFTER_TOOL_CALL | checkGuard Rule 2/3/4 观察（minStepGap 0→3） | ✅ | Phase37 |
 | ArchivalSummaryInjector 🆕 | `agent/injection/archival-summary.ts` | 1 | AFTER_TOOL_CALL | <50K不触发/50K-100K每3轮/>100K每轮 | ✅ | v3 蒸馏塔归档层 |
 
-> 各注入器变体数均为 1。34 个调度变体在 `variant-registry.ts` 中独立注册，不与注入器一一对应。
+> 各注入器变体数均为 1。35 个调度变体（34 个注册于 `variant-registry.ts` + 1 个 ad-hoc `edit_error_fix` 用于 turn/index.ts 即时注入）。
 > `MemoryRulesInjector` 不存在（早期概念文件）。
 > Phase37（07-11）：新增 DecisionTraceInjector + SessionSummaryInjector。stuck weight=30→0.6。guard-injector minStepGap=0→3。error-audit 删除分析瘫痪支柱。
 > **完整变体列表见** `variant-registry.ts:288-345`。
@@ -713,6 +713,8 @@ interface AuditLogEntry {
   turnStepCount: number    // 上轮用户消息步数（评估摘要阈值）
   pendingRecoverKeys: number  // 自动恢复失败的截断 key 数
   summaryTriggered: boolean   // ❌ 已废弃 v3（incremental LLM summary 已移除）
+  prevHitRatio: number       // 上轮命中率（首轮为 0）
+  hitRatioDelta: number     // 本轮 vs 上轮命中率变化（负=退化，正=恢复）
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics
@@ -797,7 +799,33 @@ function maskToolObservations(
   // 工具结果 < 100 chars 跳过遮蔽（短输出保护）
 ```
 
-**无接口变更**（新增可选参数，向下兼容）。
+**接口变更（Phase42d）**：新增 `SnipHint` 接口 + `snipByHint` 裁剪函数
+
+```typescript
+// SnipHint: 工具声明"首部留多少字符，尾部留多少字符"
+interface SnipHint {
+  head?: number    // 保留前 N 字符（默认不裁剪）
+  tail?: number   // 保留后 N 字符（默认不裁剪）
+}
+
+// 初始声明工具（见 ToolAccesses 声明）
+const SNIP_HINTS: Record<string, SnipHint> = {
+  Bash:  { head: 5, tail: 10 },
+  Read:  { head: 20 },
+  LSP:   { head: 10, tail: 30 },
+  Grep:  { head: 10, tail: 5 },
+  Glob:  { head: 20 },
+}
+
+function snipByHint(
+  toolName: string,
+  content: string,
+  hints?: Record<string, SnipHint>
+): string
+// 按工具声明裁剪 content
+// 有声明 → 按 head/tail 截取
+// 无声明 → 回退内容检测（短输出保留，长输出截到 3000 字符）
+```
 
 ### 7.3 MicroCompaction 批次门控 ⚠️ 已废弃
 
@@ -1073,6 +1101,46 @@ class ArchiveRecoverTool implements BuiltinTool {
 | 联动 | ContentArchive.recover()，自动寻址 sharedStore |
 | 用途 | 超大输出截断找回/跨子 agent 数据传递/诊断调试 |
 
+### 8.4 CheckpointManager 🆕（Phase42d）
+<!-- ref: CheckpointManager -->
+
+**文件**: `packages/agent-core/src/utils/checkpoint.ts`
+
+```typescript
+interface SnapshotEntry {
+  path: string
+  before: string   // Edit/Write 执行前的内容
+  after: string    // Edit/Write 执行后的内容
+}
+
+class CheckpointManager {
+  constructor()
+
+  // 记录改前内容（每次 Edit/Write 前调用）
+  snapshot(path: string): void
+
+  // 记录改后内容（每次 Edit/Write 后调用）
+  recordAfter(path: string): void
+
+  // 回退 N 轮：对所有快照文件恢复 before → 当前文件
+  restoreFromTurn(turnsAgo: number): string[]
+
+  // 重做：撤销 restoreFromTurn，恢复到 after
+  forwardToLatest(): string[]
+}
+```
+
+**集成点**：
+- `turn/index.ts` afterStep → 自动调用 snapshot + recordAfter
+- TUI 命令：`/rewind N`（/rw） `/forward`（/fw）
+- 与 git 无关：纯内存快照，不创建 commit
+
+**示例**：
+```
+/rewind 3   → 恢复 3 轮前的所有文件
+/forward    → 撤销回退，回到 AI 最新状态
+```
+
 ### 8.3 约束
 <!-- ref: archiveRecoverConstraints -->
 
@@ -1317,3 +1385,22 @@ class KnowledgeLookupTool implements StepTool
 | `TOOL_ALIAS` | turn/index.ts A组 | `codegraph_explore`→`mcp__codegraph__codegraph_explore`，`codegraph_node`→`mcp__codegraph__node`。 |
 | `knownPaths` | turn/index.ts 字段 | codegraph/LSP 返回的源码路径不扣探索债。新 turn 清空。 |
 | `[BulkRead]` | turn/index.ts checkFaithfulness | 批量读取标记。`[BulkRead: src/auth/*.ts]` 前缀匹配豁免探索债。 |
+
+### Phase42c — 缓存审计增强
+
+| 接口 | 文件 | 变更 |
+|------|------|------|
+| `AuditLogEntry.prevHitRatio` | `audit/audit-log.ts` | 新增字段：上轮命中率（首轮为 0） |
+| `AuditLogEntry.hitRatioDelta` | `audit/audit-log.ts` | 新增字段：本轮 vs 上轮命中率变化（负=退化，正=恢复） |
+| `buildAuditEntry` | `audit/audit-log.ts` | 可选接收 `prevMetrics`，自动计算 delta |
+
+### Phase42d — Checkpoint + SnipHinter + edit_error_fix
+
+| 机制 | 文件 | 说明 |
+|------|------|------|
+| `CheckpointManager` | `utils/checkpoint.ts` | 双向快照：Edit/Write 前后分别记录。`snapshot(path)`+`recordAfter(path)`。 |
+| `/rewind N`（/rw） | `apps/scream-code/src/tui/commands/rewind.ts` | TUI 命令：回退 N 轮文件内容 |
+| `/forward`（/fw） | `apps/scream-code/src/tui/commands/rewind.ts` | TUI 命令：撤销 rewind，回到最新状态 |
+| `SnipHint` 接口 | `utils/mask-tool-observations.ts` | 工具裁剪声明：`head?: number` `tail?: number` |
+| `snipByHint` 函数 | `utils/mask-tool-observations.ts` | 按声明裁剪 tool result |
+| `edit_error_fix` variant | `turn/index.ts:1271` | ad-hoc 变体：Edit 报 `old_string not found` 时即时注入 fix 指令 |

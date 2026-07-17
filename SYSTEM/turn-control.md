@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/turn, status/final]
 keywords: [回合, turn, TurnController, afterStep, runOneTurn, 债务模型, 收敛门, 偏差链, 墨克尔]
-updated: 2026-07-15
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -278,6 +278,31 @@ C 级: `${bestMessage} — 建议用工具验证代替手动推断。`
 B 级: `${bestMessage}（已重复多步）— 请 Read 当前内容后再操作。`
 A 级: `${bestMessage} — 必须修正后继续，否则回合终止。建议换方法或缩小范围。`
 S 级: `${bestMessage} — 已触发上限，违反系统规则。`
+
+---
+
+## Checkpoint 双向文件回退（Phase42d）
+
+> 代码：`packages/agent-core/src/utils/checkpoint.ts`（110 行）
+> 集成：`turn/index.ts` afterStep → snapshot/recordAfter
+> 命令：`/rewind N`（别名 /rw）和 `/forward`（别名 /fw）注册于 `apps/scream-code/src/tui/commands/`
+
+CheckpointManager 为每个 Edit/Write 操作保存**双向快照**：
+- `snapshot(path)` ← 改前（before）
+- `recordAfter(path)` ← 改后（after）
+
+### 回退机制
+
+```
+/rewind 3   → 恢复 3 轮前的文件内容（对所有快照文件执行 before → 当前）
+   ↓            snapshot 反向应用
+/forward    → 撤销 /rewind，恢复到 AI 最新修改状态
+   ↓            recordAfter 正向应用
+```
+
+- turn-step 集成：每个工具调用前后自动调用 checkpoint
+- 与 git 无关：纯内存快照，不创建 git commit
+- 安全：多次 /rewind → /forward → /rewind 反复切换
 
 ---
 

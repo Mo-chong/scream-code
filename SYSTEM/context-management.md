@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/context, status/final]
 keywords: [上下文, context, 三层蒸馏塔, maskToolObservations, 归档摘要, 缓存]
-updated: 2026-07-14
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -50,6 +50,7 @@ maskToolObservations (三层蒸馏)  ──→ 每轮 LLM 调用前
      ├── (2) 压缩层：成功→一行摘要
      ├── (3) 结构化保护：JSON/代码/表格 → 保留完整
      └── 遮蔽：其余旧结果 → [masked:toolName]
+         └── SnipHinter（可选裁剪声明）→ 工具声明 head:t/tail:n → 只保留首尾
 
      ▼
 ArchivalSummaryInjector ──→ 上下文 >50K 时触发，尾部 append

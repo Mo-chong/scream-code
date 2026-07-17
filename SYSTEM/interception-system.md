@@ -1,5 +1,5 @@
 ---
-tags: [type/reference, domain/interception, status/draft]
+tags: [type/reference, domain/interception, status/final]
 keywords: [拦截, interception, 决策, 优先级, 根因合并, InterceptionManager]
 updated: 2026-07-12
 ---

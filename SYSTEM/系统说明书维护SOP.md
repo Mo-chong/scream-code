@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD, SYSTEM-INDEX, 索引同步]
-updated: 2026-07-14
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -180,4 +180,5 @@ updated: YYYY-MM-DD
 | **注入器位置优化**（5 个移尾部） | `manager.ts` + 5 个注入器 | AFTER_SYSTEM/MID → AFTER_TOOL_CALL |
 | **tool-result-recovery 删除** | `manager.ts` | 注销注册 |
 | **CRLF 修复** | `.gitattributes` + git config | 全仓库 LF 归一化 |
-| **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表
+| **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表 |
+| **Phase42d 说明书查缺补漏** | `context-management.md` / `turn-control.md` / `injection-system.md` / `architecture-overview.md` | 补 SnipHinter+Checkpoint 文档+edit_error_fix 变体 |

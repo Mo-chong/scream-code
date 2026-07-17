@@ -126,6 +126,12 @@ export interface AuditLogEntry {
 
   summaryTriggered: boolean;
 
+  /** 上轮缓存命中率（0-1），用于对照 */
+  prevHitRatio: number;
+
+  /** 本轮 vs 上轮命中率变化量（正=提升，负=下降）。首次为 0。 */
+  hitRatioDelta: number;
+
 }
 
 
@@ -567,8 +573,12 @@ export function buildAuditEntry(
   pendingRecoverKeys = 0,
 
   summaryTriggered = false,
+  prevMetrics?: CacheMetrics,
 
 ): AuditLogEntry {
+
+  const prevHitRatio = prevMetrics?.hitRatio ?? 0;
+  const hitRatioDelta = prevMetrics ? metrics.hitRatio - prevMetrics.hitRatio : 0;
 
   const alerts: string[] = [];
 
@@ -637,6 +647,8 @@ export function buildAuditEntry(
     pendingRecoverKeys,
 
     summaryTriggered,
+    prevHitRatio,
+    hitRatioDelta,
 
   };
 

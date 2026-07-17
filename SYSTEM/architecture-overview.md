@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/architecture, status/final]
 keywords: [架构, architecture, 全景, 子系统, 数据流, 蒸馏塔, v3]
-updated: 2026-07-14
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -225,8 +225,9 @@ packages/agent-core/src/
 │   ├── context/
 │   │   ├── index.ts           ← appendUserMessage / appendSystemReminder / protectHighLevelReminders
 │   │   ├── content-archive.ts ← ContentArchive（LRU 2000 条 / 4h+24h 双窗口 TTL）
-│   │   ├── mask-tool-observations.ts ← maskToolObservations（三层蒸馏塔核心：保真/压缩/结构化/遮蔽）
+│   │   ├── mask-tool-observations.ts ← maskToolObservations（三层蒸馏塔核心：保真/压缩/结构化/遮蔽+SnipHinter）
 │   │   ├── stabilize.ts       ← stabilizePrefix（KV-cache 命中率提升）
+│   │   ├── checkpoint.ts 🆕  ← CheckpointManager（双向快照，Edit/Write 前后分别记录）
 │   │   └── compaction/
 │   │       ├── micro.ts       ← ❌ 已废弃 v3（0.01% token 换 44% 缓存断裂）
 │   │       ├── summary.ts     ← ❌ 已废弃 v3（splice 断缓存，归档层替代）
@@ -495,6 +496,7 @@ T = 动态阈值（每次注入后 T *= thresholdDecay）
 | `packages/agent-core/src/agent/injection/` | 注入系统 |
 | `packages/agent-core/src/agent/context/` | 上下文管理 |
 | `packages/agent-core/src/agent/context/compaction/` | 压缩 |
+| `packages/agent-core/src/utils/checkpoint.ts` 🆕 | CheckpointManager（双向快照） |
 | `packages/agent-core/src/agent/detection/` | 检测器 |
 | `packages/memory/` | 记忆系统 |
 | `packages/knowledge/` | 知识库 |
@@ -506,6 +508,7 @@ pnpm build                                          # 构建 monorepo
 pnpm build (agent-core/knowledge/memory) → pnpm build (scream-code)  # 两段构建
 scream                                              # CLI 入口
 scream resume <session-id>                          # 恢复会话
+/rewind N（/rw）→ /forward（/fw）                  # Checkpoint 双向文件回退
 ```
 
 ---

@@ -1,7 +1,7 @@
 ---
-tags: [type/reference, domain/attention, status/draft]
+tags: [type/reference, domain/attention, status/final]
 keywords: [注意力, attention, 拦截, interception, 全流程, AI消费体验]
-updated: 2026-07-15
+updated: 2026-07-17
 ---
 <!-- maintain: 以 AI 消费体验为中心。改相关代码前先读这个。 -->
 # 注意力系统 — AttentionSystem [P0]

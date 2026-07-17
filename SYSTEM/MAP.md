@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/index, status/final]
 keywords: [地图, map, 模块, 文件索引]
-updated: 2026-07-15
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -22,7 +22,7 @@ updated: 2026-07-15
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/DebtLedger分类债务(4类+偿还+分类阻断)+faithfulness+已知路径豁免+BulkRead(Phase42)
+│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/DebtLedger分类债务(4类+偿还+分类阻断)+faithfulness+已知路径豁免+BulkRead+Checkpoint双向回退(Phase42d)
 │   ├─ injection-system.md        — ☑ 注入系统：16个注入器(Phase41新增KnowledgeMenuInjector+域门控)/三路径已统一(Phase22)/GuardInjector迁移(Phase33)/残差调度
 │   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + DebtLedger分类债务+偿还(Phase41)+域门控+知识菜单REQUEST+忠实性检测+质量反馈+knownPaths路径豁免+BulkRead+TOOL_ALIAS(Phase42b)
 │   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors + quality-degrade消息改写(Phase38/39/40)

@@ -72,6 +72,7 @@ updated: 2026-07-08
 |------|------|
 | `commands/memory.ts` | `/memory` 命令处理 + 格式化 |
 | `commands/dispatch.ts` | 所有斜杠命令调度 |
+| `commands/rewind.ts` 🆕 | `/rewind N`（/rw）文件回退 + `/forward`（/fw）重做 |
 | `commands/knowledge.ts` | 知识库管理命令 |
 | `commands/knowledge-web.ts` | 知识库 Web 管理命令（v0.8.4 upstream） |
 | `commands/knowledge-store.ts` | 知识库存储管理命令（v0.8.4 upstream） |

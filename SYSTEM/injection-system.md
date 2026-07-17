@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-15
+updated: 2026-07-17
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -75,7 +75,7 @@ export interface VariantMeta {
 
 > 早期设计文档曾含 `'head'`/`'near_head'`/`'tail'`/`'CONTEXT_BOTTOM'`/`'ATTENTION_PEAK'` 五位置方案，代码实际使用 `InsertPosition` 三枚举值 + 注意力等级映射（`position-strategy.ts:29-54`）。
 
-### 当前注册表（34 变体，见 variant-registry.ts:288-361）
+### 当前注册表（33 变体：32 个在 VARIANT_META + 1 ad-hoc edit_error_fix，见 variant-registry.ts:288-361）
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
@@ -100,6 +100,7 @@ export interface VariantMeta {
 | `truncation_recover_guard` | 0.7 | 0.85 | 0.35 | 2 | C | 截断恢复守卫 |
 | ~~`system_trigger`~~ | — | — | — | — | — | **已删除** Phase38c（死代码，interception extraInterceptions通道替代） |
 | `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
+| `edit_error_fix` | 0.8 | 0.90 | 0.3 | 2 | B | Edit `old_string not found` 即时注入引导 |
 
 > Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
 
@@ -147,7 +148,7 @@ VariantMeta.weight ← 基础权重
 
 ### 当前使用者
 
-`variant-registry.ts` 共注册 **34 个变体**，分为 13 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
+`variant-registry.ts` 的 VARIANT_META **共 32 个变体**，分为 13 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
 
 | 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
 |--------|------------|-------------|-------------------|-----------|
@@ -157,7 +158,7 @@ VariantMeta.weight ← 基础权重
 | `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
 | `post_*` | 6 | 0.20 | 0.50 | 6 个注入器 |
 | `step_after_*` | 3 | 0.20 | 0.50 | 6 个注入器 |
-| `guard_feedback_*` | 5 | 0.40 | 0.85 | 行为反馈 |
+| `guard_feedback_*` | 4 | 0.7-0.9 | 0.85 | 行为反馈 |
 | `scene_memory_recall` | 1 | 0.50 | 0.80 | scene_memory |
 | `step_code_ref_quality` | 1 | 0.30 | 0.80 | 代码质量 |
 | `code_quality_feedback` | 1 | 0.30 | 0.80 | 代码质量 |
@@ -361,7 +362,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 ## 6. 注入器清单 (Injector Catalog)
 
 > 别名：注入器列表 / DynamicInjector 清单
-> 对应代码：DynamicInjector (injection/injector.ts) + 15 个注册子类
+> 对应代码：DynamicInjector (injection/injector.ts) + 16 个注册子类
 
 ### 当前注入器
 
@@ -385,7 +386,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
 | `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | **Phase38j 精简为仅 R1 阻断**（R2/R3/R4 由 permissionEnforcerDetector 接管） | ✅ |
 
-> **注册总数**: 15 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
+> **注册总数**: 16 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
 > Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
@@ -473,7 +474,7 @@ const injectors: [string, DynamicInjector][] = [
 injectors.forEach(([id, inj]) => this.router.register(id, inj));
 ```
 
-> **注册总数**: 15 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、SessionSummaryInjector（会话摘要）。ToolResultRecoveryInjector 未注册（死代码保留但无注册）。
+> **注册总数**: 16 个。Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、SessionSummaryInjector（会话摘要）。ToolResultRecoveryInjector 未注册（死代码保留但无注册）。
 > Phase37 调整：stuck weight=30→0.6 + context.history 替代 stuckContext | guard-injector minStepGap=0→3 | error-audit 删分析瘫痪支柱 | ILR 数据驱动优化。
 
 ### 运行时停用/启用
@@ -501,7 +502,7 @@ agent.injection.getRouter().enable('error-audit');
 
 - `session-summary.ts` — `SessionSummaryInjector`：`getInjection()` 返回 `agent.sessionMemory.getSessionSummary()`，在 step1 或 compaction 后触发
 - `persistent-summary.ts` — `PersistentSummaryInjector`：基于 ILR（Information Loss Ratio）在 `computeILR(history) > 0` 时注入结构化摘要
-- 注册于 `manager.ts:30-49` 的 `injectors` 数组，与 15 个既有注入器共享 `maxInjectionsPerStep=3` 预算
+- 注册于 `manager.ts:30-49` 的 `injectors` 数组，与 16 个既有注入器共享 `maxInjectionsPerStep=3` 预算
 - 不再绕过 S/A/B/C/D 分级系统、残差调度、预算控制
 - 不再有专门的 `removeSystemRemindersByPrefix('[summary]')` 清理（由调度系统自动管理）
 

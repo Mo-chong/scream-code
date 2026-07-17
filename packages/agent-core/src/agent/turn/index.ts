@@ -1263,6 +1263,14 @@ export class TurnFlow {
                 if (!isBashTimeout) {
                   this.addDebt(`${ctx.toolCall.name} 报错`, 0.5);
                 }
+
+                // Edit 特定错误 → 直接引导修复，不依赖债务累积
+                if (ctx.toolCall.name === 'Edit' && /old_string not found/i.test(output)) {
+                  this.inject(
+                    '[Edit Error] old_string not found。请调用 edit-fix skill 自动诊断修复（CRLF/缩进/不可见字符）。或手动：1) Read 确认文件当前内容 2) 重试 Edit。',
+                    { kind: 'injection', variant: 'edit_error_fix' },
+                  );
+                }
               } else {
                 // 正确工具调用 → 偿还所有分类债务
                 this.debtLedger.repayAll();
