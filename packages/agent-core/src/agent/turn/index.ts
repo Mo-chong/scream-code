@@ -21,7 +21,7 @@ import {
   type LoopRecordedEvent,
   type LoopTurnStopReason,
 } from '../../loop/index';
-import { maskingStats } from '../../loop/turn-step';
+import { maskingStats } from '../../utils/masking-stats';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { abortable, userCancellationReason } from '../../utils/abort';
 import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../context';

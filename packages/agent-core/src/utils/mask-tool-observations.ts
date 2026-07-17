@@ -1,21 +1,6 @@
 import type { Message } from '@scream-code/ltod';
 import { flags } from '../flags';
-
-/**
- * MaskingStats — maskToolObservations 每轮执行的可观测统计。
- * 计数在各分类出口累加，不增加新遍历。
- */
-export interface MaskingStats {
-  total: number;
-  preservedError: number;
-  resolvedError: number;
-  preservedStructured: number;
-  compressed: number;
-  snipped: number;
-  fullyMasked: number;
-  bytesSaved: number;
-  codegraphStripped: number;
-}
+import { emptyMaskingStats, type MaskingStats } from './masking-stats';
 
 /**
  * SnipHint — 工具声明的输出裁剪策略。
@@ -266,7 +251,7 @@ export function maskToolObservations(
   }
 
   const cutoff = indices.length - k;
-  if (cutoff <= 0) return { messages: [...messages], stats: emptyStats() };
+  if (cutoff <= 0) return { messages: [...messages], stats: emptyMaskingStats() };
 
   const stats: MaskingStats = { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 };
   const keep = new Set(indices.slice(cutoff));
@@ -342,8 +327,4 @@ export function maskToolObservations(
   });
 
   return { messages: result, stats };
-}
-
-function emptyStats(): MaskingStats {
-  return { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 };
 }

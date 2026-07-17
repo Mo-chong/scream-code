@@ -31,8 +31,8 @@
       "default": "./src/agent/records/migration/index.ts"
     },
     "./checkpoint": {
-      "types": "./src/turn-step-barrel.ts",
-      "default": "./src/turn-step-barrel.ts"
+      "types": "./src/checkpoint-barrel.ts",
+      "default": "./src/checkpoint-barrel.ts"
     },
     "./turn-step": {
       "types": "./src/turn-step-barrel.ts",
