@@ -1,6 +1,22 @@
 import type { Message } from '@scream-code/ltod';
-import { flags } from '../flags';
 import { emptyMaskingStats, type MaskingStats } from './masking-stats';
+
+/**
+ * 根据消息历史复杂度动态决定保留最近多少条 tool result 原文。
+ * 简单场景（<5 步/无异常）保持 3 步省 token；复杂调试（有未解决错误）保留 6 步避免断链。
+ */
+function computeKeepLastN(messages: readonly Message[]): number {
+  const toolCount = messages.filter(m => m.role === 'tool').length;
+  if (toolCount < 5) return 3;
+  // 检查是否有未解决错误（最近 10 条消息中有 error/fail/code 1 等关键词）
+  const recent = messages.slice(-10);
+  const hasError = recent.some(m => {
+    if (m.role !== 'tool') return false;
+    const text = getContentText(m.content);
+    return /error|fail|exit code \d+|FAILED/i.test(text);
+  });
+  return hasError ? 6 : 4;
+}
 
 /**
  * SnipHint — 工具声明的输出裁剪策略。
@@ -187,10 +203,35 @@ function isStructuredOutput(text: string): boolean {
 
 // ─── 遮蔽文本 ──────────────────────────────────────────────
 
-function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>): string {
+function extractToolArgs(toolCallId: string | undefined, messages: readonly Message[], msgIndex: number): string {
+  if (!toolCallId) return '';
+  for (let j = msgIndex - 1; j >= 0; j--) {
+    const prev = messages[j];
+    if (!prev || prev.role !== 'assistant') continue;
+    for (const tc of prev.toolCalls ?? []) {
+      if (tc.id !== toolCallId) continue;
+      try {
+        const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
+        if (args?.path) return args.path;
+        if (args?.pattern) return args.pattern;
+        if (args?.command) {
+          // 提取命令主干（取前 60 字符）
+          const cmd = args.command.split('\n')[0]?.trim() ?? '';
+          return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+        }
+        if (args?.query) return args.query;
+        if (args?.name) return args.name;
+      } catch { /* ignore */ }
+    }
+  }
+  return '';
+}
+
+function getMaskText(toolCallId?: string, toolNameMap?: ReadonlyMap<string, string>, argHint?: string): string {
   const toolName = toolCallId ? toolNameMap?.get(toolCallId) : undefined;
   const tag = toolName ? `:${toolName}` : '';
-  return `[masked${tag}]`;
+  const hint = argHint ? ` ${argHint}` : '';
+  return `[masked${tag}${hint}]`;
 }
 
 // ─── codegraph 结果定向压缩 ────────────────────────────────
@@ -239,7 +280,7 @@ export function maskToolObservations(
   toolNameMap?: ReadonlyMap<string, string>,
   snipHints?: ReadonlyMap<string, SnipHint>,
 ): { messages: Message[]; stats: MaskingStats } {
-  const k = keepLastN ?? flags.asNumber('mask.keepLastN') ?? 3;
+  const k = keepLastN ?? computeKeepLastN(messages);
   const indices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
@@ -320,7 +361,8 @@ export function maskToolObservations(
     }
 
     // 遮蔽
-    const maskText = getMaskText(msg.toolCallId, toolNameMap);
+    const argHint = extractToolArgs(msg.toolCallId, messages, i);
+    const maskText = getMaskText(msg.toolCallId, toolNameMap, argHint);
     stats.fullyMasked++;
     stats.bytesSaved += origLen - maskText.length;
     return { ...msg, content: [{ type: 'text' as const, text: maskText }] };
