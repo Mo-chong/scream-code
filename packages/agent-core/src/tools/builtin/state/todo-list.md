@@ -1,7 +1,7 @@
 Use this tool to maintain a structured TODO list as you work through a multi-step task. This is especially useful in plan mode and for long-running investigations.
 
 **When to use:**
-- Multi-step tasks that span several tool calls
+- Multi-step tasks that span several tool calls — **MUST use when 3+ distinct actions** are needed (see system.md Coding).
 - Tracking investigation progress across a large codebase search
 - Planning a sequence of edits before making them
 
@@ -21,6 +21,7 @@ Use this tool to maintain a structured TODO list as you work through a multi-ste
 - Keep titles short and actionable (e.g. "Read session-control.ts", "Add planMode flag to TurnManager").
 - For multi-phase work, set `phase` on each item. Items with the same phase are grouped together. Complete all items in a phase before marking items in the next phase as in_progress.
 - Update statuses as you make progress — mark one item in_progress at a time.
+- **Enforced at tool level: passing more than one item with `status: in_progress` will be rejected.**
 
 **Item schema:**
 - `title` (string, required) — short actionable description. Do not use `content` or `name`.

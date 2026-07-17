@@ -137,6 +137,10 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
         }
 
         // Write mode — replace the full list and return the new state.
+        const inProgressCount = args.todos.filter((t) => t.status === 'in_progress').length;
+        if (inProgressCount > 1) {
+          return { isError: true, output: MULTI_INPROGRESS_ERROR };
+        }
         this.setTodos(args.todos);
         const stored = this.getTodos();
         const output =

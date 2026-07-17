@@ -2,6 +2,22 @@ import type { Message } from '@scream-code/ltod';
 import { flags } from '../flags';
 
 /**
+ * SnipHint — 工具声明的输出裁剪策略。
+ * 当工具结果需要压缩时，优先使用工具自身的 SnipHint，
+ * 而不是基于内容的通用检测。
+ */
+export interface SnipHint {
+  /** 保留头部行数 */
+  head?: number;
+  /** 保留尾部行数 */
+  tail?: number;
+  /** 保留头部字符数（非行导向时） */
+  headChars?: number;
+  /** 保留尾部字符数（非行导向时） */
+  tailChars?: number;
+}
+
+/**
  * 分层上下文蒸馏（上下文蒸馏塔 — 保真层 + 压缩层）
  * 
  * 对超出 keepLastN 的旧工具结果：
@@ -200,10 +216,27 @@ function getCodegraphSummary(text: string): string {
 
 // ─── 入口 ─────────────────────────────────────────────────
 
+/**
+ * Apply a tool-declared SnipHint to truncate long output.
+ * If no SnipHint declared, returns undefined — fall through to content-based masking.
+ */
+function snipByHint(text: string, hint: SnipHint | undefined): string | undefined {
+  if (!hint) return undefined;
+  const lines = text.split('\n');
+  if (hint.head !== undefined && hint.tail !== undefined && lines.length > hint.head + hint.tail) {
+    return [...lines.slice(0, hint.head), `... ${lines.length - hint.head - hint.tail} lines omitted`, ...lines.slice(-hint.tail)].join('\n');
+  }
+  if (hint.headChars !== undefined && hint.tailChars !== undefined && text.length > hint.headChars + hint.tailChars + 20) {
+    return text.slice(0, hint.headChars) + '\n[content truncated - use Read to re-read if needed]\n' + text.slice(-hint.tailChars);
+  }
+  return undefined;
+}
+
 export function maskToolObservations(
   messages: readonly Message[],
   keepLastN?: number,
   toolNameMap?: ReadonlyMap<string, string>,
+  snipHints?: ReadonlyMap<string, SnipHint>,
 ): Message[] {
   const k = keepLastN ?? flags.asNumber('mask.keepLastN') ?? 3;
   const indices: number[] = [];
@@ -255,6 +288,15 @@ export function maskToolObservations(
     if (isSuccessCompressible(text)) {
       const summary = getCompressedText(text, toolName);
       return { ...msg, content: [{ type: 'text' as const, text: summary }] };
+    }
+
+    // SnipHint 优先裁剪（工具声明的裁剪策略）
+    if (toolName && snipHints) {
+      const hint = snipHints.get(toolName) ?? snipHints.get('_default');
+      const snipped = snipByHint(text, hint);
+      if (snipped !== undefined && snipped !== text) {
+        return { ...msg, content: [{ type: 'text' as const, text: snipped }] };
+      }
     }
 
     // 遮蔽

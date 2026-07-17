@@ -8,6 +8,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { CheckpointManager } from '../utils/checkpoint';
+import type { SnipHint } from '../utils/mask-tool-observations';
+
+/** Session-wide checkpoint safety net. */
+const checkpoint = new CheckpointManager();
 
 import type { TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
@@ -56,6 +61,8 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     recordUsage,
   } = deps;
 
+  checkpoint.beginTurn(currentStep);
+
   if (hooks?.beforeStep !== undefined) {
     const beforeStep = await hooks.beforeStep({
       turnId,
@@ -83,7 +90,16 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       }
     }
   }
-  messages = maskToolObservations(messages, undefined, toolNameMap);
+  // SnipHint 声明：工具输出裁剪策略
+  const snipHints = new Map<string, SnipHint>([
+    ['Bash', { head: 5, tail: 10 }],
+    ['Read', { head: 20 }],
+    ['LSP', { head: 10, tail: 30 }],
+    ['Grep', { head: 10, tail: 5 }],
+    ['Glob', { head: 20 }],
+  ]);
+
+  messages = maskToolObservations(messages, undefined, toolNameMap, snipHints);
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();
@@ -148,6 +164,14 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // contains tool calls.
   let effectiveStopReason = stopReason;
   if (stopReason === 'tool_use') {
+    // Pre-execution checkpoint: snapshot files before writer tools
+    for (const tc of response.toolCalls ?? []) {
+      const toolName = tc.name ?? tc.function?.name;
+      const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : tc.parsedArgs;
+      if (toolName === 'Edit' || toolName === 'Write') {
+        checkpoint.snapshot(args.path);
+      }
+    }
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
   }
