@@ -106,17 +106,19 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
 
   const { messages: maskMsgs, stats } = maskToolObservations(messages, undefined, toolNameMap, snipHints);
   messages = maskMsgs;
-  // Accumulate masking stats per-turn for audit log
+  // Per-step snapshot of masking stats (not cumulative — avoids O(N²) double-count)
   const p = maskingStats.perTurn;
-  p.total += stats.total;
-  p.preservedError += stats.preservedError;
-  p.resolvedError += stats.resolvedError;
-  p.preservedStructured += stats.preservedStructured;
-  p.compressed += stats.compressed;
-  p.snipped += stats.snipped;
-  p.fullyMasked += stats.fullyMasked;
-  p.bytesSaved += stats.bytesSaved;
-  p.codegraphStripped += stats.codegraphStripped;
+  if (stats.total > 0) {
+    p.total = stats.total;
+    p.preservedError = stats.preservedError;
+    p.resolvedError = stats.resolvedError;
+    p.preservedStructured = stats.preservedStructured;
+    p.compressed = stats.compressed;
+    p.snipped = stats.snipped;
+    p.fullyMasked = stats.fullyMasked;
+    p.bytesSaved = stats.bytesSaved;
+    p.codegraphStripped = stats.codegraphStripped;
+  }
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();

@@ -429,15 +429,6 @@ export class FooterComponent implements Component {
       );
       const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
       rightText = `${ccDot} ${contextPart}${statusPart}`;
-      // Append masking stats if any bytes were saved this turn
-      const m = maskingStats.perTurn;
-      if (m.bytesSaved > 0) {
-        const kb = (m.bytesSaved / 1024).toFixed(1);
-        const detail = [];
-        if (m.fullyMasked > 0) detail.push(`mask:${m.fullyMasked}`);
-        if (m.compressed > 0) detail.push(`cmp:${m.compressed}`);
-        rightText += ` 🧊-${kb}K${detail.length ? ' ' + detail.join(' ') : ''}`;
-      }
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;
@@ -482,8 +473,19 @@ export class FooterComponent implements Component {
         rate2Str = dim('—');
       }
       const cacheText = ` ${bolt} ${dim('单:')}${chalk.hex(c1)(rate1Str)}  ${dim('总:')}${chalk.hex(c2)(rate2Str)} `;
-      const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText)) / 2));
-      lines.push(shortCwd + ' '.repeat(pad) + cacheText);
+      // 第二行右侧：遮蔽统计（仅有数据时显示）
+      const m = maskingStats.perTurn;
+      let maskSuffix = '';
+      if (m.bytesSaved > 0) {
+        const label = chalk.hex(colors.orange);
+        const digits = chalk.hex(colors.text);
+        const mb = (m.bytesSaved / (1024 * 1024)).toFixed(1);
+        const parts: string[] = [ `${label('掩蔽')}${digits(':'+m.fullyMasked)}` ];
+        if (m.compressed > 0) parts.push(`${label('压缩')}${digits(':'+m.compressed)}`);
+        maskSuffix = ` ${label('🧊')} -${mb}M ${parts.join(' ')}`;
+      }
+      const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText) - visibleWidth(maskSuffix)) / 2));
+      lines.push(shortCwd + ' '.repeat(pad) + cacheText + maskSuffix);
     }
 
     return lines;
