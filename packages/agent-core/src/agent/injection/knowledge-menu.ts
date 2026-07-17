@@ -100,7 +100,14 @@ export class KnowledgeMenuInjector extends DynamicInjector {
     const step = this._lastInjectContext?.currentStep;
     if (step !== 1) return undefined; // 仅 session 启动时注入
 
-    const lines = MENU_ITEMS.map(item =>
+    const activeDomains = this._lastInjectContext?.activeDomains;
+    let items = MENU_ITEMS;
+    if (activeDomains && activeDomains.length > 0) {
+      const matched = MENU_ITEMS.filter(item => activeDomains.includes(item.id));
+      if (matched.length > 0) items = matched;
+    }
+
+    const lines = items.map(item =>
       `  "${item.id}" — ${item.cn}`,
     );
 

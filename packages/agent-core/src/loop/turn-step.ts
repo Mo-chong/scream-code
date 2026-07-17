@@ -167,10 +167,9 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     // Pre-execution checkpoint: snapshot files before writer tools
     for (const tc of response.toolCalls ?? []) {
       const toolName = tc.name ?? tc.function?.name;
+      if (toolName !== 'Edit' && toolName !== 'Write') continue;
       const args = tc.function?.arguments ? JSON.parse(tc.function.arguments) : tc.parsedArgs;
-      if (toolName === 'Edit' || toolName === 'Write') {
-        checkpoint.snapshot(args.path);
-      }
+      if (args?.path) checkpoint.snapshot(args.path);
     }
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
