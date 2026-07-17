@@ -30,6 +30,10 @@
       "types": "./src/agent/records/migration/index.ts",
       "default": "./src/agent/records/migration/index.ts"
     },
+    "./checkpoint": {
+      "types": "./src/checkpoint-barrel.ts",
+      "default": "./src/checkpoint-barrel.ts"
+    },
     "./session/store": {
       "types": "./src/session/store/index.ts",
       "default": "./src/session/store/index.ts"

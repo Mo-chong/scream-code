@@ -192,6 +192,20 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'idle-only',
   },
   {
+    name: 'rewind',
+    aliases: ['rw'],
+    description: '恢复文件到指定轮数前的状态。用法: /rewind [N]',
+    priority: 107,
+    availability: 'idle-only',
+  },
+  {
+    name: 'forward',
+    aliases: ['fw'],
+    description: '撤销上次 /rewind，恢复到最新改动。用法: /forward',
+    priority: 106,
+    availability: 'idle-only',
+  },
+  {
     name: 'fork',
     aliases: [],
     description: 'registry.fork_desc',

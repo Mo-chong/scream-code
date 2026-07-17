@@ -47,6 +47,7 @@ import {
 } from './session';
 import { handleGoalCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
+import { handleRewindCommand, handleForwardCommand } from './rewind';
 import { handleCcCommand } from './cc';
 import { handleUpdateCommand } from './update';
 import { handleMcpCommand } from './mcp';
@@ -299,6 +300,12 @@ async function handleBuiltInSlashCommand(
       return;
     case 'revoke':
       await handleRevokeCommand(host, args);
+      return;
+    case 'rewind':
+      await handleRewindCommand(host, args);
+      return;
+    case 'forward':
+      await handleForwardCommand(host, args);
       return;
     case 'goal':
       await handleGoalCommand(host, args);

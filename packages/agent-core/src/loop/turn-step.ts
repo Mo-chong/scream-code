@@ -11,8 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { CheckpointManager } from '../utils/checkpoint';
 import type { SnipHint } from '../utils/mask-tool-observations';
 
-/** Session-wide checkpoint safety net. */
-const checkpoint = new CheckpointManager();
+/** Session-wide checkpoint safety net for file rewind/forward. */
+export const checkpoint = new CheckpointManager();
 
 import type { TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
