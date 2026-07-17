@@ -34,7 +34,7 @@ const KNOWLEDGE_SNIPPETS: Record<string, string> = {
     '3 层结构：保真层(full) → 压缩层(masked) → 归档层(audit summary)。\n' +
     '只对 codegraph 的 L3(源码块) 做压缩，L1(文件索引)+L2(符号关系) 完整保留。\n' +
     '压缩策略：识别 \`\`\` 分隔符，L1+L2 不走截断，L3 块级保留整函数/整类。\n' +
-    '在 >50K token 时，ArchivalSummaryInjector 追加结构化摘要到尾部。',
+    '在 >50K token 时，归档摘要追加到尾部（已注销注册 Phase43）。',
 
   debt_model:
     '[Knowledge: 债务模型 (Exploration Debt)]\n' +

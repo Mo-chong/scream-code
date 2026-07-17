@@ -17,7 +17,6 @@ import { SessionSummaryInjector } from './session-summary';
 // import { ToolResultRecoveryInjector } from './tool-result-recovery';
 import { DecisionTraceInjector } from './decision-trace';
 import { KnowledgeMenuInjector } from './knowledge-menu';
-import { ArchivalSummaryInjector } from './archival-summary';
 import { InjectionRouter, type InjectContext } from './router';
 
 export class InjectionManager {
@@ -50,8 +49,6 @@ export class InjectionManager {
       // ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
       ['decision-trace', new DecisionTraceInjector(agent)],
       ['knowledge-menu', new KnowledgeMenuInjector(agent)],
-      // 归档层（蒸馏塔第三层）：上下文 >50K 时触发式结构化摘要，尾部 append
-      ['archival-summary', new ArchivalSummaryInjector(agent)],
     ];
     for (const [id, injector] of injectors) {
       this.router.register(id, injector);
