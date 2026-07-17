@@ -9,10 +9,15 @@
 
 import { randomUUID } from 'node:crypto';
 import { CheckpointManager } from '../utils/checkpoint';
-import type { SnipHint } from '../utils/mask-tool-observations';
+import type { MaskingStats, SnipHint } from '../utils/mask-tool-observations';
 
 /** Session-wide checkpoint safety net for file rewind/forward. */
 export const checkpoint = new CheckpointManager();
+
+/** Per-turn masking stats accumulator. Reset at turn start, read at turn end for audit log. */
+export const maskingStats: { perTurn: MaskingStats } = {
+  perTurn: { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 },
+};
 
 import type { TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
@@ -99,7 +104,19 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     ['Glob', { head: 20 }],
   ]);
 
-  messages = maskToolObservations(messages, undefined, toolNameMap, snipHints);
+  const { messages: maskMsgs, stats } = maskToolObservations(messages, undefined, toolNameMap, snipHints);
+  messages = maskMsgs;
+  // Accumulate masking stats per-turn for audit log
+  const p = maskingStats.perTurn;
+  p.total += stats.total;
+  p.preservedError += stats.preservedError;
+  p.resolvedError += stats.resolvedError;
+  p.preservedStructured += stats.preservedStructured;
+  p.compressed += stats.compressed;
+  p.snipped += stats.snipped;
+  p.fullyMasked += stats.fullyMasked;
+  p.bytesSaved += stats.bytesSaved;
+  p.codegraphStripped += stats.codegraphStripped;
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();

@@ -21,6 +21,7 @@ import {
   type LoopRecordedEvent,
   type LoopTurnStopReason,
 } from '../../loop/index';
+import { maskingStats } from '../../loop/turn-step';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 import { abortable, userCancellationReason } from '../../utils/abort';
 import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../context';
@@ -619,6 +620,8 @@ export class TurnFlow {
     this.verifyFailStep = -1;
     this.toolCountsBeforeVerifyRetry = {};
     this.turnHasCalledAnyLsp = false;
+    // Reset masking stats per-turn for audit log
+    maskingStats.perTurn = { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 };
     this.totalStepsWithEditsThisTurn = 0;
     this.totalCodeFileEditsThisTurn = 0;
     this.debtLedger = new DebtLedger(0); // newTurn = fresh session
@@ -1956,7 +1959,7 @@ export class TurnFlow {
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedEvents.length);
       const archiveStats = this.agent.contentArchive?.getStats();
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, false);
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, false, undefined, maskingStats.perTurn);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态

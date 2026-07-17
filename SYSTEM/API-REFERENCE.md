@@ -715,6 +715,12 @@ interface AuditLogEntry {
   summaryTriggered: boolean   // ❌ 已废弃 v3（incremental LLM summary 已移除）
   prevHitRatio: number       // 上轮命中率（首轮为 0）
   hitRatioDelta: number     // 本轮 vs 上轮命中率变化（负=退化，正=恢复）
+  masking: {                // maskToolObservations 遮蔽统计（Phase42e）
+    total: number           // 本轮 tool result 总数
+    compressed: number      // 成功压缩
+    fullyMasked: number     // 完全遮蔽
+    bytesSaved: number      // 节省字节数
+  }
 }
 
 function computeCacheMetrics(usage: TokenUsage): CacheMetrics
@@ -793,10 +799,23 @@ function maskToolObservations(
   messages: readonly Message[],
   keepLastN?: number,                          // flag mask.keepLastN (默认 3)，< 100 chars 不遮蔽
   toolNameMap?: ReadonlyMap<string, string>   // {toolCallId → toolName}
-): Message[]
+{ messages: Message[]; stats: MaskingStats }
   // 遮蔽旧 tool result，保留最近 keepLastN 条原文
   // 纯函数，不修改 context.history
+  // 返回 { messages：遮蔽后消息列表，stats：本轮遮蔽统计 }
   // 工具结果 < 100 chars 跳过遮蔽（短输出保护）
+
+export interface MaskingStats {
+  total: number;              // 本轮 tool result 总数
+  preservedError: number;     // 保真层保留
+  resolvedError: number;      // 错误已解决降级
+  preservedStructured: number;// 结构化保护
+  compressed: number;         // 成功压缩为一行
+  snipped: number;            // SnipHint 裁剪
+  fullyMasked: number;        // 完全遮蔽
+  bytesSaved: number;         // 原内容总字节 - 遮蔽后总字节
+  codegraphStripped: number;  // codegraph L3 砍掉
+}
 ```
 
 **接口变更（Phase42d）**：新增 `SnipHint` 接口 + `snipByHint` 裁剪函数
@@ -1404,3 +1423,14 @@ class KnowledgeLookupTool implements StepTool
 | `SnipHint` 接口 | `utils/mask-tool-observations.ts` | 工具裁剪声明：`head?: number` `tail?: number` |
 | `snipByHint` 函数 | `utils/mask-tool-observations.ts` | 按声明裁剪 tool result |
 | `edit_error_fix` variant | `turn/index.ts:1271` | ad-hoc 变体：Edit 报 `old_string not found` 时即时注入 fix 指令 |
+
+### Phase42e — MaskingStats 可观测性 🆕
+
+| 接口 | 文件 | 变更 |
+|------|------|------|
+| `MaskingStats` | `utils/mask-tool-observations.ts` | 新增接口，8 类遮蔽统计 |
+| `maskToolObservations` | `utils/mask-tool-observations.ts` | 返回 `{ messages, stats }` 替代 `Message[]` |
+| `maskingStats` | `loop/turn-step.ts` → `turn-step-barrel.ts` | 每轮累计统计，TUI 和审计日志共享 |
+| `AuditLogEntry.masking` | `usage/audit-log.ts` | ndjson 新增 `masking` 字段 |
+| `buildAuditEntry` | `usage/audit-log.ts` | 可选接收 `MaskingStats` 并写入 entry |
+| TUI footer | `apps/scream-code/src/tui/components/chrome/footer.ts` | 显示 `🧊 -X.XK mask:N cmp:N` |

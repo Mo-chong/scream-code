@@ -469,6 +469,14 @@ updated: 2026-07-15
 - **25 文件 ToolAccesses 补齐** + **6 SYSTEM 说明书同步**。
 - **构建验证**：通过。
 
+**Phase42e — MaskingStats 遮蔽可观测性（2026-07-17）：**
+- **MaskingStats** 接口 + `maskToolObservations()` 返回 `{ messages, stats }`：8 类遮蔽统计，零额外遍历。
+- **maskingStats** 每轮累计：`turn-step.ts` 导出，`turn/index.ts` 重置+传入审计日志。
+- **`AuditLogEntry.masking`**：ndjson 新增 `masking.total/compressed/fullyMasked/bytesSaved`。
+- **TUI footer**：显示 `🧊 -X.XK mask:N cmp:N`（有遮蔽时），一眼判断遮蔽是否生效。
+- **barrel 重命名**：`checkpoint-barrel.ts` → `turn-step-barrel.ts`，同时导出 `checkpoint` + `maskingStats`。
+- **8 文件修改**，构建通过。
+
 ### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
 
 **P0 — 信息结构优化：**

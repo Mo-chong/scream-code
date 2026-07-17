@@ -23,6 +23,7 @@ import {
   type GitStatusCache,
 } from '#/utils/git/git-status';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
+import { maskingStats } from '@scream-code/agent-core/turn-step';
 
 // Toolbar tips — rotates every 10s. Most tips are short and pair up (two
 // joined by " | ") when space allows; tips flagged `solo` are long or
@@ -428,6 +429,15 @@ export class FooterComponent implements Component {
       );
       const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
       rightText = `${ccDot} ${contextPart}${statusPart}`;
+      // Append masking stats if any bytes were saved this turn
+      const m = maskingStats.perTurn;
+      if (m.bytesSaved > 0) {
+        const kb = (m.bytesSaved / 1024).toFixed(1);
+        const detail = [];
+        if (m.fullyMasked > 0) detail.push(`mask:${m.fullyMasked}`);
+        if (m.compressed > 0) detail.push(`cmp:${m.compressed}`);
+        rightText += ` 🧊-${kb}K${detail.length ? ' ' + detail.join(' ') : ''}`;
+      }
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;

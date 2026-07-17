@@ -483,7 +483,7 @@ export class FullCompaction {
         messagesToCompact: readonly ContextMessage[],
       ): Promise<{ summary: string; usage: TokenUsage | null }> => {
         const projected = project(messagesToCompact);
-        const masked = maskToolObservations(projected, 1);
+        const { messages: masked } = maskToolObservations(projected, 1);
         const instruction = isUpdate
           ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
           : COMPACTION_INSTRUCTION(data.instruction);

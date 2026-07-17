@@ -2,6 +2,22 @@ import type { Message } from '@scream-code/ltod';
 import { flags } from '../flags';
 
 /**
+ * MaskingStats — maskToolObservations 每轮执行的可观测统计。
+ * 计数在各分类出口累加，不增加新遍历。
+ */
+export interface MaskingStats {
+  total: number;
+  preservedError: number;
+  resolvedError: number;
+  preservedStructured: number;
+  compressed: number;
+  snipped: number;
+  fullyMasked: number;
+  bytesSaved: number;
+  codegraphStripped: number;
+}
+
+/**
  * SnipHint — 工具声明的输出裁剪策略。
  * 当工具结果需要压缩时，优先使用工具自身的 SnipHint，
  * 而不是基于内容的通用检测。
@@ -237,7 +253,7 @@ export function maskToolObservations(
   keepLastN?: number,
   toolNameMap?: ReadonlyMap<string, string>,
   snipHints?: ReadonlyMap<string, SnipHint>,
-): Message[] {
+): { messages: Message[]; stats: MaskingStats } {
   const k = keepLastN ?? flags.asNumber('mask.keepLastN') ?? 3;
   const indices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
@@ -250,19 +266,24 @@ export function maskToolObservations(
   }
 
   const cutoff = indices.length - k;
-  if (cutoff <= 0) return [...messages];
+  if (cutoff <= 0) return { messages: [...messages], stats: emptyStats() };
 
+  const stats: MaskingStats = { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 };
   const keep = new Set(indices.slice(cutoff));
-  return messages.map((msg, i) => {
+  const result = messages.map((msg, i) => {
     if (msg === undefined || msg.role !== 'tool' || keep.has(i)) return msg;
+    stats.total++;
 
     const text = getContentText(msg.content);
+    const origLen = text.length;
     const toolName = msg.toolCallId ? toolNameMap?.get(msg.toolCallId) : undefined;
 
     // ★ codegraph 结果定向压缩（先于 isStructuredOutput，避免源码块被结构化保护整段保留）
     if (isCodegraphResult(toolName, text)) {
       const summary = getCodegraphSummary(text);
       if (summary !== text) {
+        stats.codegraphStripped++;
+        stats.bytesSaved += origLen - summary.length;
         return { ...msg, content: [{ type: 'text' as const, text: summary }] };
       }
     }
@@ -274,19 +295,31 @@ export function maskToolObservations(
       if (isErrorResolved(text, msg.toolCallId, i, messages)) {
         const path = extractPath(text) ?? extractPathFromToolCall(msg.toolCallId, messages, i) ?? '';
         const resolved = path ? `Edit ${path}: resolved ✓` : 'Error: resolved ✓';
+        stats.resolvedError++;
+        stats.bytesSaved += origLen - resolved.length;
         return { ...msg, content: [{ type: 'text' as const, text: resolved }] };
       }
-      if (text.length <= error.budget) return msg;
+      if (text.length <= error.budget) {
+        stats.preservedError++;
+        return msg;
+      }
       const truncated = text.slice(0, error.budget) + '\n[content truncated - use Read to re-read if needed]';
+      stats.preservedError++;
+      stats.bytesSaved += origLen - truncated.length;
       return { ...msg, content: [{ type: 'text' as const, text: truncated }] };
     }
 
     // 结构化内容保护：JSON/代码/表格 → 保留完整
-    if (isStructuredOutput(text)) return msg;
+    if (isStructuredOutput(text)) {
+      stats.preservedStructured++;
+      return msg;
+    }
 
     // 压缩层：成功 → 一行摘要
     if (isSuccessCompressible(text)) {
       const summary = getCompressedText(text, toolName);
+      stats.compressed++;
+      stats.bytesSaved += origLen - summary.length;
       return { ...msg, content: [{ type: 'text' as const, text: summary }] };
     }
 
@@ -295,12 +328,22 @@ export function maskToolObservations(
       const hint = snipHints.get(toolName) ?? snipHints.get('_default');
       const snipped = snipByHint(text, hint);
       if (snipped !== undefined && snipped !== text) {
+        stats.snipped++;
+        stats.bytesSaved += origLen - snipped.length;
         return { ...msg, content: [{ type: 'text' as const, text: snipped }] };
       }
     }
 
     // 遮蔽
     const maskText = getMaskText(msg.toolCallId, toolNameMap);
+    stats.fullyMasked++;
+    stats.bytesSaved += origLen - maskText.length;
     return { ...msg, content: [{ type: 'text' as const, text: maskText }] };
   });
+
+  return { messages: result, stats };
+}
+
+function emptyStats(): MaskingStats {
+  return { total: 0, preservedError: 0, resolvedError: 0, preservedStructured: 0, compressed: 0, snipped: 0, fullyMasked: 0, bytesSaved: 0, codegraphStripped: 0 };
 }

@@ -132,6 +132,13 @@ export interface AuditLogEntry {
   /** 本轮 vs 上轮命中率变化量（正=提升，负=下降）。首次为 0。 */
   hitRatioDelta: number;
 
+  /** maskToolObservations 遮蔽统计 */
+  masking: {
+    total: number;
+    compressed: number;
+    fullyMasked: number;
+    bytesSaved: number;
+  };
 }
 
 
@@ -574,6 +581,7 @@ export function buildAuditEntry(
 
   summaryTriggered = false,
   prevMetrics?: CacheMetrics,
+  masking?: { total: number; compressed: number; fullyMasked: number; bytesSaved: number },
 
 ): AuditLogEntry {
 
@@ -649,6 +657,7 @@ export function buildAuditEntry(
     summaryTriggered,
     prevHitRatio,
     hitRatioDelta,
+    masking: masking ?? { total: 0, compressed: 0, fullyMasked: 0, bytesSaved: 0 },
 
   };
 

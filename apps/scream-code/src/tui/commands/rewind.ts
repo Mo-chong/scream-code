@@ -2,7 +2,7 @@ import type { SlashCommandHost } from './dispatch';
 import { formatErrorMessage } from '../utils/event-payload';
 import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import { isBusy } from '../utils/app-state';
-import { checkpoint } from '@scream-code/agent-core/checkpoint';
+import { checkpoint } from '@scream-code/agent-core/turn-step';
 
 // ── Rewind command ───────────────────────────────────────────────────────
 // Restores files to their state before a specified number of turns ago.
