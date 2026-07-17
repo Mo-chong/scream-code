@@ -1,8 +1,9 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { GoalInjector } from './goal';
-import { ModeBlockInjector } from './mode-block';
+import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
+import { PlanModeInjector } from './plan-mode';
 import { TodoListReminderInjector } from './todo-list';
 import { UserPrefsInjector } from './user-prefs';
 import { WolfPackModeInjector } from './wolfpack';
@@ -34,7 +35,8 @@ export class InjectionManager {
       ['plugin-session-start', new PluginSessionStartInjector(agent)],
       ['user-prefs', new UserPrefsInjector(agent)], // HIGHEST PRIORITY — 提到第2位（紧跟 plugin-session-start），利用 Attention Sink
       ['wolfpack', new WolfPackModeInjector(agent)],
-      ['mode-block', new ModeBlockInjector(agent)],
+      ['plan-mode', new PlanModeInjector(agent)],
+      ['permission-mode', new PermissionModeInjector(agent)],
       ['todo-list', new TodoListReminderInjector(agent)],
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],

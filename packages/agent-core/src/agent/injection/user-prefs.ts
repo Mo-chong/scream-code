@@ -20,22 +20,17 @@ const USER_PREFS_VARIANT = 'user_prefs';
 export class UserPrefsInjector extends DynamicInjector {
   protected override readonly injectionVariant = USER_PREFS_VARIANT;
 
-  /** Only inject once per session — preferences don't change between turns. */
-  private _consumed = false;
-
   override getPosition(): InsertPosition {
     return InsertPosition.AFTER_SYSTEM;
   }
 
   protected override async getInjection(): Promise<string | undefined> {
-    if (this._consumed) return undefined;
     if (this.injectedAt !== null && !this.hasNewUserPromptSince(this.injectedAt)) {
       return undefined;
     }
     const prefs = await loadRoleAdditional(this.agent.jian);
     if (prefs === undefined) return undefined;
 
-    this._consumed = true;
     return [
       'USER PREFERENCES REMINDER: Before responding, re-read and apply EVERY',
       'user preference below. These are direct user instructions set via /like',

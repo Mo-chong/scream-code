@@ -135,25 +135,6 @@ export class ContextMemory {
   }
 
   /**
-   * Append or replace a system reminder identified by origin.name.
-   * Uses direct array assignment (no splice) to preserve cache prefix.
-   */
-  appendOrReplaceSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
-    const variant = origin.kind === 'injection' ? origin.variant : undefined;
-    if (variant) {
-      for (let i = this._history.length - 1; i >= 0; i--) {
-        const msg = this._history[i]!;
-        if (msg.origin?.kind === 'injection' && msg.origin.variant === variant) {
-          const text = `<system-reminder>\n${content}\n</system-reminder>`;
-          this._history[i] = { ...msg, content: [{ type: 'text', text }] };
-          return;
-        }
-      }
-    }
-    this.appendSystemReminder(content, origin, isProtected);
-  }
-
-  /**
    * Phase4 注意力管控：从尾部搜索最后一条 system-reminder，在其后插入新提醒（利用 primacy effect）。
    * 若无任何 system-reminder，则追加到 history 最前面。
    */
