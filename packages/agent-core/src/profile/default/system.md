@@ -46,6 +46,9 @@ Inviolable:
 - Never substitute an easier problem.
 - Never ask what tools/repo/files can provide; never punt half-solved work.
 - Clean cutover: migrate every caller, no shims/aliases/deprecated paths.
+- Tool-call first: action needed — open with tool call. NEVER end a turn after narration only.
+- End-of-turn gate: turn ends — zero pending TODOs. Mark completed or scope out before yielding.
+- NEVER reformat code / run install commands / bulk file changes / reorder imports — explicit user request required.
 
 Done = end-to-end as specified, not scaffold/narrow test. Every criterion met.
 Never shrink scope. No stubs/placeholders/mocks/no-ops/fake fallbacks/"TODO: implement".
@@ -123,6 +126,8 @@ Bug fix: MINIMAL changes. Root cause → fix. No scope creep.
 Refactor: update callers on interface change. Don't alter existing logic/tests.
 
 DO NOT run git mutations unless user asks. Ask confirmation each time.
+
+TODO for multi-step work [P1]: 3+ distinct actions → open with todo tool call (merge:false). Maintain one in_progress at a time. Mark completed immediately — no batch-mark. Post-compaction: re-open todo with fresh call.
 
 ## Code display [P1]
 

@@ -24,6 +24,14 @@ export interface QualityBaselineData {
   peakScore: number;
   /** 总记录次数 */
   recordCount: number;
+  /** 5 维评分详情（Phase42d 新增） */
+  scores?: {
+    deviation: number;
+    convergence: number;
+    toolAccuracy: number;
+    faithfulness: number;
+    debtHealth: number;
+  };
 }
 
 const EMPTY: QualityBaselineData = {
@@ -44,7 +52,7 @@ export function readBaseline(): QualityBaselineData {
   }
 }
 
-export function writeBaseline(qualityIndex: number): void {
+export function writeBaseline(qualityIndex: number, scores?: QualityBaselineData['scores']): void {
   const prev = readBaseline();
   const trend: QualityBaselineData['trend'] =
     prev.recordCount === 0 ? 'stable' :
@@ -58,6 +66,7 @@ export function writeBaseline(qualityIndex: number): void {
     firstRecordedAt: prev.firstRecordedAt || new Date().toISOString(),
     peakScore: Math.max(prev.peakScore, qualityIndex),
     recordCount: prev.recordCount + 1,
+    scores,
   };
 
   try {
@@ -72,6 +81,33 @@ export function writeBaseline(qualityIndex: number): void {
 export function getFeedbackInjection(data: QualityBaselineData): string | null {
   if (data.recordCount === 0) return null;
 
+  // 🆕 Phase42d: 5 维具体反馈（替代 3 档模糊分）
+  if (data.scores) {
+    const { deviation, convergence, toolAccuracy, faithfulness, debtHealth } = data.scores;
+    const dims = [
+      { name: '偏差', key: 'deviation', score: deviation },
+      { name: '收敛', key: 'convergence', score: convergence },
+      { name: '工具准确', key: 'toolAccuracy', score: toolAccuracy },
+      { name: '推理一致', key: 'faithfulness', score: faithfulness },
+      { name: '债务健康', key: 'debtHealth', score: debtHealth },
+    ];
+
+    const low = dims.filter(d => d.score < 60).map(d => `${d.name}=${d.score}`);
+    const high = dims.filter(d => d.score >= 85).map(d => `${d.name}=${d.score}`);
+
+    const lines: string[] = [
+      '[Quality Feedback]',
+      `Previous session: qualityIndex=${data.lastQualityIndex}`,
+    ];
+
+    if (high.length > 0) lines.push(`  ✅ 好: ${high.join(', ')}`);
+    if (low.length > 0) lines.push(`  ❌ 注意: ${low.join(', ')}`);
+    if (low.length === 0 && high.length > 0) lines.push('  无短板 — 保持当前策略');
+
+    return lines.join('\n');
+  }
+
+  // 回退：无 scores 时用 3 档模糊分（兼容旧数据）
   if (data.lastQualityIndex < 55) {
     return (
       '[Quality Feedback]\n' +
@@ -91,7 +127,7 @@ export function getFeedbackInjection(data: QualityBaselineData): string | null {
       'Suggestions:\n' +
       '  1. Double-check tool outputs before relying on them\n' +
       '  2. Use codegraph_explore for unknown structures\n' +
-      `  3. Trend: ${data.trend === 'improving' ? 'Keep it up' : 'Focus on reducing tool errors'}`
+      `  3. Trend: ${data.trend}`
     );
   }
 

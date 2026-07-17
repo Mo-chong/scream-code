@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import type { Agent } from '../../agent';
 import type { ExecutableTool, ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../loop';
+import { ToolAccesses } from '../../loop/tool-access';
 
 interface CodeGraphInput {
   command: 'callees' | 'impact' | 'affected';
@@ -43,6 +44,7 @@ export class CodeGraphTool implements ExecutableTool<CodeGraphInput> {
 
     return {
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async (_ctx: ExecutableToolContext): Promise<ExecutableToolResult> => {
         try {
           const result = execSync(`codegraph ${command} "${target}" --max-files 1 2>/dev/null`, {

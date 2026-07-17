@@ -443,7 +443,22 @@ updated: 2026-07-15
 - **背景**：Phase41 Work Style 是直接编辑 `user-prefs.md` 加的，`/like` schema 只有 nickname/tone/other 三字段。跑 `/like` 会覆盖丢失。
 - **修复（5 文件）：** `config.ts` — `TuiLikePreferencesSchema` 加 `workStyle: z.string().optional()` | `like.ts` — `handleLikeCommand()` 加第 4 输入框 + `buildRoleAdditionalText()` 加 Work Style 段落输出 | `zh.ts` / `en.ts` — 3 条 i18n 翻译（标题/提示/示例）。
 - **格式修正：** `user-prefs.md` 手动整理为 41 行：Work Style 6 条逐行排列、5 条规则分条、4 示例独立代码块。无中文尾部多余文字。
-- **构建验证：** `agent-core 7.7s + scream-code 5.7s = EXIT 0`### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
+- **构建验证：** `agent-core 7.7s + scream-code 5.7s = EXIT 0`
+
+**Phase42d — 回合内实时反馈闭环 + quality_feedback 删除（2026-07-15）：**
+- **回合内 3 缺口分析：** faithfulness 只记录不注入 / 域门控只过滤不推荐 / 收敛门不拦工具选择（all 代码行号验证）
+- **已执行（2/3）：**
+  - `[Faithfulness Alert]` 实时注入 — `checkFaithfulness()` mismatch 时 `this.inject('[Faithfulness Alert] 推理说X但实际调了Y')` + `variant: 'faithfulness_alert'`
+  - G4 收敛门 — 收敛门复用 event-log 最近 faithfulness 记录，`action==='mismatch'` 追加 lowReasons
+- **已否决（1/3）：** 域门控主动推荐 — 已有探索债务覆盖，额外注入破坏缓存
+- **P0 quality_feedback 删除：** `step 1 readBaseline()+getFeedbackInjection()` 全量删除。原因：跨 session 质量分跟本轮任务无关系（噪音），且每次文字不同导致 step 1 前缀缓存断裂。
+- **quality-baseline.ts 重构：** `QualityBaselineData` 加 `scores?` 可选字段 | `writeBaseline()` 加第二参数存 5 维分数 | `getFeedbackInjection()` 改为优先输出具体分（降级兼容旧数据）→ 后因 cross-session 噪音问题删除调用
+- **5 维具体反馈（P0 已执行）：** `getFeedbackInjection()` 输出从 3 档模糊分改为 5 维具体分（`✅好:工具准确=94` / `❌注意:推理一致=38`）。后因跨 session 噪音问题删除 step 1 注入，数据继续存 `quality-baseline.json` 供后分析。
+- **跨 session 方向修正：** 判定跨 session 质量分无 / 本轮任务相关（噪音），改为 event-log 后分析检测真实退化模式时才尾部追加注入。
+- **清理：** `turn/index.ts` 删 8 行 step 1 `quality_feedback` 块 + import 清理 `readBaseline/getFeedbackInjection`（只剩 `writeBaseline`）
+- **构建：** `agent-core 5948ms + scream-code 5476ms = EXIT 0`
+
+### Phase41 — 注意力与偏好系统升级：P0→P2 全量落地（2026-07-15）
 
 **P0 — 信息结构优化：**
 - user-prefs.md：新增 Work Style 6 条 + [InsufficientContext] MUST 指令

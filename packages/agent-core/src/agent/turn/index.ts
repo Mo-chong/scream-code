@@ -33,7 +33,7 @@ import { detectConfabulation } from './detectors/confabulation';
 import { VariantRegistry, detectWeightLevel, repeatDecay, shouldInjectByResidual, shouldUseShortText, shortenText, VARIANT_META, getScore, type WeightLevel } from './variant-registry';
 import { checkFaithfulness } from '../../audit/faithfulness';
 import { computeQualityScore } from '../../audit/quality-score';
-import { writeBaseline, readBaseline, getFeedbackInjection } from '../../audit/quality-baseline';
+import { writeBaseline } from '../../audit/quality-baseline';
 import { getOutputConstraint } from '../interception/output-constraint';
 import { resolveKnowledgeRequest } from '../injection/knowledge-menu';
 import { TurnEventLog } from './event-log';
@@ -884,15 +884,6 @@ export class TurnFlow {
                 );
               }
 
-              // 🆕 P2: session-start 质量反馈注入（低分加约束，高分给自由）
-              if (stepNumber === 1) {
-                const baseline = readBaseline();
-                const feedback = getFeedbackInjection(baseline);
-                if (feedback) {
-                  this.inject(feedback, { kind: 'injection', variant: 'quality_feedback' });
-                }
-              }
-
               // 🆕 Phase41: 域分析 — 为域门控提供活跃域列表
               const activeDomains = analyzeActiveDomains({
                 currentStep: this.currentStep,
@@ -992,6 +983,15 @@ export class TurnFlow {
 
                 // — 带 await 的条件（pending-doc 需要异步搜索）—
                 await this.collectPendingDocReason(lowReasons);
+
+                // 🆕 Phase42d: G4 — 收敛门中复用 faithfulness 结果检查工具选择一致性
+                const lastFaithfulness = this.eventLog?.events?.slice().reverse()
+                  .find((e: any) => e.kind === 'faithfulness');
+                if (lastFaithfulness && lastFaithfulness.action === 'mismatch') {
+                  lowReasons.push(
+                    `上一步推理说"${lastFaithfulness.variant}"，但实际调用了不同工具。请确保推理描述与实际操作一致。`,
+                  );
+                }
 
                 const reasons = [...highReasons, ...lowReasons];
 
@@ -2067,6 +2067,16 @@ export class TurnFlow {
           : `推理说"${result.mismatches[0]?.verb ?? '?'}"但未调用期望工具 [${result.mismatches[0]?.expectedTools.join(', ') ?? ''}], 实际调了 [${result.mismatches[0]?.actualTools.join(', ') ?? ''}]`,
         agentType: this.agent.type,
       });
+
+      // 🆕 Phase42d: faithfulness mismatch 实时注入 — 让 AI 立刻知道言行不一致
+      if (!result.consistent) {
+        this.inject(
+          `[Faithfulness Alert] 推理说"${result.mismatches[0]?.verb ?? '?'}"` +
+          `，但实际调用了 [${result.mismatches[0]?.actualTools.join(', ') ?? '?'}]。` +
+          `推理描述应与实际工具调用保持一致。`,
+          { kind: 'injection', variant: 'faithfulness_alert' },
+        );
+      }
     }
 
     // 🆕 P1.6: REQUEST: 知识主动请求处理
@@ -2138,7 +2148,7 @@ export class TurnFlow {
     });
 
     // 🆕 P2: 持久化 qualityIndex → 下个 session 反馈回路使用
-    writeBaseline(score.qualityIndex);
+    writeBaseline(score.qualityIndex, score.scores);
   }
 
   /** 偏差链修复跟踪 */
