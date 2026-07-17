@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { ToolAccesses } from '../../../loop/tool-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 export const MemoryEditInputSchema = z.object({
@@ -50,6 +51,7 @@ export class MemoryEditTool implements BuiltinTool<MemoryEditInput> {
     return {
       description: args.action === 'delete' ? 'Deleting memory memo' : 'Updating memory memo',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.memoStore;
         if (!store) {

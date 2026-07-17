@@ -72,6 +72,7 @@ export class TaskListTool implements BuiltinTool<TaskListInput> {
     return {
       description: 'Listing background tasks',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, listScope),
       execute: async () => {
         await this.manager.settlePendingExits();

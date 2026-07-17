@@ -34,6 +34,7 @@ export class CreateGoalTool implements BuiltinTool<CreateGoalToolInput> {
     return {
       description: 'Creating a goal',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const snapshot = await goal.createGoal(
           {

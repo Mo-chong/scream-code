@@ -96,6 +96,7 @@ export class CronListTool implements BuiltinTool<CronListInput> {
     return {
       description: 'Listing scheduled cron jobs',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         // Snapshot the store once and pin "now" from the manager's
         // clock — keeping both reads inside the same execute() call

@@ -67,6 +67,7 @@ export class ReportFindingTool implements BuiltinTool<ReportFindingInput> {
     return {
       description,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         if (args.line_end < args.line_start) {
           return {

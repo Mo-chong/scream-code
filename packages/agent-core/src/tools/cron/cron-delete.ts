@@ -90,6 +90,7 @@ export class CronDeleteTool implements BuiltinTool<CronDeleteInput> {
     return {
       description: `Deleting cron ${args.id}`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const removed = this.manager.removeTasks([args.id]);
         if (removed.length === 0) {

@@ -77,6 +77,7 @@ export class TaskOutputTool implements BuiltinTool<TaskOutputInput> {
     return {
       description: `Reading output of task ${args.task_id}`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.task_id),
       execute: () => this.execute(args),
     };

@@ -35,6 +35,7 @@ export class EnterPlanModeTool implements BuiltinTool<EnterPlanModeInput> {
     return {
       description: 'Requesting to enter plan mode',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         // Guard: already in plan mode
         if (this.agent.planMode.isActive) {

@@ -20,6 +20,7 @@ export class GetGoalTool implements BuiltinTool<GetGoalToolInput> {
     return {
       description: 'Reading the current goal',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const result = store.getGoal();
         return { output: JSON.stringify(result, null, 2) };

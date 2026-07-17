@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { ToolAccesses } from '../../../loop/tool-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 export const MemoryWriteInputSchema = z.object({
@@ -60,6 +61,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
     return {
       description: 'Writing memory memo',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.memoStore;
         if (!store) {

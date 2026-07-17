@@ -65,6 +65,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     return {
       description: `Setting goal status: ${args.status}`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         if (args.status === 'active') {
           await goal.resumeGoal({}, 'model');

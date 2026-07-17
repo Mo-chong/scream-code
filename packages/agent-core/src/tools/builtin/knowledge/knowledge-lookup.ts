@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { ToolAccesses } from '../../../loop/tool-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 const DEFAULT_TOP_K = 5;
@@ -47,6 +48,7 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
     return {
       description: 'Searching knowledge base',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.knowledgeStore;
         if (!store) {

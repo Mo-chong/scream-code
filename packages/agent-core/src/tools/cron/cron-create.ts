@@ -248,6 +248,7 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
           recurring,
         }),
       ),
+      accesses: ToolAccesses.none(),
       execute: async () => {
         // Anchor the schedule to the moment of execution, not the
         // moment of preparation. Manual-approval mode can leave

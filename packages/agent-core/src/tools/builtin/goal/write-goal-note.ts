@@ -35,6 +35,7 @@ export class WriteGoalNoteTool implements BuiltinTool<WriteGoalNoteInput> {
     return {
       description: 'Writing a goal note',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const snapshot = await goal.addNote(args.content);
         if (snapshot === null) {

@@ -33,6 +33,7 @@ export class SetGoalBudgetTool implements BuiltinTool<SetGoalBudgetToolInput> {
     return {
       description: `Setting goal budget: ${formatBudget(normalizedArgs.value, normalizedArgs.unit)}`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const budget = budgetLimitsFromInput(normalizedArgs);
         if (budget === null) {

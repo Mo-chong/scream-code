@@ -39,6 +39,7 @@ export class MakeSkillApplyTool implements BuiltinTool<MakeSkillApplyInput> {
     return {
       description: `Installing skill "${sanitizeSkillName(args.name)}" to plugin center`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: (context) => this.execute(args, context),
     };
   }

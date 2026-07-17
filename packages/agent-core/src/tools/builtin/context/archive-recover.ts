@@ -31,6 +31,7 @@ export class ArchiveRecoverTool implements BuiltinTool<ArchiveRecoverInput> {
     return {
       description: 'ArchiveRecover',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async (_ctx: ExecutableToolContext): Promise<ExecutableToolResult> => {
         if (args.key) {
           const content = this.contentArchive.recover(args.key);

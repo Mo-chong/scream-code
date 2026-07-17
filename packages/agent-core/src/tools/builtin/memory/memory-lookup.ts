@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { ToolAccesses } from '../../../loop/tool-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 const DEFAULT_LIMIT = 5;
@@ -92,6 +93,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
     return {
       description: 'Searching memory memos',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.memoStore;
         if (!store) {

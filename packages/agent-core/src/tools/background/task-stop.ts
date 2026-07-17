@@ -37,6 +37,7 @@ export class TaskStopTool implements BuiltinTool<TaskStopInput> {
     return {
       description: `Stopping task ${args.task_id}`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.task_id),
       execute: async () => {
         await this.manager.settlePendingExits();

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import { ToolAccesses } from '../../../loop/tool-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 const MemoryMemoSummarySchema = z.object({
@@ -85,6 +86,7 @@ export class MemoryConsolidatePlanTool implements BuiltinTool<Record<string, nev
     return {
       description: 'Building memory consolidation plan',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.memoStore;
         if (!store) {
@@ -129,6 +131,7 @@ export class MemoryConsolidateApplyTool implements BuiltinTool<MemoryConsolidate
     return {
       description: 'Applying memory consolidation plan',
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: async () => {
         const store = this.agent.memoStore;
         if (!store) {

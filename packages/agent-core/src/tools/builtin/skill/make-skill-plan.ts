@@ -111,6 +111,7 @@ export class MakeSkillPlanTool implements BuiltinTool<MakeSkillPlanInput> {
     return {
       description: `Crafting skill plan (${args.type})`,
       approvalRule: this.name,
+      accesses: ToolAccesses.none(),
       execute: (context) => this.execute(args, context),
     };
   }
