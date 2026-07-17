@@ -16,7 +16,8 @@
  * 置信度 >0.6 才显示，宁缺毋滥。
  */
 
-import { DynamicInjector, type ResidualConfig } from './injector';
+import { DynamicInjector, simpleHash, type ResidualConfig } from './injector';
+import { InsertPosition } from './position-strategy';
 import type { Agent } from '..';
 import type { ContextMessage } from '../context/types';
 
@@ -254,6 +255,35 @@ export class ArchivalSummaryInjector extends DynamicInjector {
 
   override getResidualConfig(): ResidualConfig {
     return { weight: 0, decayPerStep: 0, threshold: 0, minStepGap: 0 };
+  }
+
+  /**
+   * Override inject() to use appendOrReplaceSystemReminder.
+   * Base class (DynamicInjector.inject()) hardcodes appendSystemReminder,
+   * which causes O(N²) archival bloat. This override replaces old archive
+   * in-place when one already exists, preserving cache prefix.
+   */
+  override async inject(context?: InjectContext): Promise<void> {
+    this._lastInjectContext = context;
+    const injection = await this.getInjection();
+    if (injection) {
+      this._lastContentHash = simpleHash(injection);
+      this.injectedAt = this.agent.context.history.length;
+      const pos = this.getTargetPosition();
+      if (pos === InsertPosition.AFTER_SYSTEM) {
+        this.agent.context.insertSystemReminderAtHead(injection, {
+          kind: 'injection',
+          variant: this.injectionVariant,
+        }, true);
+      } else {
+        this.agent.context.appendOrReplaceSystemReminder(injection, {
+          kind: 'injection',
+          variant: this.injectionVariant,
+        });
+      }
+    } else {
+      this._lastContentHash = null;
+    }
   }
 
   protected override getInjection(): string | undefined {
