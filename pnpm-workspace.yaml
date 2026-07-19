@@ -15,6 +15,5 @@ catalog:
 overrides:
   "ssh2@1.17.0>cpu-features": "-"
   "ssh2@1.17.0>nan": "-"
-patchedDependencies:
-  '@earendil-works/pi-tui@0.80.6': patches/@earendil-works__pi-tui@0.80.6.patch
+
 scriptShell: D:/Git/Git/usr/bin/bash.exe

@@ -18,6 +18,31 @@ updated: 2026-07-15
 
 ---
 
+## v0.10.0 — 合并上游 v0.10.0（2026-07-19）
+
+### 重大变更
+- **移除 `/loop` 命令**
+- **`@earendil-works/pi-tui` → `@liutod-scream/pi-tui`**（删 patch 系统，清空 `patchedDependencies`）
+- **品牌色改酸黄绿 `#ccfb23`**，修复 9 个 TUI 渲染 bug
+
+### 新功能
+- `/goal config wizard`：交互式 goal 配置助手
+- `/title` 改为交互式标题编辑
+- 响应式欢迎区、思考徽章、帮助面板改进
+- WolfPack 加固：结果聚合 + 权限范围 + 超时 + 状态同步
+
+### 修复
+- TUI 渲染生命周期修复（spinner 泄漏、面板持久化、对话框追踪）
+- 5 个类型错误
+- i18n 精简（中英文各 -65 行）
+
+### 二开影响
+高（对比 v0.9.x）。主要变动：
+- `pnpm-workspace.yaml`：保留本地 `scriptShell` 配置，删除旧 `patchedDependencies`
+- 测试文件 8 个取上游
+- `/loop` 相关测试跟上游删除
+- `system.md`：零改动
+
 ## v0.9.7 — 合并上游 v0.9.7（2026-07-08）
 
 ### 重大变更
