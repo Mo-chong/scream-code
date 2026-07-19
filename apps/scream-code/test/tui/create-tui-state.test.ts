@@ -43,13 +43,6 @@ function fakeInitialAppState(): AppState {
     lastStepCacheMiss: 0,
     ccConnectActive: false,
     wolfpackMode: false,
-    loopModeEnabled: false,
-    loopPrompt: undefined,
-    loopLimit: undefined,
-    loopVerifier: undefined,
-    loopIteration: 0,
-    loopLastVerifyPassed: undefined,
-    loopVerifying: false,
     recentSessions: [],
     subagentUsage: {},
   };

@@ -556,6 +556,9 @@ readonly contentArchive: ContentArchive;
         }
         return this.goal.setBudgetLimits({ budgetLimits }, 'user');
       },
+      getWolfpackMode: () => {
+        return this.wolfpackMode.isActive;
+      },
     };
   }
 
@@ -760,6 +763,7 @@ readonly contentArchive: ContentArchive;
       contextUsage,
       planMode: this.planMode.isActive,
       planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
+      wolfpackMode: this.wolfpackMode.isActive,
       permission: this.permission.mode,
       usage,
     });

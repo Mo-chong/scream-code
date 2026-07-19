@@ -36,6 +36,9 @@ export interface EditorKeyboardHost {
   toggleToolOutputExpansion(): void;
   togglePlanExpansion(): boolean;
   hideSessionPicker(): void;
+  hideMemoryPicker(): void;
+  hideHelpPanel(): void;
+  restoreEditor(): void;
   stop(exitCode?: number): Promise<void>;
   handlePlanModeStateChange(state: PlanModeState): void;
   clearQueuedMessages(): void;
@@ -112,6 +115,18 @@ export class EditorKeyboardController {
         host.hideSessionPicker();
         return;
       }
+      if (host.state.activeDialog === 'memory-picker') {
+        host.hideMemoryPicker();
+        return;
+      }
+      if (host.state.activeDialog === 'help') {
+        host.hideHelpPanel();
+        return;
+      }
+      if (host.state.activeDialog === 'overlay') {
+        host.restoreEditor();
+        return;
+      }
       if (host.state.appState.isCompacting) {
         this.cancelCurrentCompaction();
         return;
@@ -119,11 +134,6 @@ export class EditorKeyboardController {
       if (isStreaming(host.state.appState)) {
         this.cancelCurrentStream();
         return;
-      }
-      // 如果循环模式正在等待自动重发，则暂停当前迭代，但不完全关闭循环模式。
-      if (host.state.appState.loopModeEnabled && host.state.appState.loopPrompt) {
-        host.setAppState({ loopPrompt: undefined });
-        host.showStatus(t('editorkey.loop_paused'));
       }
     };
 

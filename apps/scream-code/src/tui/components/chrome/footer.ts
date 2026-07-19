@@ -6,14 +6,13 @@
  *   Line 2: context: XX.X% (tokens/max)
  */
 
-import type { Component, TUI } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
+import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
-import { resolveLoopSubstate } from '#/tui/loop-state';
 import { shimmerText } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
@@ -181,7 +180,7 @@ function pickCacheColor(rate: number, colors: ColorPalette): string {
 
 // ── Gradient status line for footer line 2 ───────────────────────────
 
-const BRAND_COLORS = ['#72A4E9', '#A78BFA', '#34D399'];
+const BRAND_COLORS = ['#ccfb23', '#56D4DD', '#FF6B9D'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 120;
@@ -358,24 +357,7 @@ export class FooterComponent implements Component {
       const isFusion = state.planMode === 'fusionplan';
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
-    if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold(t('badge.wolfpack')));
-    if (state.loopModeEnabled) {
-      const iter = state.loopIteration;
-      const limit = state.loopLimit;
-      let badge = t('badge.loop');
-      if (limit?.kind === 'iterations') {
-        badge = `${t('badge.loop')} ${iter}/${limit.initial}`;
-      } else if (limit?.kind === 'duration') {
-        const remainMs = Math.max(0, limit.deadlineMs - Date.now());
-        badge = remainMs >= 60_000
-          ? `${t('badge.loop')} ${Math.ceil(remainMs / 60_000)}m`
-          : `${t('badge.loop')} ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
-      }
-      const substate = resolveLoopSubstate(state);
-      if (substate === 'verifying') badge += ' · ' + t('status.verifying');
-      if (state.loopLastVerifyPassed === false) badge += ' · ✗';
-      left.push(chalk.hex(colors.primary).bold(badge));
-    }
+    if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
     if (state.goalActive) {
       left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
     }

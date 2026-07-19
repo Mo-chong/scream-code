@@ -19,28 +19,6 @@ export interface RecentSession {
   readonly updatedAt: number;
 }
 
-export type LoopLimitConfig =
-  | {
-      kind: 'iterations';
-      iterations: number;
-    }
-  | {
-      kind: 'duration';
-      durationMs: number;
-    };
-
-export type LoopLimitRuntime =
-  | {
-      kind: 'iterations';
-      initial: number;
-      remaining: number;
-    }
-  | {
-      kind: 'duration';
-      durationMs: number;
-      deadlineMs: number;
-    };
-
 export type PlanModeState = 'off' | 'plan' | 'fusionplan';
 
 export interface AppState {
@@ -83,13 +61,6 @@ export interface AppState {
   goalContinuationCount: number;
   ccConnectActive: boolean;
   wolfpackMode: boolean;
-  loopModeEnabled: boolean;
-  loopPrompt: string | undefined;
-  loopLimit: LoopLimitRuntime | undefined;
-  loopVerifier: { command: string; timeoutMs: number } | undefined;
-  loopIteration: number;
-  loopLastVerifyPassed: boolean | undefined;
-  loopVerifying: boolean;
   recentSessions: RecentSession[];
   subagentUsage: SubagentUsageMap;
 }
@@ -177,6 +148,7 @@ export type TranscriptEntryKind =
   | 'user'
   | 'assistant'
   | 'tool_call'
+  | 'tool_result'
   | 'thinking'
   | 'status'
   | 'skill_activation'

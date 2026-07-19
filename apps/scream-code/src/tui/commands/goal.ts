@@ -1,10 +1,10 @@
 import { t } from '@scream-code/config';
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
 
 import type { SlashCommandHost } from './dispatch';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
 import { isBusy } from '../utils/app-state';
-import { detectGoalLoopConflict } from '../utils/goal-loop-conflict';
+import { detectGoalConflict } from '../utils/goal-loop-conflict';
 
 const GOAL_STATUS_DISMISS_MS = 10_000;
 
@@ -98,9 +98,7 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
     return;
   }
 
-  // Storm Breaker: /goal and /loop are semantically incompatible. loop resets
-  // context each round, which would destroy goal's working notes.
-  if (detectGoalLoopConflict(host.state.appState, 'enable_goal') === 'loop_active') {
+  if (detectGoalConflict(host.state.appState, 'enable_goal') === 'goal_active') {
     host.showNotice(
       t('goal.storm_breaker'),
       t('goal.conflict_loop'),
@@ -108,20 +106,97 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
     return;
   }
 
-  try {
-    await session.createGoal(parsed.objective, { replace: parsed.replace });
-    host.showStatus(t('goal.set', { objective: parsed.objective }));
+  // Launch configuration wizard
+  await showGoalConfigWizard(host, session, parsed.objective, parsed.replace);
+}
 
-    // Auto-start: send the objective as user input to begin execution
+// ── Goal Configuration Wizard ──────────────────────────────────────────
+
+async function showGoalConfigWizard(
+  host: SlashCommandHost,
+  session: NonNullable<SlashCommandHost['session']>,
+  objective: string,
+  replace: boolean,
+): Promise<void> {
+  const { TextInputDialogComponent } = await import('../components/dialogs/text-input-dialog');
+
+  // Step 1: Turn limit (0 = unlimited)
+  const turnInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_turns_hint'),
+    placeholder: '10',
+  });
+  if (turnInput === undefined) return;
+
+  // Step 2: Token limit (0 = unlimited)
+  const tokenInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_tokens_hint'),
+    placeholder: '200000',
+  });
+  if (tokenInput === undefined) return;
+
+  // Step 3: Time limit in minutes (0 = unlimited)
+  const timeInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_time_hint'),
+    placeholder: '30',
+  });
+  if (timeInput === undefined) return;
+
+  // Create goal with configured options
+  try {
+    await session.createGoal(objective, { replace });
+
+    // Set budgets (skip if 0 = unlimited)
+    const budgets: Array<{ value: number; unit: 'turns' | 'tokens' | 'minutes' }> = [];
+    if (turnInput > 0) budgets.push({ value: turnInput, unit: 'turns' });
+    if (tokenInput > 0) budgets.push({ value: tokenInput, unit: 'tokens' });
+    if (timeInput > 0) budgets.push({ value: timeInput, unit: 'minutes' });
+    for (const b of budgets) {
+      await session.setGoalBudget(b.value, b.unit);
+    }
+
+    host.showStatus(t('goal.set', { objective }));
+
     if (!isBusy(host.state.appState)) {
-      host.sendQueuedMessage(session, { text: parsed.objective, agentId: undefined });
+      host.sendQueuedMessage(session, { text: objective, agentId: undefined });
     } else {
-      host.state.queuedMessages.push({ text: parsed.objective, agentId: undefined });
+      host.state.queuedMessages.push({ text: objective, agentId: undefined });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     host.showError(t('goal.create_failed', { msg: message }));
   }
+}
+
+/** Prompt user for a non-negative integer. Returns undefined on cancel. */
+function promptNumber(
+  host: SlashCommandHost,
+  TextInputDialogComponent: typeof import('../components/dialogs/text-input-dialog').TextInputDialogComponent,
+  opts: { title: string; subtitle: string; placeholder: string },
+): Promise<number | undefined> {
+  return new Promise<number | undefined>((resolve) => {
+    const dialog = new TextInputDialogComponent(
+      (result) => {
+        host.restoreEditor();
+        if (result.kind !== 'ok') {
+          resolve(undefined);
+          return;
+        }
+        const parsed = parseInt(result.value.trim(), 10);
+        resolve(Number.isNaN(parsed) || parsed < 0 ? 0 : parsed);
+      },
+      {
+        title: opts.title,
+        subtitle: opts.subtitle,
+        placeholder: opts.placeholder,
+        allowEmpty: true,
+        colors: host.state.theme.colors,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
 }
 
 async function pauseGoal(host: SlashCommandHost): Promise<void> {
@@ -227,4 +302,13 @@ function dismissGoalPanel(host: SlashCommandHost): void {
     activeGoalPanel = undefined;
     host.state.ui.requestRender();
   }
+}
+
+/** Clear goal panel state on session switch to prevent stale timer/panel leaks. */
+export function clearGoalState(): void {
+  if (activeGoalTimer !== undefined) {
+    clearTimeout(activeGoalTimer);
+    activeGoalTimer = undefined;
+  }
+  activeGoalPanel = undefined;
 }
