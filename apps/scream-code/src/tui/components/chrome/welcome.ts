@@ -1,47 +1,52 @@
 /**
  * Welcome panel shown at the top of the TUI.
  *
- * Layout: a single rounded box split into three areas by internal lines.
- *   - Left column: logo + model + version, vertically centered.
- *   - Right top: quick-start tips.
- *   - Right bottom: recent sessions.
+ * Responsive layout:
+ * - Wide terminal (≥87 cols): full SCREAM CODE ASCII art with per-char
+ *   colouring (█ white, stroke breathing, others dim) + centred info line.
+ * - Narrow terminal: compact logo face + centred info line.
  *
- * The logo, outer border, and section titles share the theme's breathing
- * primary colour; content stays muted.
+ * The outer border uses the theme's breathing primary colour.
  */
 
-import type { Component, TUI } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
+import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState, RecentSession } from '#/tui/types';
+import type { AppState } from '#/tui/types';
 import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 
 // 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
 const HUE_STOPS = 24;
 const SUB_STEPS = 5;
 
-function getWelcomeTips(): readonly string[] {
-  return [
-    t('welcome.config'),
-    t('welcome.sessions'),
-    t('welcome.quick_menu'),
-  ];
-}
-
-const WELCOME_SESSION_SLOTS = 3;
-const LEFT_COLUMN_WIDTH = 22;
 const MIN_BOX_WIDTH = 50;
 
-// ── Logo face animation frames ──────────────────────────────────────
+// Full SCREAM CODE art needs 85 columns of inner width (longest line).
+// With 2 border chars that means 87 terminal columns minimum.
+const FULL_LOGO_MIN_WIDTH = 87;
+
+// ── Full SCREAM CODE ASCII art (matches loading splash) ────────────
+const LOGO = [
+  '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗  ██████╗ ██████╗ ██████╗ ███████╗',
+  '██╔════╝██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║ ██╔════╝██╔═══██╗██╔══██╗██╔════╝',
+  '███████╗██║     ██████╔╝█████╗  ███████║██╔████╔██║ ██║     ██║   ██║██║  ██║█████╗  ',
+  '╚════██║██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║ ██║     ██║   ██║██║  ██║██╔══╝  ',
+  '███████║╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║ ╚██████╗╚██████╔╝██████╔╝███████╗',
+  '╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝',
+];
+
+const SHADOW_CHARS = new Set(['╚', '═', '╝', '║', '╔', '╗', '╠', '╣', '╦', '╩', '╬']);
+
+// ── Compact logo face (narrow terminal fallback) ────────────────────
 const LOGO_FRAMES: [string, string][] = [
-  ['██▄▄▄██', '▐█▄▀▄█▌'], // 回中
-  ['██▄▄▄██', '▐▄▄▀▄▄▌'], // 眯眼
-  ['██▄▄▄██', '▐▄▀▄▄▄▌'], // 细眯眼（左）
-  ['██▄▄▄██', '▐▄▄▄▀▄▌'], // 细眯眼（右）
-  ['██▄▄▄██', '▐█▄▀▄█▌'], // 睁开
+  ['██▄▄▄██', '▐█▄▀▄█▌'],
+  ['██▄▄▄██', '▐▄▄▀▄▄▌'],
+  ['██▄▄▄██', '▐▄▀▄▄▄▌'],
+  ['██▄▄▄██', '▐▄▄▄▀▄▌'],
+  ['██▄▄▄██', '▐█▄▀▄█▌'],
 ];
 
 // ── HSL ↔ RGB helpers ──────────────────────────────────────────────
@@ -104,17 +109,6 @@ function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: n
   return palette;
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return t('welcome.just_now');
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return t('welcome.minutes_ago', { minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t('welcome.hours_ago', { hours });
-  const days = Math.floor(hours / 24);
-  return t('welcome.days_ago', { days });
-}
-
 function padSpaces(n: number): string {
   return ' '.repeat(Math.max(0, n));
 }
@@ -127,6 +121,23 @@ function centerText(text: string, width: number): string {
   return ' '.repeat(leftPad) + text + ' '.repeat(rightPad);
 }
 
+/**
+ * Colour a single logo line matching the loading splash scheme:
+ * - `█` blocks  → white (the "font")
+ * - shadow chars → breathing primary colour (the "stroke")
+ * - others       → dim grey
+ */
+function renderLogoLine(line: string, boxColor: (s: string) => string, dim: (s: string) => string, white: (s: string) => string): string {
+  let out = '';
+  for (const ch of line) {
+    if (ch === ' ') { out += ' '; continue; }
+    if (ch === '█') { out += white(ch); continue; }
+    if (SHADOW_CHARS.has(ch)) { out += boxColor(ch); continue; }
+    out += dim(ch);
+  }
+  return out;
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export class WelcomeComponent implements Component {
@@ -136,14 +147,12 @@ export class WelcomeComponent implements Component {
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
   private breatheTimeout: ReturnType<typeof setTimeout> | null = null;
   private breathePalette: string[];
-  private recentSessions: readonly RecentSession[];
   borderTitle: string | null = null;
 
-  constructor(state: AppState, colors: ColorPalette, ui: TUI, recentSessions: readonly RecentSession[] = []) {
+  constructor(state: AppState, colors: ColorPalette, ui: TUI) {
     this.state = state;
     this.colors = colors;
     this.ui = ui;
-    this.recentSessions = recentSessions;
     this.breathePalette = buildBreathingPalette(colors.primary, HUE_STOPS, SUB_STEPS);
     this.startBreathing();
   }
@@ -181,15 +190,13 @@ export class WelcomeComponent implements Component {
       : this.colors.primary;
     const boxColor = chalk.hex(breatheColor);
     const dim = chalk.hex(this.colors.textDim);
-    const muted = chalk.hex(this.colors.textMuted);
-    const titleColor = chalk.bold.hex(breatheColor);
+    const white = chalk.hex('#FFFFFF');
 
     const boxWidth = Math.max(MIN_BOX_WIDTH, width);
     const innerWidth = boxWidth - 2;
-    const showRightColumn = innerWidth >= 55;
-    const leftCol = showRightColumn ? LEFT_COLUMN_WIDTH : innerWidth;
-    const rightCol = showRightColumn ? Math.max(10, innerWidth - leftCol - 1) : 0;
+    const useFullLogo = boxWidth >= FULL_LOGO_MIN_WIDTH;
 
+    // Build info values.
     const isLoggedOut = !this.state.model;
     const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
@@ -213,85 +220,18 @@ export class WelcomeComponent implements Component {
         ' ' +
         dim('(' + this.state.latestVersion + ')');
     } else {
-      versionValue = this.state.version;
+      versionValue = dim(this.state.version);
     }
 
-    const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
-    const frame = LOGO_FRAMES[frameIdx]!;
-    const logo = [boxColor(frame[0]), boxColor(frame[1])];
-
-    // Right column content.
-    const tipLines: string[] = [];
-    for (const tip of getWelcomeTips()) {
-      tipLines.push(` ${dim('•')} ${muted(tip)}`);
-    }
-
-    const sessionLines: string[] = [];
-    const sessions = this.recentSessions.slice(0, WELCOME_SESSION_SLOTS);
-    if (sessions.length === 0) {
-      sessionLines.push(` ${dim('•')} ${muted(t('welcome.no_recent'))}`);
-    } else {
-      for (const session of sessions) {
-        const name = session.title ?? session.id;
-        const timeAgo = formatTimeAgo(session.updatedAt);
-        sessionLines.push(` ${dim('•')} ${muted(name)} ${dim(`(${timeAgo})`)}`);
-      }
-    }
-
-    let leftRows: string[];
-    let rightRows: string[] = [];
-    let separatorRow = -1;
-
-    if (showRightColumn) {
-      rightRows = [
-        ` ${titleColor('Tips')}`,
-        ...tipLines,
-        boxColor('─'.repeat(rightCol)),
-        ` ${titleColor(t('welcome.recent'))}`,
-        ...sessionLines,
-      ];
-      separatorRow = 1 + tipLines.length;
-
-      const leftContent = [
-        '',
-        centerText(logo[0]!, leftCol),
-        centerText(logo[1]!, leftCol),
-        '',
-        centerText(dim(versionValue), leftCol),
-        centerText(dim(modelValue), leftCol),
-        centerText(likeValue, leftCol),
-      ];
-      const topPad = Math.max(0, Math.floor((rightRows.length - leftContent.length) / 2));
-      const bottomPad = Math.max(0, rightRows.length - leftContent.length - topPad);
-      leftRows = [
-        ...Array(topPad).fill(''),
-        ...leftContent,
-        ...Array(bottomPad).fill(''),
-      ];
-    } else {
-      const leftContent = [
-        '',
-        centerText(logo[0]!, leftCol),
-        centerText(logo[1]!, leftCol),
-        '',
-        centerText(dim(versionValue), leftCol),
-        centerText(dim(modelValue), leftCol),
-        centerText(likeValue, leftCol),
-        '',
-      ];
-      leftRows = leftContent;
-    }
-
-    // Top border with the title centered above the left-column logo.
+    // Top border with centred title.
     const borderTitle = this.borderTitle ?? '';
     const contentWidth = boxWidth - 2;
     let topBorder: string;
     if (borderTitle) {
       const titleVis = visibleWidth(borderTitle);
-      const textPad = Math.floor((leftCol - titleVis) / 2);
-      const leftDash = Math.max(0, textPad - 2);
       const titleText = `─ ${borderTitle} ─`;
       const titleBlockVis = titleVis + 4;
+      const leftDash = Math.max(0, Math.floor((contentWidth - titleBlockVis) / 2));
       const rightDash = Math.max(0, contentWidth - leftDash - titleBlockVis);
       topBorder = boxColor('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
     } else {
@@ -299,27 +239,43 @@ export class WelcomeComponent implements Component {
     }
 
     const lines: string[] = [''];
-    const boxOffset = '';
+    lines.push(topBorder);
 
-    lines.push(boxOffset + topBorder);
+    const separator = dim(' · ');
+    const helpValue = dim(t('welcome.help_hint'));
 
-    const totalRows = Math.max(leftRows.length, rightRows.length);
-    for (let i = 0; i < totalRows; i++) {
-      const left = this.#fitToWidth(leftRows[i] ?? '', leftCol);
-      if (showRightColumn) {
-        const right = this.#fitToWidth(rightRows[i] ?? '', rightCol);
-        const sep = i === separatorRow ? boxColor('├') : boxColor('│');
-        lines.push(boxOffset + boxColor('│') + left + sep + right + boxColor('│'));
-      } else {
-        lines.push(boxOffset + boxColor('│') + left + boxColor('│'));
+    if (useFullLogo) {
+      // ── Full SCREAM CODE art layout ──────────────────────────────
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+
+      for (const line of LOGO) {
+        const rendered = renderLogoLine(line, boxColor, dim, white);
+        lines.push(boxColor('│') + this.#fitToWidth(centerText(rendered, innerWidth), innerWidth) + boxColor('│'));
       }
+
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+
+      const infoLine = centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, innerWidth);
+      lines.push(boxColor('│') + this.#fitToWidth(infoLine, innerWidth) + boxColor('│'));
+
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+    } else {
+      // ── Compact logo face layout (narrow terminal) ──────────────
+      const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
+      const frame = LOGO_FRAMES[frameIdx]!;
+
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+      lines.push(boxColor('│') + centerText(boxColor(frame[0]), innerWidth) + boxColor('│'));
+      lines.push(boxColor('│') + centerText(boxColor(frame[1]), innerWidth) + boxColor('│'));
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
+
+      const infoLine = centerText(versionValue + separator + modelValue + separator + likeValue + separator + helpValue, innerWidth);
+      lines.push(boxColor('│') + this.#fitToWidth(infoLine, innerWidth) + boxColor('│'));
+
+      lines.push(boxColor('│') + padSpaces(innerWidth) + boxColor('│'));
     }
 
-    if (showRightColumn) {
-      lines.push(boxOffset + boxColor('╰' + '─'.repeat(leftCol) + '┴' + '─'.repeat(rightCol) + '╯'));
-    } else {
-      lines.push(boxOffset + boxColor('╰' + '─'.repeat(leftCol) + '╯'));
-    }
+    lines.push(boxColor('╰' + '─'.repeat(innerWidth) + '╯'));
     lines.push('');
 
     return lines;

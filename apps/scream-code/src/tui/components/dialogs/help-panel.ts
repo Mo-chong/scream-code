@@ -15,7 +15,7 @@ import {
   decodeKittyPrintable,
   type Focusable,
   truncateToWidth,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
@@ -115,6 +115,7 @@ export class HelpPanelComponent extends Container implements Focusable {
       '',
       // Greeting
       `  ${dim(t('help.welcome_msg'))}`,
+      `  ${muted(t('help.hidden_commands'))}`,
       '',
       // Section: keyboard shortcuts
       `  ${chalk.bold(t('help.shortcuts'))}`,

@@ -1,5 +1,5 @@
-import type { Component } from '@earendil-works/pi-tui';
-import { Text } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { Text } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import { CachedContainer } from '../../utils/cached-container';
 import chalk from 'chalk';
@@ -96,6 +96,8 @@ class CommittedMessageComponent implements Component {
         return new Text(`  ${chalk.hex(colors.textDim)(text)}`, 0, 0).render(width);
       }
       case 'welcome':
+        return [];
+      case 'tool_result':
         return [];
     }
   }

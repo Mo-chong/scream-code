@@ -1,4 +1,4 @@
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
 
 import { t } from '@scream-code/config';
 import { WelcomeComponent } from '../components/chrome/welcome';
@@ -113,6 +113,7 @@ function isRevokeContextEntry(entry: TranscriptEntry): boolean {
     case 'user':
     case 'assistant':
     case 'tool_call':
+    case 'tool_result':
     case 'thinking':
     case 'skill_activation':
       return true;

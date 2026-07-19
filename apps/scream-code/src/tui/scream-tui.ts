@@ -1,7 +1,7 @@
 import {
   type Component,
   type Focusable,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type {
   ApprovalRequest,
   ApprovalResponse,
@@ -22,6 +22,9 @@ import {
   type ScreamSlashCommand,
   type SkillListSession,
 } from './commands';
+import { clearGoalState } from './commands/goal';
+import { clearInfoPanelState } from './commands/info';
+import { disposeChildren } from './utils/component-capabilities';
 
 import type { HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
@@ -137,13 +140,6 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
-    loopModeEnabled: false,
-    loopPrompt: undefined,
-    loopLimit: undefined,
-    loopVerifier: undefined,
-    loopIteration: 0,
-    loopLastVerifyPassed: undefined,
-    loopVerifying: false,
     recentSessions: [],
     subagentUsage: {},
   };
@@ -756,6 +752,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   clearTranscriptAndRedraw(): void {
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
+    // Clear goal panel timer/refs to prevent stale timer firing on new session.
+    clearGoalState();
+    clearInfoPanelState(this.state);
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).
@@ -817,7 +816,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   private swapEditor(component: Component & Focusable): void {
-    this.state.editorContainer.clear();
+    disposeChildren(this.state.editorContainer);
     this.state.editorContainer.addChild(component);
     this.state.ui.setFocus(component);
     this.state.ui.requestRender();
@@ -832,17 +831,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   mountEditorReplacement(panel: Component & Focusable): void {
     this.exitFullScreenTakeover();
     this.swapEditor(panel);
+    this.state.activeDialog = 'overlay';
   }
 
   restoreEditor(): void {
     this.swapEditor(this.state.editor);
+    this.state.activeDialog = null;
   }
 
   showHelpPanel(): void {
     this.dialogManager.showHelpPanel(this.getSlashCommands() as unknown as readonly HelpPanelCommand[]);
   }
 
-  private hideHelpPanel(): void {
+  hideHelpPanel(): void {
     this.dialogManager.hideHelpPanel();
   }
 
@@ -866,19 +867,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.dialogManager.hideMemoryPicker();
   }
 
-  private showApprovalPanel(payload: ApprovalPanelData): void {
+  showApprovalPanel(payload: ApprovalPanelData): void {
     this.dialogManager.showApprovalPanel(payload);
   }
 
-  private hideApprovalPanel(): void {
+  hideApprovalPanel(): void {
     this.dialogManager.hideApprovalPanel();
   }
 
-  private showQuestionDialog(payload: QuestionPanelData): void {
+  showQuestionDialog(payload: QuestionPanelData): void {
     this.dialogManager.showQuestionDialog(payload);
   }
 
-  private hideQuestionDialog(): void {
+  hideQuestionDialog(): void {
     this.dialogManager.hideQuestionDialog();
   }
 

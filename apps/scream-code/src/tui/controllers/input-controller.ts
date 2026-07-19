@@ -2,7 +2,7 @@ import type {
   AutocompleteItem,
   Component,
   SlashCommand,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type { Session } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
@@ -27,7 +27,6 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy, isStreaming } from '../utils/app-state';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
-import { consumeLoopLimitIteration } from '../utils/loop-limit';
 import { BREATHE_CYCLE_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
@@ -138,15 +137,10 @@ export class InputController {
   }
 
   private dispatchUserInput(text: string, session: Session): void {
-    // When loop mode is waiting for its first prompt, capture it and reserve
-    // one iteration from the budget.
-    if (this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt) {
-      this.host.setAppState({ loopPrompt: text });
-      consumeLoopLimitIteration(this.host.state.appState.loopLimit);
-    }
-
     const extraction = extractMediaAttachments(text, this.host.imageStore);
-    if (!this.validateMediaCapabilities(extraction)) return;
+    if (!this.validateMediaCapabilities(extraction)) {
+      return;
+    }
 
     if (extraction.hasMedia) {
       this.sendMessage(session, text, {
@@ -216,6 +210,7 @@ export class InputController {
           : this.host.state.theme.colors.planMode
         : this.host.state.theme.colors.primary;
       this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
+      this.host.state.editor.borderHex = colorToken;
       this.host.state.ui.requestRender();
     }
   }
@@ -253,6 +248,7 @@ export class InputController {
     // Fall back to static green.
     const colorToken = this.host.state.theme.colors.primary;
     this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
+    this.host.state.editor.borderHex = colorToken;
     this.host.state.ui.requestRender();
   }
 
@@ -269,6 +265,7 @@ export class InputController {
       const hue = (baseHue + (getBreathingFrame() / BREATHE_FRAMES) * 360) % 360;
       const hex = hslToHex(hue, 90, 70);
       editor.borderColor = (s: string) => chalk.hex(hex)(s);
+      editor.borderHex = hex;
       ui.requestRender();
     }, BREATHE_INTERVAL_MS);
     if (this.breatheTimeout === null) {

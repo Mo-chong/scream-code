@@ -2,7 +2,7 @@ import {
   Container,
   ProcessTerminal,
   TUI,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { getLogDir } from '#/utils/paths';
 import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
@@ -60,7 +60,7 @@ export interface TUIState {
   planExpanded: boolean;
   sessions: SessionRow[];
   loadingSessions: boolean;
-  activeDialog: 'session-picker' | 'memory-picker' | 'help' | null;
+  activeDialog: 'session-picker' | 'memory-picker' | 'help' | 'overlay' | null;
   tasksBrowser: TasksBrowserState | undefined;
   externalEditorRunning: boolean;
   queuedMessages: QueuedMessage[];

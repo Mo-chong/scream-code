@@ -1,4 +1,4 @@
-import type { Component, Focusable } from '@earendil-works/pi-tui';
+import type { Component, Focusable } from '@liutod-scream/pi-tui';
 
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
@@ -56,7 +56,6 @@ import { handleMemoryCommand } from './memory';
 import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
-import { handleLoopCommand } from './loop';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 
@@ -94,7 +93,6 @@ export {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
-export { handleLoopCommand, disableLoopMode, describeLoopStatus } from './loop';
 export { handleRevokeCommand } from './revoke';
 export { handleCcCommand } from './cc';
 export { handleUpdateCommand } from './update';
@@ -294,9 +292,6 @@ async function handleBuiltInSlashCommand(
       return;
     case 'wolfpack':
       await handleWolfpackCommand(host, args);
-      return;
-    case 'loop':
-      await handleLoopCommand(host, args);
       return;
     case 'revoke':
       await handleRevokeCommand(host, args);
