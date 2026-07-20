@@ -35,10 +35,13 @@ export class ErrorAuditInjector extends DynamicInjector {
 
   /** 残差控制：降低每轮注入频率 */
   override getResidualConfig(): ResidualConfig | undefined {
-    return { weight: 0.5, decayPerStep: 0.85, minStepGap: 2, threshold: 0.2 };
+    return { weight: 0.5, decayPerStep: 0.85, minStepGap: 4, threshold: 0.2 };
   }
 
   protected getInjection(): string | undefined {
+    // 非交互终端（TERM=dumb）下不注入 — Git Bash 超时是环境问题而非 AI 策略问题
+    if (process.env['TERM'] === 'dumb') return undefined;
+
     const audit = (this.agent as any).fileActionAudit as
       | { getRecentEntries: (n: number) => FileActionAuditEntry[] }
       | undefined;

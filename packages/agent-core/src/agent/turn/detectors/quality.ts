@@ -143,20 +143,9 @@ export function observeBehavior(
   registry: VariantRegistry,
   sig: StepSignature,
 ): void {
-  // post_edit: 如果 Edit 后调用了知识工具 → 注入生效
-  if (registry.get('post_edit') && sig.hasKnowledgeTools) {
-    registry.markBehaviorObserved('post_edit');
-  }
-
   // prepare_bash_file: 如果注入后使用 Read（而非 Bash）→ 注入生效
   if (registry.get('prepare_bash_file') && (sig.toolCounts['Read'] ?? 0) > 0) {
     registry.markBehaviorObserved('prepare_bash_file');
-  }
-
-  // prepare_search: Grep/LSP 后使用了知识工具 → 注入生效
-  // hasActionTools 不算——action 是编辑/写入，不是搜到结果后正确操作
-  if (registry.get('prepare_search') && sig.hasKnowledgeTools) {
-    registry.markBehaviorObserved('prepare_search');
   }
 
   // post_memory: MemoryLookup 后调用了知识工具 → 注入生效
@@ -170,10 +159,6 @@ export function observeBehavior(
   }
 
   // ── Phase 7.5 补全: 此前遗漏的观察条件 ────────────────
-  // prepare_edit: 提醒后调了知识工具（LSP.references）→ 生效
-  if (registry.get('prepare_edit') && sig.hasKnowledgeTools) {
-    registry.markBehaviorObserved('prepare_edit');
-  }
   // prepare_write: 写大文件后调了验证工具 → 生效
   if (registry.get('prepare_write') && sig.hasVerificationTools) {
     registry.markBehaviorObserved('prepare_write');
@@ -185,14 +170,6 @@ export function observeBehavior(
   // step_after_edit: 被提醒后调了知识工具 → 生效
   if (registry.get('step_after_edit') && sig.hasKnowledgeTools) {
     registry.markBehaviorObserved('step_after_edit');
-  }
-  // step_after_search: 搜到结果后有了 action（改代码）→ 生效
-  if (registry.get('step_after_search') && sig.hasActionTools) {
-    registry.markBehaviorObserved('step_after_search');
-  }
-  // step_after_verify_fail: 验证失败后重新验证 → 生效
-  if (registry.get('step_after_verify_fail') && sig.hasVerificationTools) {
-    registry.markBehaviorObserved('step_after_verify_fail');
   }
 
   // ── 意图变体行为观察 ─────────────────────────────────

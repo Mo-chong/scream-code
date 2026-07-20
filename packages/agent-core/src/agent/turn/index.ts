@@ -1114,12 +1114,7 @@ export class TurnFlow {
                 if (mapped) ctx.toolCall.name = mapped;
               }
               // 🆕 A组: 工具执行前注入 — prepareToolExecution
-              if (ctx.toolCall.name === 'Edit') {
-                this.inject(
-                  '修改函数/API 后，必须更新所有调用方。先调 LSP.references 查找所有引用点。',
-                  { kind: 'injection', variant: 'prepare_edit' },
-                );
-              }
+              // prepare_edit 已移除 — 由 step_after_edit(单条) 覆盖
               // 🆕 Phase41: 输出格式约束 — 减认知负荷
               const constraint = getOutputConstraint(ctx.toolCall.name);
               if (constraint) {
@@ -1137,12 +1132,7 @@ export class TurnFlow {
                   variant: 'prepare_write',
                 });
               }
-              if (ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') {
-                this.inject(
-                  '搜到一个匹配后不要立即编辑。评估所有搜索结果后再动手。',
-                  { kind: 'injection', variant: 'prepare_search' },
-                );
-              }
+              // prepare_search 已移除 — 规则在 system prompt 中，无需每轮注入
               if (ctx.toolCall.name === 'MemoryLookup') {
                 this.inject(
                   'MUST check whatFailed before repeating approach.',
@@ -1539,21 +1529,8 @@ export class TurnFlow {
               }
 
               // 🆕 B组: 工具执行后注入 — finalizeResult
-              if (ctx.toolCall.name === 'Edit' && isError !== true) {
-                this.inject(
-                  'NEVER leave callers unverified without update.',
-                  { kind: 'injection', variant: 'post_edit' },
-                );
-              }
-              if ((ctx.toolCall.name === 'Grep' || ctx.toolCall.name === 'LSP') && isError !== true) {
-                const hasContent = toolOutputText(output).trim().length > 0;
-                if (hasContent) {
-                  this.inject(
-                    'Full picture ready. NOW design and apply the change.',
-                    { kind: 'injection', variant: 'post_search' },
-                  );
-                }
-              }
+              // post_edit 已移除 — 由 step_after_edit(单条) 覆盖
+              // post_search 已移除 — 搜索结果可见，无需额外提醒
               if (ctx.toolCall.name === 'Write' && isError !== true) {
                 const text = toolOutputText(output);
                 if (text.length > 500) {
@@ -1563,15 +1540,7 @@ export class TurnFlow {
                   );
                 }
               }
-              if (ctx.toolCall.name === 'Bash' && isError !== true) {
-                const cmd = (ctx.args as { command?: string }).command ?? '';
-                if (looksLikeVerificationCommand(cmd)) {
-                  this.inject(
-                    'Verification passed. Deliver the result.',
-                    { kind: 'injection', variant: 'post_verify_pass' },
-                  );
-                }
-              }
+              // post_verify_pass(成功提醒) 已移除 — 验证结果已可见
               if (ctx.toolCall.name === 'Bash' && isError === true) {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
                 if (looksLikeVerificationCommand(cmd)) {
@@ -1993,12 +1962,7 @@ export class TurnFlow {
     } else if (this.editOnCodeFileThisStep) {
       this.editWithoutLookupCount = 0;
     }
-    if (this.searchHadResultsThisStep && !this.editCalledSuccessThisStep) {
-      this.inject('找到引用点了。设计好改动方案后再编辑。', { kind: 'injection', variant: 'step_after_search' });
-    }
-    if (this.verifyFailedThisStep) {
-      this.inject('验证失败后必须修复根因重新跑完整验证，不准降低验证标准。', { kind: 'injection', variant: 'step_after_verify_fail' });
-    }
+    // step_after_search + step_after_verify_fail 已移除 — 由 post_verify_fail 覆盖
   }
 
   /** 毒性早期检测：偏差链追踪 */

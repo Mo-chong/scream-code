@@ -82,16 +82,16 @@ export interface VariantMeta {
 | `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: ctx.history替代stuckContext） |
 | ~~`system_ref_anti_confabulation`~~ | — | — | — | — | — | **已删除** Phase38c（合并入 confabulationDetector） |
 | ~~`quality_escalate`~~ 🗑️ | — | — | — | — | — | **已删除** Phase38j（由 qualityDegradeDetector 替代，走 InterceptionManager 统一管道） |
-| `error-audit` | 0.5 | 0.85 | 0.2 | 2 | B | FAA 超时/耗时检测（分析瘫痪已砍） |
-| `session_summary` | 0.8 | 0.88 | 0.3 | 3 | B | 会话摘要（step1或compaction后） |
+| `error-audit` | 0.5 | 0.85 | 0.2 | 4 | B | FAA 超时/耗时检测（排除 TERM=dumb） |
+| `session_summary` | 0.4 | 0.88 | 0.3 | 3 | B | 会话摘要 |
 | `persistent_summary` | — | — | — | — | — | ❌ **已废弃 v3**（被 ArchivalSummaryInjector 归档层替代） |
 | `archival_summary` 🆕 | 0 | 0 | 0 | 0（自身频率控制） | — | 归档层结构化摘要，>50K触发，尾部append |
 | `tool_result_recovery` 🆕 | 0.6 | 0.85 | 0.15 | 3 | B | 被mask的关键tool结果恢复 |
 | `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
 | `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
-| `prepare_*` (6变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入 |
-| `post_*` (6变体) | 0.20 | 0.50 | 0.3 | 2 | C | 执行后注入 |
-| `step_after_*` (3变体) | 0.20 | 0.50 | 0.3 | 2 | C | 步后注入 |
+| `prepare_*` (3变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入（prepare_edit/prepare_search 已移除 — system prompt 覆盖） |
+| `post_*` (3变体) | 0.20 | 0.50 | 0.3 | 2 | C | 执行后注入（post_edit/post_search/post_verify_pass 已移除 — 冗余合并） |
+| `step_after_*` (1变体) | 0.20 | 0.50 | 0.3 | 2 | C | 步后注入（step_after_search/step_after_verify_fail 已移除 — 由 post_verify_fail 覆盖） |
 | `guard_feedback_*` (4变体) | 0.7-0.9 | 0.85 | 0.25 | 3 | C | 行为规则反馈（Phase37: minStepGap 0→3） |
 | `feedback_positive` | 0.6 | 0.80 | 0.4 | 3 | S | 正向反馈 |
 | `scene_memory_recall` | 0.8 | 0.88 | 0.3 | 3 | B | 场景记忆召回 |
@@ -162,7 +162,7 @@ VariantMeta.weight ← 基础权重
 | `scene_memory_recall` | 1 | 0.50 | 0.80 | scene_memory |
 | `step_code_ref_quality` | 1 | 0.30 | 0.80 | 代码质量 |
 | `code_quality_feedback` | 1 | 0.30 | 0.80 | 代码质量 |
-| `system_ref_stuck` | 1 | 0.50 | 0.85 | stuck.ts |
+| `system_ref_stuck` | 1 | 0.40 | 0.85 | stuck.ts（降频 — minStepGap 3→8, weight 0.7→0.4） |
 | `truncation_recover_guard` | 1 | 0.50 | 0.80 | 截断恢复 |
 | `error-audit` | 1 | 0.80 | 0.85 | error-audit-injector.ts |
 

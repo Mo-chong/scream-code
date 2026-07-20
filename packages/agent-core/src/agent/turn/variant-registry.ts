@@ -281,17 +281,13 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   intent_research:             { weight: 0.8, decayPerStep: 0.90, threshold: 0.3, minStepGap: 0 },
   intent_document:             { weight: 0.7, decayPerStep: 0.88, threshold: 0.3, minStepGap: 0 },
 
-  // A组: prepare — 工具执行前提醒
-  prepare_edit:                { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
+  // A组: prepare — 工具执行前提醒（prepare_edit/prepare_search 已移除 — system prompt 覆盖）
   prepare_write:               { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
-  prepare_search:              { weight: 0.7, decayPerStep: 0.85, threshold: 0.40, minStepGap: 3 },
   prepare_memory:              { weight: 0.7, decayPerStep: 0.85, threshold: 0.40, minStepGap: 3 },
   prepare_bash_file:           { weight: 0.5, decayPerStep: 0.82, threshold: 0.40, minStepGap: 3 },
   prepare_verify:              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
 
-  // B组: post — 工具执行后反馈
-  post_edit:                   { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
-  post_search:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  // B组: post — 工具执行后反馈（post_edit/post_search 已移除 — 冗余，由 step_after 覆盖）
   post_write_large:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
   post_verify_pass:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
   post_verify_fail:            { weight: 0.9, decayPerStep: 0.88, threshold: 0.40, minStepGap: 3 },
@@ -299,8 +295,6 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // C组: step_after — 步级行为反馈
   step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5, interceptThreshold: 3 },
-  step_after_search:           { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
-  step_after_verify_fail:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.40, minStepGap: 4, interceptThreshold: 3 },
 
   // ── Phase 12: 反馈信号闭环 variants ────────────────────────────
   // Note: guard_feedback_rule_1 不走 inject() 路径，在 Phase12 实施时已清理
@@ -318,13 +312,13 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   code_quality_feedback:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
 
   // ── Phase 21: 痛点感知（stuck 检测 → 文档导航）────────────────
-  system_ref_stuck:          { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 5 },
+  system_ref_stuck:          { weight: 0.4, decayPerStep: 0.85, threshold: 0.25, minStepGap: 8 },
 
   // ── Phase 24: 截断数据强制恢复 — 🗑️ 已废弃 v3（蒸馏塔归档层替代）
   // truncation_recover_guard 依赖 Micro Compaction 已废弃，不再产生需要恢复的截断数据
 
   // ── Phase 26: 错误审计（FAA）──────────────────────────────────
-  'error-audit':              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 2 },
+  'error-audit':              { weight: 0.5, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
 };
 
 /**
