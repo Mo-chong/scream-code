@@ -18,6 +18,17 @@ updated: 2026-07-15
 
 ---
 
+## v0.10.1 — 合并上游 v0.10.1（2026-07-20）
+
+### 新功能/修复
+- 25 bugs 全量审计修复（knowledge/store.ts +121 重构）
+- agent-core turn/compaction/tool-call 修复
+- store.ts embeddingQueue.clear() 防泄漏
+
+### 二开影响
+低。4 文件冲突，complementary merge（保留 processTags + 加上游 projectDir）。
+`system.md`: 零改动。
+
 ## v0.10.0 — 合并上游 v0.10.0（2026-07-19）
 
 ### 重大变更
