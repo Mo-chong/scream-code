@@ -1141,12 +1141,7 @@ export class TurnFlow {
               }
               if (ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
-                if (TurnFlow.BASH_FILE_OPS_RE.test(cmd)) {
-                  this.inject(
-                    'NEVER use Bash for file reads. Use Read/Edit/Grep.',
-                    { kind: 'injection', variant: 'prepare_bash_file' },
-                  );
-                }
+                // prepare_bash_file 已移除 — 规则已合并到 system prompt
               }
               if (ctx.toolCall.name === 'Bash') {
                 const cmd = (ctx.args as { command?: string }).command ?? '';
@@ -2265,10 +2260,7 @@ export class TurnFlow {
   private detectCodeRefIssue(): void {
     const codeRefAssistantText = extractLastAssistantText(this.agent.context.history);
     if (codeRefAssistantText.length > 100 && this.currentStep > 1) {
-      const codeRefIssue = detectCodeRefQuality(codeRefAssistantText);
-      if (codeRefIssue.hasMissingRef) {
-        this.inject('Code blocks without file references. ALWAYS prefix with path and line range.', { kind: 'injection', variant: 'step_code_ref_quality' });
-      }
+      // step_code_ref_quality 已移除 — 规则已合并到 system prompt
     }
   }
 

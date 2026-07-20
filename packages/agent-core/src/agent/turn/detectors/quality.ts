@@ -104,7 +104,7 @@ export function detectQualityIssue(
     // 当 bash 工具返回 >3000 chars 的输出时，催促 AI 简洁回应
     // 避免 AI 在回应中大段引用/重述 bash 输出
     if (
-      (record.variant === 'prepare_bash_file' || record.variant === 'step_after_edit') &&
+      (record.variant === 'step_after_edit') &&
       sig.outputLength > 3000
     ) {
       bestResult = betterResult(bestResult, {
@@ -143,10 +143,7 @@ export function observeBehavior(
   registry: VariantRegistry,
   sig: StepSignature,
 ): void {
-  // prepare_bash_file: 如果注入后使用 Read（而非 Bash）→ 注入生效
-  if (registry.get('prepare_bash_file') && (sig.toolCounts['Read'] ?? 0) > 0) {
-    registry.markBehaviorObserved('prepare_bash_file');
-  }
+  // prepare_bash_file 已移除 — 规则已合并到 system prompt
 
   // post_memory: MemoryLookup 后调用了知识工具 → 注入生效
   if (registry.get('post_memory') && sig.hasKnowledgeTools) {

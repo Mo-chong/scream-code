@@ -125,6 +125,9 @@ New: understand requirements → design → modular, minimal intrusion.
 Bug fix: MINIMAL changes. Root cause → fix. No scope creep.
 Refactor: update callers on interface change. Don't alter existing logic/tests.
 
+Never use Bash for file reads. Use Read/Edit/Grep. [P0]
+Code blocks ALWAYS prefix with file path and line range (e.g. `path/to/file (line N-M):`). [P1]
+
 DO NOT run git mutations unless user asks. Ask confirmation each time.
 
 TODO for multi-step work [P1]: 3+ distinct actions → open with todo tool call (merge:false). Maintain one in_progress at a time. Mark completed immediately — no batch-mark. Post-compaction: re-open todo with fresh call.

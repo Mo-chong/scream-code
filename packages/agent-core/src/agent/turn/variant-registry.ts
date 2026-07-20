@@ -284,7 +284,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   // A组: prepare — 工具执行前提醒（prepare_edit/prepare_search 已移除 — system prompt 覆盖）
   prepare_write:               { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
   prepare_memory:              { weight: 0.7, decayPerStep: 0.85, threshold: 0.40, minStepGap: 3 },
-  prepare_bash_file:           { weight: 0.5, decayPerStep: 0.82, threshold: 0.40, minStepGap: 3 },
+  // prepare_bash_file 已移除 — 规则已合并到 system prompt
   prepare_verify:              { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4 },
 
   // B组: post — 工具执行后反馈（post_edit/post_search 已移除 — 冗余，由 step_after 覆盖）
@@ -306,7 +306,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   guard_feedback_rule_4:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   'guard-feedback':             { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   scene_memory_recall:       { weight: 0.8, decayPerStep: 0.88, threshold: 0.30, minStepGap: 5, interceptThreshold: 3 },
-  step_code_ref_quality:     { weight: 0.5, decayPerStep: 0.85, threshold: 0.40, minStepGap: 6 },
+  // step_code_ref_quality 已移除 — 规则已合并到 system prompt
 
   // ── Phase 18: 代码质量反馈 ────────────────────────────────────
   code_quality_feedback:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
