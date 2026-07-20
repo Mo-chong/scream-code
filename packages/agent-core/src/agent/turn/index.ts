@@ -285,6 +285,9 @@ export class TurnFlow {
   private _lastModel: string = '';
   private _prevModel: string = '';
   private _lastCacheMetrics: CacheMetrics | null = null;
+  private _sessionCumulativeHit = 0;
+  private _sessionCumulativeTotal = 0;
+  private _lastTurnTime: number = 0;
 
   // ── Event snapshot persistence (Phase 10+) ─────────────────────
   private eventBuffer!: EventSnapshotBuffer;
@@ -614,6 +617,7 @@ export class TurnFlow {
     this.currentStepByTurn.set(turnId, 0);
     this.lastTurnStepCount = this.currentStep;
     this.currentStep = 0;
+    this._lastTurnTime = Date.now();
     this.agent.fullCompaction.resetForTurn();
     this.agent.injection.resetForTurn();
     this.editWithoutLookupCount = 0;
@@ -1927,7 +1931,19 @@ export class TurnFlow {
       const modelChanged = this._lastModel !== this._prevModel && this._prevModel !== '';
       const apiKeySwitched = detectApiKeySwitch(this._lastCacheMetrics, metrics, modelChanged, compacted, injectedEvents.length);
       const archiveStats = this.agent.contentArchive?.getStats();
-      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, false, undefined, maskingStats.perTurn);
+      const curHit = metrics.hitTokens;
+      const curTotal = metrics.totalInput;
+      this._sessionCumulativeHit += curHit;
+      this._sessionCumulativeTotal += curTotal;
+      const timeGap = this._lastCacheMetrics ? Math.round((Date.now() - this._lastTurnTime) / 1000) : undefined;
+      const prevTotal = this._lastCacheMetrics?.totalInput ?? 0;
+      const inputChangeRatio = prevTotal > 0 ? +(curTotal / prevTotal).toFixed(2) : undefined;
+      const estimatedInjectionTokens = injectedEvents
+        .filter((e: any) => e.success)
+        .reduce((s: number, e: any) => s + (e.estimatedTokens ?? 100), 0); // default 100 per inject
+      const prevHitRatio = this._lastCacheMetrics?.hitRatio ?? 0;
+      const hitDropSincePrev = prevHitRatio > 0 ? Math.round(Math.max(0, prevHitRatio - metrics.hitRatio) * 1000) / 1000 : 0;
+      const entry = buildAuditEntry(this.currentStep, this._lastModel, this.eventBuffer.sessionId, metrics, compacted, compactedTokens, injectedEvents, modelChanged, apiKeySwitched, { hits: archiveStats?.hits ?? 0, misses: archiveStats?.misses ?? 0 }, this.lastTurnStepCount, this.turnTruncation.pendingKeys().length, false, undefined, maskingStats.perTurn, this._sessionCumulativeHit, this._sessionCumulativeTotal, timeGap, inputChangeRatio, estimatedInjectionTokens, hitDropSincePrev);
       this.auditLogger.write(entry);
       this._lastCacheMetrics = metrics;
       // 若发生了 compaction，内容缓存失效，重置去重状态

@@ -44,6 +44,10 @@ export interface InjectionEvent {
 
   reason?: string;
 
+  /** 该注入内容的估算 token 数（基于文本长度 ÷ 4） */
+
+  estimatedTokens?: number;
+
   /** 注入内容预估 token 数 */
 
   tokenEstimate?: number;
@@ -59,6 +63,8 @@ export interface CacheMetrics {
   hitTokens: number;
 
   missTokens: number;
+
+  cacheWrite: number;        // tokens written to cache this turn (inputCacheCreation)
 
   totalInput: number;        // total input tokens this turn
 
@@ -132,7 +138,24 @@ export interface AuditLogEntry {
   /** 本轮 vs 上轮命中率变化量（正=提升，负=下降）。首次为 0。 */
   hitRatioDelta: number;
 
-  /** maskToolObservations 遮蔽统计 */
+  /** tokens written to cache this turn (inputCacheCreation) */
+  cacheWrite: number;
+
+  /** 累积命中率（从 session 首轮到当前轮的累计 cacheHit / cacheTotal） */
+  cumulativeHitRatio: number;
+
+  /** 距上一轮的时间差（秒）。首轮为 undefined */
+  timeGapSeconds?: number;
+
+  /** 本轮输入 vs 上轮输入的倍率。首轮为 undefined */
+  inputChangeRatio?: number;
+
+  /** 本轮注入内容估算 token 数（基于注入文本长度估算） */
+  estimatedInjectionTokens: number;
+
+  /** 命中率较上轮下降量（0=持平/上升，正数=下降pp）。首轮为 0 */
+  hitDropSincePrev: number;
+
   masking: {
     total: number;
     compressed: number;
@@ -193,6 +216,8 @@ const ALERT_RULES: { check: (m: CacheMetrics) => string | null }[] = [
 
 export function computeCacheMetrics(usage: TokenUsage): CacheMetrics {
 
+  const cacheWrite = usage.inputCacheCreation ?? 0;
+
   const hitTokens = usage.cacheHitTokens ?? 0;
 
   const missTokens = usage.cacheMissTokens ?? 0;
@@ -200,8 +225,6 @@ export function computeCacheMetrics(usage: TokenUsage): CacheMetrics {
   const total = hitTokens + missTokens;
 
   const hitRatio = total > 0 ? hitTokens / total : 0;
-
-
 
   return {
 
@@ -211,7 +234,9 @@ export function computeCacheMetrics(usage: TokenUsage): CacheMetrics {
 
     missTokens,
 
-    totalInput: usage.inputOther + (usage.inputCacheRead ?? 0) + (usage.inputCacheCreation ?? 0),
+    cacheWrite,
+
+    totalInput: usage.inputOther + (usage.inputCacheRead ?? 0) + cacheWrite,
 
   };
 
@@ -303,7 +328,7 @@ export class AuditLogWriter {
 `#\n` +
 `# 📋 层级架构 (7层)\n` +
 `#   L1 元数据  → turn, sessionId, model, ts, modelChanged\n` +
-`#   L2 缓存    → totalInput, cacheHit, cacheMiss, hitRatio, apiKeySwitched\n` +
+`#   L2 缓存    → totalInput, cacheHit, cacheMiss, hitRatio, cacheWrite, cumulativeHitRatio, timeGapSeconds, inputChangeRatio, apiKeySwitched\n` +
 `#   L3 压缩    → compacted, compactedTokens\n` +
 `#   L4 注入    → injected[].{variant,success,level,position,reason,tokenEstimate}\n` +
 `#   L5 存档    → archiveHit, archiveMiss\n` +
@@ -582,6 +607,12 @@ export function buildAuditEntry(
   summaryTriggered = false,
   prevMetrics?: CacheMetrics,
   masking?: { total: number; compressed: number; fullyMasked: number; bytesSaved: number },
+  cumulativeHit = 0,
+  cumulativeTotal = 0,
+  timeGapSeconds?: number,
+  inputChangeRatio?: number,
+  estimatedInjectionTokens = 0,
+  hitDropSincePrev = 0,
 
 ): AuditLogEntry {
 
@@ -635,6 +666,12 @@ export function buildAuditEntry(
     cacheMiss: metrics.missTokens,
 
     hitRatio: metrics.hitRatio,
+    cacheWrite: metrics.cacheWrite,
+    cumulativeHitRatio: cumulativeTotal > 0 ? cumulativeHit / cumulativeTotal : 0,
+    timeGapSeconds,
+    inputChangeRatio,
+    estimatedInjectionTokens,
+    hitDropSincePrev,
 
     compacted,
 

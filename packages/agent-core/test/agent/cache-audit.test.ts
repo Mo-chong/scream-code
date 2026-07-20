@@ -12,6 +12,7 @@ describe('computeCacheMetrics', () => {
     expect(result.hitRatio).toBe(0);
     expect(result.hitTokens).toBe(0);
     expect(result.missTokens).toBe(1000);
+    expect(result.cacheWrite).toBe(0);
   });
 
   it('returns 1 hitRatio when all tokens are hit', () => {
@@ -22,6 +23,7 @@ describe('computeCacheMetrics', () => {
     expect(result.hitRatio).toBe(1);
     expect(result.hitTokens).toBe(1500);
     expect(result.missTokens).toBe(0);
+    expect(result.cacheWrite).toBe(0);
   });
 
   it('returns 0 hitRatio when no cache data is present', () => {
@@ -29,16 +31,19 @@ describe('computeCacheMetrics', () => {
     expect(result.hitRatio).toBe(0);
     expect(result.hitTokens).toBe(0);
     expect(result.missTokens).toBe(0);
+    expect(result.cacheWrite).toBe(0);
   });
 
   it('computes correct ratio for mixed hit/miss', () => {
     const result = computeCacheMetrics({
       cacheHitTokens: 300,
       cacheMissTokens: 700,
+      inputCacheCreation: 500,
     } as any);
     expect(result.hitRatio).toBeCloseTo(0.3, 5);
     expect(result.hitTokens).toBe(300);
     expect(result.missTokens).toBe(700);
+    expect(result.cacheWrite).toBe(500);
   });
 
   it('handles zero total tokens gracefully', () => {
