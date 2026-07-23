@@ -136,6 +136,12 @@ export interface PromptPayload {
 }
 export interface SteerPayload {
   readonly input: readonly ContentPart[];
+  /**
+   * When false, the steer joins at the next step boundary without
+   * interrupting an in-flight tool batch (auto-drained queue). Default
+   * (undefined) interrupts immediately, as an explicit user steer should.
+   */
+  readonly interrupt?: boolean | undefined;
 }
 export interface CancelPayload {
   readonly turnId?: number;
@@ -145,6 +151,13 @@ export interface SetThinkingPayload {
 }
 export interface SetPermissionPayload {
   readonly mode: PermissionMode;
+}
+export interface RuntimeSystemPrompt {
+  readonly replace?: string | undefined;
+  readonly append?: string | undefined;
+}
+export interface SetRuntimeSystemPromptPayload {
+  readonly prompt: RuntimeSystemPrompt;
 }
 export interface SetModelPayload {
   readonly model: string;
@@ -400,6 +413,7 @@ export interface AgentAPI {
 type AgentAPIWithId = WithAgentId<AgentAPI>;
 
 export interface SessionAPI extends AgentAPIWithId {
+  setRuntimeSystemPrompt: (payload: SetRuntimeSystemPromptPayload) => void;
   renameSession: (payload: RenameSessionPayload) => void;
   updateSessionMetadata: (payload: UpdateSessionMetadataPayload) => void;
   getSessionMetadata: (payload: EmptyPayload) => SessionMeta;

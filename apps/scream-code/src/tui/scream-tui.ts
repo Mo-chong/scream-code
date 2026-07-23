@@ -140,6 +140,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
+    reconnectAttempt: 0,
     recentSessions: [],
     subagentUsage: {},
   };
@@ -298,6 +299,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         this.lifecycleController.startCcConnectPolling();
       } catch (error) {
         this.lifecycleController.disposeTerminalTracking();
+        this.state.footer.dispose();
         this.state.ui.stop();
         throw error;
       }
@@ -397,6 +399,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
+    this.state.footer.dispose();
     this.showStatus(t('tui.organizing_memory'), this.state.theme.colors.textDim);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
@@ -629,6 +632,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if ('thinkingLevel' in patch) {
       this.state.editor.thinking = patch.thinkingLevel !== 'off';
       this.state.editor.thinkingLevel = patch.thinkingLevel ?? 'off';
+    }
+    if ('permissionMode' in patch) {
+      this.state.editor.permissionMode = patch.permissionMode ?? 'manual';
     }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing

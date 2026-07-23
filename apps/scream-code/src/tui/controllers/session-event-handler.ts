@@ -31,6 +31,7 @@ import type {
   TurnStartedEvent,
   TurnStepCompletedEvent,
   TurnStepInterruptedEvent,
+  TurnStepRetryingEvent,
   TurnStepStartedEvent,
   WarningEvent,
 } from '@scream-code/scream-code-sdk';
@@ -40,6 +41,7 @@ import { StatusMessageComponent } from '../components/messages/status-message';
 import { MAIN_AGENT_ID } from '../constant/scream-tui';
 import {
   argsRecord,
+  formatErrorMessage,
   isTodoItemShape,
   serializeToolResultOutput,
   stringValue,
@@ -90,6 +92,7 @@ export interface SessionEventHost {
   aborted: boolean;
   sessionEventUnsubscribe: (() => void) | undefined;
   readonly streamingUI: StreamingUIController;
+  readonly deferUserMessages: boolean;
 
   requireSession(): Session;
   setAppState(patch: Partial<AppState>): void;
@@ -102,6 +105,7 @@ export interface SessionEventHost {
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   sendNormalUserInput(text: string): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
+  updateQueueDisplay(): void;
   readonly tasksBrowserController: TasksBrowserController;
   markMemoryExtracted(): void;
 }
@@ -212,7 +216,7 @@ export class SessionEventHandler {
       case 'turn.step.started': this.handleStepBegin(event); break;
       case 'turn.step.interrupted': this.handleStepInterrupted(event); break;
       case 'turn.step.completed': this.handleStepCompleted(event); break;
-      case 'turn.step.retrying': break;
+      case 'turn.step.retrying': this.handleStepRetrying(event); break;
       case 'tool.progress': this.handleToolProgress(event); break;
       case 'assistant.delta': this.handleAssistantDelta(event); break;
       case 'hook.result': this.handleHookResult(event); break;
@@ -359,7 +363,7 @@ export class SessionEventHandler {
   }
 
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
-    this.host.streamingUI.flushNow();
+    this.host.setAppState({ reconnectAttempt: 0 });
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
@@ -386,6 +390,7 @@ export class SessionEventHandler {
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
+    this.drainQueuedMessagesIntoSteer();
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(
@@ -403,10 +408,51 @@ export class SessionEventHandler {
     this.host.showNotice(title, detail);
   }
 
+  private handleStepRetrying(event: TurnStepRetryingEvent): void {
+    this.host.setAppState({ reconnectAttempt: event.nextAttempt });
+  }
+
   private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {
     if (process.env['SCREAM_CODE_DEBUG'] !== '1') return;
     const text = formatStepDebugTiming(event);
     if (text !== undefined) this.host.showStatus(text);
+  }
+
+  /**
+   * Auto-insert queued messages at the step boundary. The current step has
+   * finished, so queued input is steered in with interrupt: false — it
+   * never kills in-flight tools; it reaches the model at the next call.
+   * Race-safe by design: if the turn already ended between the event and
+   * the steer call, the core launches a fresh turn with the message.
+   * (Ctrl+S remains the immediate-interrupt path.)
+   *
+   * Skipped while `deferUserMessages` is set: /init and make-skill run
+   * system-triggered flows whose steps must not receive user input.
+   */
+  private drainQueuedMessagesIntoSteer(): void {
+    const { state } = this.host;
+    const session = this.host.session;
+    if (session === undefined || state.appState.isCompacting || this.host.deferUserMessages) return;
+    const items = state.queuedMessages;
+    if (items.length === 0) return;
+    state.queuedMessages = [];
+    this.host.updateQueueDisplay();
+    for (const item of items) {
+      this.host.appendTranscriptEntry({
+        id: nextTranscriptId(),
+        kind: 'user',
+        turnId: this.host.streamingUI.getTurnContext().turnId,
+        renderMode: 'plain',
+        content: item.text,
+        ...(item.imageAttachmentIds !== undefined && item.imageAttachmentIds.length > 0
+          ? { imageAttachmentIds: item.imageAttachmentIds }
+          : {}),
+      });
+      void session.steer(item.parts ?? item.text, { interrupt: false }).catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.host.showError(t('input.guide_failed', { message }));
+      });
+    }
   }
 
   private isAnthropicSessionActive(): boolean {
@@ -663,7 +709,7 @@ export class SessionEventHandler {
       return;
     }
     const tint = (s: string): string => chalk.hex(state.theme.colors.textMuted)(s);
-    const spinner = new MoonLoader(state.ui, 'braille', tint, label);
+    const spinner = new MoonLoader(state.ui, tint, label);
     state.transcriptContainer.addChild(spinner);
     this.mcpServerStatusSpinners.set(name, spinner);
     state.ui.requestRender();

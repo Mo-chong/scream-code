@@ -13,6 +13,7 @@ import type {
   PluginSummary,
   PromptInput,
   ReloadSummary,
+  RuntimeSystemPrompt,
   ResumedSessionState,
   SessionPlan,
   SessionStatus,
@@ -100,11 +101,12 @@ export class Session {
     });
   }
 
-  async steer(input: string | PromptInput): Promise<void> {
+  async steer(input: string | PromptInput, opts?: { interrupt?: boolean | undefined }): Promise<void> {
     this.ensureOpen();
     await this.rpc.steer({
       sessionId: this.id,
       input: normalizePromptInput(input),
+      interrupt: opts?.interrupt,
     });
   }
 
@@ -116,6 +118,11 @@ export class Session {
   async cancel(): Promise<void> {
     this.ensureOpen();
     await this.rpc.cancel({ sessionId: this.id });
+  }
+
+  async setRuntimeSystemPrompt(prompt: RuntimeSystemPrompt): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setRuntimeSystemPrompt({ sessionId: this.id, prompt });
   }
 
   async setModel(model: string): Promise<void> {

@@ -24,7 +24,7 @@
 
 ---
 
-Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! Desktop App Download You Can GOOOO！！[scream.chat](https://scream.chat/)
+Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! 
 
 ---
 
@@ -183,18 +183,6 @@ Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, G
 
 ---
 
-## ⭐ Star History
-
-<a href="https://www-star-history.com/#LIUTod/scream-code&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
- </picture>
-</a>
-
----
-
 ## 📄 License
 
 [MIT](LICENSE) © [LIUTod](https://github.com/LIUTod)
@@ -213,7 +201,7 @@ Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, G
   <a href="#readme"><img src="https://img.shields.io/badge/README-English-blue?style=for-the-badge" alt="English README"></a>
 </p>
 
-Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你无需硬记代码，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！ 桌面级app下载去这.https://scream.chat/
+Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你无需硬记代码，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！ 
 
 ---
 

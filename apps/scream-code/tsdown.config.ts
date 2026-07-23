@@ -45,6 +45,8 @@ export default defineConfig({
   },
   deps: {
     alwaysBundle: [/^@scream-./],
-    neverBundle: [/^fastembed$/, /^onnxruntime-node$/],
+    // mupdf must resolve its mupdf-wasm.wasm sibling from its own package
+    // directory at runtime; bundling the JS breaks that lookup.
+    neverBundle: ['fastembed', 'mupdf', 'onnxruntime-node'],
   },
 });

@@ -18,16 +18,36 @@ updated: 2026-07-15
 
 ---
 
-## v0.10.1 — 合并上游 v0.10.1（2026-07-20）
+## v0.10.5 — 合并上游 v0.10.5（2026-07-23）
 
-### 新功能/修复
-- 25 bugs 全量审计修复（knowledge/store.ts +121 重构）
-- agent-core turn/compaction/tool-call 修复
-- store.ts embeddingQueue.clear() 防泄漏
+### 新功能
+- **markit 文档引擎**：FetchURL 支持 PDF/Office→markdown（mammoth/fast-xml-parser/turndown）
+- **MCP 浏览器技能注入**：Chrome DevTools MCP 连接时注入 browser skill guide
+- **steer 中断机制**：用户中断 / steer 事件时挂起而非丢弃
+- **权限模式徽章**：editor top border 显示当前权限模式
+- **max thinking effort 选择器**：model selector 新字段
+
+### 修复
+- live-scrolling Write streaming preview 修复
+- Web search 超时加固（hard timeouts + visible failure + domestic fallback）
+- CI 修复（drop stale ScreamCliServiceConfig + eqeqeq）
+- pi-tui 0.80.14→0.80.19 连续升级（ConPTY 写分块、全转录回放、对齐修复、committed prefix 对齐）
+- 9 个运行时 bug 修复
+
+### 变更
+- `apps/scream-code/src/tui/components/` 重写：组件作用域动画 tick，自持有 footer 状态定时器
 
 ### 二开影响
-低。4 文件冲突，complementary merge（保留 processTags + 加上游 projectDir）。
-`system.md`: 零改动。
+中等。4 文件冲突。
+
+| 文件 | 策略 |
+|------|------|
+| `tsdown.config.ts` | neverBundle 合并 `['fastembed', 'mupdf', 'onnxruntime-node']` |
+| `agent/index.ts` | 双 import 保留（ContentArchive + USER_PROMPT_ORIGIN） |
+| `injection/manager.ts` | router 模式 + McpBrowserSkillInjector 加入 |
+| `system.md` | **增强合并**：保留 HEAD 234 行骨架 + [Pn] 权重体系 + CONTRACT → 吸收 Delivering Results / Verification 增强 / Fusion Plan / Memory vs Knowledge 对比 / Subagents 增强。257 行零冲突。 |
+
+`system.md`: 半吸收（保留 HEAD+Pn+CONTRACT，插入上游高价值内容）。
 
 ## v0.10.0 — 合并上游 v0.10.0（2026-07-19）
 
