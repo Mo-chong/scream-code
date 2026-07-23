@@ -36,15 +36,14 @@ describe('FooterComponent — active status animation', () => {
 
   function makeFooter(state: AppState) {
     const requestRender = vi.fn();
-    const requestComponentRender = vi.fn();
-    const ui = { requestRender, requestComponentRender } as unknown as TUI;
+    const ui = { requestRender } as unknown as TUI;
     const footer = new FooterComponent(state, darkColors, ui);
-    return { footer, requestRender, requestComponentRender };
+    return { footer, requestRender };
   }
 
   it('stays quiet while idle and ticks independently in every active phase', () => {
     vi.useFakeTimers();
-    const { footer, requestRender, requestComponentRender } = makeFooter(baseState());
+    const { footer, requestRender } = makeFooter(baseState());
 
     vi.advanceTimersByTime(500);
     expect(requestRender).not.toHaveBeenCalled();
@@ -55,19 +54,17 @@ describe('FooterComponent — active status animation', () => {
       vi.advanceTimersByTime(500);
       expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
     }
-    expect(requestComponentRender).not.toHaveBeenCalled();
     footer.dispose();
   });
 
   it('uses the normal render scheduler at 30fps while thinking', () => {
     vi.useFakeTimers();
-    const { footer, requestRender, requestComponentRender } = makeFooter(baseState());
+    const { footer, requestRender } = makeFooter(baseState());
 
     footer.setState(baseState({ streamingPhase: 'thinking' }));
     vi.advanceTimersByTime(200);
 
     expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(5);
-    expect(requestComponentRender).not.toHaveBeenCalled();
     footer.dispose();
   });
 
