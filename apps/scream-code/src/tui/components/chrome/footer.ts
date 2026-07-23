@@ -180,7 +180,10 @@ function pickCacheColor(rate: number, colors: ColorPalette): string {
 
 // ── Gradient status line for footer line 2 ───────────────────────────
 
-const BRAND_COLORS = ['#ccfb23', '#56D4DD', '#FF6B9D'];
+// Keep active-status motion inside the product's cool/acid palette. Red and
+// pink read as error states in the terminal, so the spinner never crosses
+// those hues while the agent is working normally.
+const BRAND_COLORS = ['#79eb00', '#56D4DD', '#4ADE80', '#FACC15'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 120;
@@ -207,9 +210,17 @@ function lerpGradient(t: number): string {
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   streamingStartTime: number,
+  reconnectAttempt: number,
 ): string {
   if (streamingPhase === 'idle') {
     return t('status.idle');
+  }
+
+  // Reconnection takes priority over normal status display. Each retry
+  // fires ~20s apart and counts up to the provider's maxAttempts.
+  if (reconnectAttempt > 0) {
+    return chalk.hex('#E85454').bold('◎') + ' ' +
+      chalk.hex('#E85454')(`${t('status.reconnecting')} ${String(reconnectAttempt)}`);
   }
 
   let label: string;
@@ -257,7 +268,7 @@ export class FooterComponent implements Component {
   private gitCache: GitStatusCache;
   private gitCacheWorkDir: string;
   private transientHint: string | null = null;
-  private shimmerTimer: ReturnType<typeof setInterval> | null = null;
+  private statusTimer: ReturnType<typeof setInterval> | null = null;
   /**
    * Non-terminal background-task counts split by kind so the footer can
    * render two distinct badges. `bashTasks` covers `bash-*` BPM tasks
@@ -277,22 +288,19 @@ export class FooterComponent implements Component {
   }
 
   setState(state: AppState): void {
-    const wasThinking = this.state?.streamingPhase === 'thinking';
+    const previousPhase = this.state?.streamingPhase;
     if (state.workDir !== this.gitCacheWorkDir) {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // Shimmer is a 30fps decorative timer. While streaming, every frame is
-    // a fullRender(true) risk in pi-tui (any spurious diff above the
-    // viewport triggers `\x1b[2J\x1b[H` and snaps content to the top on
-    // ConPTY / gnome). Restrict shimmer to the thinking phase only —
-    // waiting/composing/tool have their own activity indicators already.
-    const isThinking = state.streamingPhase === 'thinking';
-    if (isThinking && !wasThinking) {
-      this.#startShimmer();
-    } else if (!isThinking && wasThinking) {
-      this.#stopShimmer();
+    // Keep one wall-clock-driven animation source independent from token/tool
+    // output. It uses the normal full-render scheduler (the pre-component-tick
+    // path), so frames coalesce with stream renders instead of competing with
+    // them as requestComponentRender jobs. Thinking needs 30fps for the model
+    // shimmer; other active phases use the spinner's 120ms cadence.
+    if (state.streamingPhase !== previousPhase) {
+      this.#restartStatusTimer(state.streamingPhase);
     }
   }
 
@@ -322,27 +330,26 @@ export class FooterComponent implements Component {
 
   invalidate(): void {}
 
-  /**
-   * Stop the shimmer animation timer. Idempotent — safe to call even when
-   * the timer isn't running. Call this when the component is disposed.
-   */
+  /** Stop the active-status timer. Idempotent and safe during disposal. */
   dispose(): void {
-    this.#stopShimmer();
+    this.#stopStatusTimer();
   }
 
-  // ── Shimmer animation ───────────────────────────────────────────────
+  // ── Active status animation ─────────────────────────────────────────
 
-  #startShimmer(): void {
-    if (this.shimmerTimer) return;
-    this.shimmerTimer = setInterval(() => {
+  #restartStatusTimer(phase: AppState['streamingPhase']): void {
+    this.#stopStatusTimer();
+    if (phase === 'idle') return;
+    const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
+    this.statusTimer = setInterval(() => {
       this.ui.requestRender();
-    }, 1000 / 30);
+    }, intervalMs);
   }
 
-  #stopShimmer(): void {
-    if (!this.shimmerTimer) return;
-    clearInterval(this.shimmerTimer);
-    this.shimmerTimer = null;
+  #stopStatusTimer(): void {
+    if (!this.statusTimer) return;
+    clearInterval(this.statusTimer);
+    this.statusTimer = null;
   }
 
   render(width: number): string[] {
@@ -350,9 +357,10 @@ export class FooterComponent implements Component {
     const state = this.state;
 
     // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
+    // Permission mode is NOT rendered here — it lives in the editor's top
+    // border (CustomEditor permissionMode badge), next to the input it
+    // governs.
     const left: string[] = [];
-    if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold(t('badge.auto')));
-    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold(t('badge.yes')));
     if (state.planMode !== 'off') {
       const isFusion = state.planMode === 'fusionplan';
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
@@ -401,6 +409,7 @@ export class FooterComponent implements Component {
       const statusLine = buildStatusLine(
         state.streamingPhase,
         state.streamingStartTime,
+        state.reconnectAttempt,
       );
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')

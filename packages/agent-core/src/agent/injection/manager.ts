@@ -1,6 +1,7 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { GoalInjector } from './goal';
+import { McpBrowserSkillInjector } from './mcp-browser-skill';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
@@ -39,6 +40,7 @@ export class InjectionManager {
       ['todo-list', new TodoListReminderInjector(agent)],
       ['goal', new GoalInjector(agent)],
       ['working-set', new WorkingSetInjector(agent)],
+      ['mcp-browser-skill', new McpBrowserSkillInjector(agent)], // v0.10.5: MCP browser skill guide injection
       // 路径 B 迁移：原 turn/injectors/{stuck,quality,intent}.ts
       ['system_ref_stuck', new StuckInjector(agent)],
       ['intent_guidance', new IntentInjector(agent)],

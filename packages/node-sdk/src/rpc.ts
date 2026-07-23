@@ -38,6 +38,7 @@ import type {
   PluginInfo,
   PluginSummary,
   ReloadSummary,
+  RuntimeSystemPrompt,
   CompactOptions,
   SessionPlan,
   SessionStatus,
@@ -68,6 +69,11 @@ export interface SessionPromptRpcInput {
   readonly input: PromptInput;
 }
 
+export interface SessionSteerRpcInput extends SessionPromptRpcInput {
+  /** false = join at the next step boundary without interrupting running tools. */
+  readonly interrupt?: boolean | undefined;
+}
+
 export interface SessionIdRpcInput {
   readonly sessionId: string;
 }
@@ -91,6 +97,10 @@ export interface SetSessionThinkingRpcInput extends SessionIdRpcInput {
 
 export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
   readonly mode: PermissionMode;
+}
+
+export interface SetRuntimeSystemPromptRpcInput extends SessionIdRpcInput {
+  readonly prompt: RuntimeSystemPrompt;
 }
 
 export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
@@ -268,12 +278,13 @@ export class SDKRpcClient {
     });
   }
 
-  async steer(input: SessionPromptRpcInput): Promise<void> {
+  async steer(input: SessionSteerRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.steer({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       input: input.input,
+      interrupt: input.interrupt,
     });
   }
 
@@ -287,6 +298,14 @@ export class SDKRpcClient {
     return rpc.cancel({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
+    });
+  }
+
+  async setRuntimeSystemPrompt(input: SetRuntimeSystemPromptRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.setRuntimeSystemPrompt({
+      sessionId: input.sessionId,
+      prompt: input.prompt,
     });
   }
 

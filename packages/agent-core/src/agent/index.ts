@@ -33,6 +33,7 @@ import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { ContentArchive } from './context/content-archive';
+import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
@@ -103,6 +104,7 @@ export interface AgentOptions {
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
+  readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
 }
 
 export class Agent {
@@ -150,6 +152,7 @@ readonly contentArchive: ContentArchive;
 
   private lastLlmConfigLogSignature?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
+  private readonly resolveRuntimeSystemPrompt: (basePrompt: string) => string;
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
@@ -160,6 +163,7 @@ readonly contentArchive: ContentArchive;
     this.rpc = options.rpc;
     this.toolServices = options.toolServices;
     this.pluginSessionStarts = options.pluginSessionStarts ?? [];
+    this.resolveRuntimeSystemPrompt = options.resolveRuntimeSystemPrompt ?? ((basePrompt) => basePrompt);
     this.rawGenerate = options.generate ?? generate;
     this.modelProvider = options.modelProvider;
     this.subagentHost = options.subagentHost;
@@ -315,7 +319,7 @@ readonly contentArchive: ContentArchive;
     return new LtodLLM({
       provider,
       modelName: model,
-      systemPrompt: this.config.systemPrompt,
+      systemPrompt: this.resolveRuntimeSystemPrompt(this.config.systemPrompt),
       capability: this.config.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,
@@ -416,7 +420,7 @@ readonly contentArchive: ContentArchive;
         this.turn.prompt(payload.input);
       },
       steer: (payload) => {
-        this.turn.steer(payload.input);
+        this.turn.steer(payload.input, USER_PROMPT_ORIGIN, { interrupt: payload.interrupt });
       },
       cancel: (payload) => {
         this.turn.cancel(payload.turnId);

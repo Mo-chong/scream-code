@@ -10,7 +10,7 @@ import { createRenderBatcher, type RenderBatchController } from './utils/render-
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
-import type { MoonLoader, SpinnerStyle } from './components/chrome/moon-loader';
+import type { MoonLoader } from './components/chrome/moon-loader';
 import { PlanModeBannerComponent } from './components/chrome/plan-mode-banner';
 import type { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { TodoPanelComponent } from './components/chrome/todo-panel';
@@ -54,7 +54,7 @@ export interface TUIState {
   livePane: LivePaneState;
   transcriptEntries: TranscriptEntry[];
   terminalState: TerminalState;
-  activitySpinner: { instance: MoonLoader; style: SpinnerStyle } | null;
+  activitySpinner: { instance: MoonLoader } | null;
   pulseWave: PulseWaveLoader | null;
   toolOutputExpanded: boolean;
   planExpanded: boolean;
@@ -155,6 +155,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const editor = new CustomEditor(ui, theme.colors);
   editor.thinking = initialAppState.thinkingLevel !== 'off';
   editor.thinkingLevel = initialAppState.thinkingLevel;
+  editor.permissionMode = initialAppState.permissionMode ?? 'manual';
   const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui, () => {
     ui.requestRender();
   });

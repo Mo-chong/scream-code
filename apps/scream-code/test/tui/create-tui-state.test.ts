@@ -43,6 +43,7 @@ function fakeInitialAppState(): AppState {
     lastStepCacheMiss: 0,
     ccConnectActive: false,
     wolfpackMode: false,
+    reconnectAttempt: 0,
     recentSessions: [],
     subagentUsage: {},
   };
