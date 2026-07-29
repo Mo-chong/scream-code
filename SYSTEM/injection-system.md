@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-23
+updated: 2026-07-29
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -10,11 +10,12 @@ updated: 2026-07-23
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 17 个 DynamicInjector（Phase41 新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控；v0.10.5 新增 McpBrowserSkillInjector）。
+> 16 个 DynamicInjector（Phase41 新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控；v0.10.5 新增 McpBrowserSkillInjector）。
 > **演变**：路径 B 已清零（Phase22）。路径 C (GuardInjector) 已完成迁移（Phase33）。
 > Phase41 (2026-07-15)：新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控。
-> **v0.10.5 (2026-07-23)**：新增 McpBrowserSkillInjector — Chrome DevTools MCP 连接时注入 browser skill guide，单次触发（injectedAt 守卫）。注入器达 17 个。
+> **v0.10.5 (2026-07-23)**：新增 McpBrowserSkillInjector — Chrome DevTools MCP 连接时注入 browser skill guide，单次触发（injectedAt 守卫）。注入器达 16 个。
 > Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱。
+> Phase42 (2026-07-28)：删 persistent-summary.ts / tool-result-recovery.ts；VARIANT_META 从 32 项精简至 18 项。
 > **v3 (2026-07-14)**：PersistentSummaryInjector→废弃（被 ArchivalSummaryInjector 归档层替代）。
 > TruncationTracker→Micro/ArchiveRecover 已废弃，自动恢复走归档层。
 
@@ -76,34 +77,30 @@ export interface VariantMeta {
 
 > 早期设计文档曾含 `'head'`/`'near_head'`/`'tail'`/`'CONTEXT_BOTTOM'`/`'ATTENTION_PEAK'` 五位置方案，代码实际使用 `InsertPosition` 三枚举值 + 注意力等级映射（`position-strategy.ts:29-54`）。
 
-### 当前注册表（33 变体：32 个在 VARIANT_META + 1 ad-hoc edit_error_fix，见 variant-registry.ts:288-361）
+### 当前注册表（19 变体：18 个在 VARIANT_META + 1 ad-hoc edit_error_fix，见 variant-registry.ts:273-328）
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
-| `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: ctx.history替代stuckContext） |
-| ~~`system_ref_anti_confabulation`~~ | — | — | — | — | — | **已删除** Phase38c（合并入 confabulationDetector） |
-| ~~`quality_escalate`~~ 🗑️ | — | — | — | — | — | **已删除** Phase38j（由 qualityDegradeDetector 替代，走 InterceptionManager 统一管道） |
-| `error-audit` | 0.5 | 0.85 | 0.2 | 4 | B | FAA 超时/耗时检测（排除 TERM=dumb） |
-| `session_summary` | 0.4 | 0.88 | 0.3 | 3 | B | 会话摘要 |
-| `persistent_summary` | — | — | — | — | — | ❌ **已废弃 v3**（被 ArchivalSummaryInjector 归档层替代） |
-| `archival_summary` 🆕 | 0 | 0 | 0 | 0（自身频率控制） | — | 归档层结构化摘要，>50K触发，尾部append |
-| `tool_result_recovery` 🆕 | 0.6 | 0.85 | 0.15 | 3 | B | 被mask的关键tool结果恢复 |
-| `decision_trace` 🆕 | 0.5 | 0.85 | 0.15 | 5 | B | 决策链快照+循环检测（ILR>0.6） |
-| `intent_*` (6变体) | 0.5 | 0.50 | 0.3 | 2 | A/B | 意图检测引导 |
-| `prepare_*` (3变体) | 0.25 | 0.70 | 0.3 | 2 | B | 准备阶段注入（prepare_edit/prepare_search 已移除 — system prompt 覆盖） |
-| `post_*` (3变体) | 0.20 | 0.50 | 0.3 | 2 | C | 执行后注入（post_edit/post_search/post_verify_pass 已移除 — 冗余合并） |
-| `step_after_*` (1变体) | 0.20 | 0.50 | 0.3 | 2 | C | 步后注入（step_after_search/step_after_verify_fail 已移除 — 由 post_verify_fail 覆盖） |
-| `guard_feedback_*` (4变体) | 0.7-0.9 | 0.85 | 0.25 | 3 | C | 行为规则反馈（Phase37: minStepGap 0→3） |
-| `feedback_positive` | 0.6 | 0.80 | 0.4 | 3 | S | 正向反馈 |
-| `scene_memory_recall` | 0.8 | 0.88 | 0.3 | 3 | B | 场景记忆召回 |
-| `step_code_ref_quality` | 0.5 | 0.85 | 0.4 | 2 | C | 代码质量参考 |
-| `code_quality_feedback` | 0.7 | 0.85 | 0.35 | 2 | C | 代码质量反馈 |
-| `truncation_recover_guard` | 0.7 | 0.85 | 0.35 | 2 | C | 截断恢复守卫 |
-| ~~`system_trigger`~~ | — | — | — | — | — | **已删除** Phase38c（死代码，interception extraInterceptions通道替代） |
 | `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
-| `edit_error_fix` | 0.8 | 0.90 | 0.3 | 2 | B | Edit `old_string not found` 即时注入引导 |
+| `intent_*` (6变体) | 0.5-0.8 | 0.88-0.90 | 0.3 | 0-2 | A/B | 意图检测引导（fix_bug/refactor/add_feature/review/research/document） |
+| `prepare_*` (3变体) | 0.7-0.8 | 0.85 | 0.35-0.40 | 3-4 | B | 准备阶段注入（prepare_write/prepare_memory/prepare_verify） |
+| `post_*` (3变体) | 0.5-0.9 | 0.80-0.85 | 0.40 | 3-4 | C | 执行后注入（post_write_large/post_verify_fail/post_memory） |
+| `step_after_edit` | 0.5 | 0.80 | 0.40 | 3 | C | 编辑后步引导 |
+| `feedback_positive` | 0.6 | 0.80 | 0.4 | 3 | S | 正向反馈 |
+| `guard-feedback` | 0.7 | 0.85 | 0.35 | 4 | C | 行为规则反馈（Phase38j 精简为仅 R1 阻断） |
+| `system_ref_stuck` | 0.6 | 0.88 | 0.25 | 3 | D | 文件编辑/报错循环（Phase37: weight 30→0.6） |
+| `error-audit` | 0.5 | 0.85 | 0.2 | 4 | B | FAA 超时/耗时检测（排除 TERM=dumb） |
+| `edit_error_fix` | 0.8 | 0.90 | 0.3 | 2 | B | Edit `old_string not found` 即时注入引导（ad-hoc） |
+| ~~`scene_memory_recall`~~ | — | — | — | — | — | **已删除** — 15天零触发，功能被蒸馏塔替代 |
+| ~~`code_quality_feedback`~~ | — | — | — | — | — | **已删除** — 15天零触发（功能合并到 qualityDegradeDetector） |
+| ~~`guard_feedback_rule_2/3/4`~~ | — | — | — | — | — | **已删除** — Phase38j 精简（仅保留统一 `guard-feedback`） |
+| ~~`truncation_recover_guard`~~ | — | — | — | — | — | **已删除** — v3 废弃（蒸馏塔归档层替代） |
+| ~~`tool_result_recovery`~~ | — | — | — | — | — | **已删除** — 依赖 Micro/ArchiveRecover 已废弃 |
+| ~~`persistent_summary`~~ | — | — | — | — | — | **已删除** — v3 废弃（ArchivalSummaryInjector 归档层替代） |
 
-> Phase37 (2026-07-11) 变体变更：新增 tool_result_recovery + decision_trace；stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3；persistent_summary 退役。
+> Phase37 (2026-07-11) 变体变更：stuck weight 1.0→0.6 + threshold 0.18→0.25 + decay 0.85→0.88；error-audit weight 0.8→0.5 + threshold 0.35→0.2 + minStepGap 2；guard_feedback minStepGap 0→3。
+> **Phase38j 精简 (2026-07-15)**：guard_feedback_rule_2/3/4 移除，仅保留统一 `guard-feedback`（R1 阻断）。
+> **Phase41+ (2026-07-28)**：scene_memory_recall / code_quality_feedback / truncation_recover_guard / tool_result_recovery 移除（15天零触发或依赖废弃）。persistent_summary 文件删除。VARIANT_META 从 32 项精简至 18 项。
 
 ```typescript
 export function getScore(variant: string, stepDelta: number): number {
@@ -149,25 +146,22 @@ VariantMeta.weight ← 基础权重
 
 ### 当前使用者
 
-`variant-registry.ts` 的 VARIANT_META **共 32 个变体**，分为 13 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
+`variant-registry.ts` 的 VARIANT_META **共 18 个变体**，分为 9 组。所有 injector 循环共享同一套残差系统，`shouldInjectByResidual()` 在各个注入阶段对所有变体计算残差分数。
 
 | 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
 |--------|------------|-------------|-------------------|-----------|
-| ~~`system_trigger`~~🗑️ | — | — | — | **已删除** Phase38c（extraInterceptions 通道替代） |
 | `deviation_chain_intercept` | 1 | 1.20 | 0.90 | 偏差链检测 |
-| `intent_*` | 6 | 0.50 | 0.50 | intent-injector.ts |
-| `prepare_*` | 6 | 0.25 | 0.70 | 6 个注入器 |
-| `post_*` | 6 | 0.20 | 0.50 | 6 个注入器 |
-| `step_after_*` | 3 | 0.20 | 0.50 | 6 个注入器 |
-| `guard_feedback_*` | 4 | 0.7-0.9 | 0.85 | 行为反馈 |
-| `scene_memory_recall` | 1 | 0.50 | 0.80 | scene_memory |
-| `step_code_ref_quality` | 1 | 0.30 | 0.80 | 代码质量 |
-| `code_quality_feedback` | 1 | 0.30 | 0.80 | 代码质量 |
-| `system_ref_stuck` | 1 | 0.40 | 0.85 | stuck.ts（降频 — minStepGap 3→8, weight 0.7→0.4） |
-| `truncation_recover_guard` | 1 | 0.50 | 0.80 | 截断恢复 |
-| `error-audit` | 1 | 0.80 | 0.85 | error-audit-injector.ts |
+| `intent_*` | 6 | 0.5-0.8 | 0.88-0.90 | intent-injector.ts |
+| `prepare_*` | 3 | 0.7-0.8 | 0.85 | prepare 注入器 (write/memory/verify) |
+| `post_*` | 3 | 0.5-0.9 | 0.80-0.85 | post 注入器 (write_large/verify_fail/memory) |
+| `step_after_edit` | 1 | 0.5 | 0.80 | 编辑后步引导 |
+| `guard-feedback` | 1 | 0.7 | 0.85 | 行为反馈（R1 阻断） |
+| `system_ref_stuck` | 1 | 0.6 | 0.88 | stuck 检测 |
+| `error-audit` | 1 | 0.5 | 0.85 | error-audit-injector.ts |
 
-详情见 `variant-registry.ts:288-345`。
+**已移除组**：`scene_memory_recall` / `code_quality_feedback` / `step_code_ref_quality` / `truncation_recover_guard` / `guard_feedback_rule_2/3/4` — 10 变体已删除（零触发或依赖废弃）
+
+详情见 `variant-registry.ts:273-328`。
 
 ---
 
@@ -379,7 +373,6 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `goal.ts` | `goal` | MID_CONTEXT | C | 计划模式 step | ✅ |
 | `todo-list.ts` | `todo_list` | MID_CONTEXT | C | todo 列表变化 | ✅ |
 | `session-summary.ts` 🆕 | `session_summary` | MID_CONTEXT | B | step=1 / compaction 后 | ✅ |
-| `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | MID_CONTEXT | B | ILR>0.3 + hasHighValue | ✅ |
 | `wolfpack.ts` | `wolfpack` | MID_CONTEXT | C | WolfPack 调用 | ✅ |
 | `plugin-session-start.ts` | `plugin_session_start` | MID_CONTEXT | C | 插件会话启动 | ✅ |
 | ~~`anti_confabulation.ts`~~ 🗑️ | ~~`system_ref_anti_confabulation`~~ | — | — | — | ❌ | **已删除** Phase38c（合并入 confabulationDetector） |
@@ -388,8 +381,9 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | **Phase38j 精简为仅 R1 阻断**（R2/R3/R4 由 permissionEnforcerDetector 接管） | ✅ |
 | `mcp-browser-skill.ts` 🆕 v0.10.5 | `mcp_browser_skill` | AFTER_TOOL_CALL | D | Chrome DevTools MCP 连接时单次注入 browser skill guide（injectedAt 守卫） | ✅ |
 
-> **注册总数**: 17 个。v0.10.5 新增 McpBrowserSkillInjector。
-> Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
+> **注册总数**: 16 个。v0.10.5 新增 McpBrowserSkillInjector。
+> Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、SessionSummaryInjector（会话摘要）。
+> Phase42 (2026-07-28) 删除：ToolResultRecoveryInjector（依赖废弃）、PersistentSummaryInjector（v3 废弃）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 
 ### DynamicInjector 基类
@@ -698,7 +692,7 @@ B 级注入器（error-audit、working-set、goal、todo-list、wolfpack、plugi
 
 ---
 
-> **相关文件**: `SYSTEM-INDEX.md` (索引链入口) | `SYSTEM/API-REFERENCE.md` (接口定义) | `SYSTEM/architecture-overview.md` (架构总图) | `ZHU/DECISIONS/INDEX.md` (决策历史) | `ZHU/DECISIONS/ADR-7-注入位置优化与尾部聚合策略.md` (ADR)
+> **相关文件**: `SYSTEM-INDEX.md` (索引链入口) | `SYSTEM/API-REFERENCE.md` (接口定义) | `SYSTEM/architecture-overview.md` (架构总图) | `ZHU/DECISIONS/INDEX.md` (决策历史) | `ZHU/DECISIONS/adr/ADR-7-注入位置优化与尾部聚合策略.md` (ADR)
 
 ### 融合计划落地状态
 

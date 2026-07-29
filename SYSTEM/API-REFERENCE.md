@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-23
+updated: 2026-07-29
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -218,7 +218,6 @@ class InjectionManager {
 | WorkingSetInjector | `agent/injection/working-set.ts` | 1 | AFTER_TOOL_CALL | working set 变化 | ✅ | |
 | ErrorAuditInjector | `agent/injection/error-audit-injector.ts` | 1 | AFTER_TOOL_CALL | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** | ✅ | Phase37 |
 | SessionSummaryInjector 🆕 | `agent/injection/session-summary.ts` | 1 | MID_CONTEXT | step=1 / compaction 后 | ✅ | Phase33 |
-| ToolResultRecoveryInjector 🆕 | `agent/injection/tool-result-recovery.ts` | 1 | MID_CONTEXT | ILR>0.3 + hasHighValue | ✅ | Phase37 |
 | GoalInjector | `agent/injection/goal.ts` | 1 | AFTER_TOOL_CALL | 计划模式 step | ✅ | |
 | TodoListInjector | `agent/injection/todo-list.ts` | 1 | AFTER_TOOL_CALL | todo 列表变化 | ✅ | |
 | WolfPackInjector | `agent/injection/wolfpack.ts` | 1 | AFTER_TOOL_CALL | WolfPack 调用 | ✅ | |
@@ -1347,27 +1346,25 @@ class KnowledgeLookupTool implements StepTool
 | intent_research | variant | weight:0.8, decay:0.90, thr:0.3 | variant-registry.ts |
 | intent_document | variant | weight:0.7, decay:0.88, thr:0.3 | variant-registry.ts |
 | prepare_edit/write/search/memory/bash_file/verify | variant | 6 variants, weight 0.5–0.8 | variant-registry.ts |
-| post_edit/search/write_large/verify_pass/verify_fail/memory | variant | 6 variants, weight 0.5–0.9 | variant-registry.ts |
-| step_after_edit/search/verify_fail | variant | 3 variants, weight 0.5–0.8 | variant-registry.ts |
-| guard_feedback_rule_1/2/3/4 | variant | 4 variants, weight 0.7–0.9, minStepGap:3（Phase37: 0→3） | guard-injector.ts |
+| `post_*` | variant | 3 variants: write_large/verify_fail/memory, weight 0.5–0.9 | variant-registry.ts |
+| `step_after_edit` | variant | 1 variant, weight:0.6, decay:0.80, thr:0.40 | variant-registry.ts |
+| `guard-feedback` | variant | 1 variant, weight:0.7, decay:0.85, thr:0.35, minStepGap:4 | guard-injector.ts | C |
 | feedback_positive | variant | weight:0.6, decay:0.80, thr:0.4 | variant-registry.ts |
-| scene_memory_recall | variant | weight:0.8, decay:0.88, thr:0.3 | variant-registry.ts |
-| step_code_ref_quality | variant | weight:0.5, decay:0.85, thr:0.4 | variant-registry.ts |
-| code_quality_feedback | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| step_code_ref_quality | variant | 🗑️ **已删除** — 零触发，功能合并到 qualityDegradeDetector | variant-registry.ts |
 | system_ref_stuck | variant | weight:0.6（Phase37: 30→0.6）, decay:0.88, thr:0.25, minStepGap:3 | stuck.ts |
-| truncation_recover_guard | variant | weight:0.7, decay:0.85, thr:0.35 | variant-registry.ts |
+| truncation_recover_guard | variant | 🗑️ **已删除** — v3 废弃，蒸馏塔归档层替代 | variant-registry.ts |
 | error-audit | variant | weight:0.5, decay:0.85, thr:0.2, minStepGap:2（Phase37: 分析瘫痪已砍） | error-audit-injector.ts |
 | session_summary | variant | weight:0.8, decay:0.88, thr:0.3 | session-summary.ts |
-| tool_result_recovery 🆕 | variant | ✅ 文件存在但**未注册**（死代码）。weight:0.6, decay:0.85, thr:0.15, minStepGap:3 | tool-result-recovery.ts |
+| tool_result_recovery 🆕 | variant | 🗑️ **已删除** — 文件已删除（Phase42）。依赖 Micro/ArchiveRecover 已废弃 | — |
 | decision_trace 🆕 | variant | weight:0.5, decay:0.85, thr:0.15, minStepGap:5 | decision-trace.ts |
-| persistent_summary | variant | ❌ 已退役（tool_result_recovery 死代码未注册，无替代） | persistent-summary.ts |
+| persistent_summary | variant | 🗑️ **已删除** — 文件已删除（Phase42）。ArchivalSummaryInjector 归档层替代 | — |
 
-> Phase37 (2026-07-11): stuck weight 30→0.6; guard-injector minStepGap 0→3; error-audit 删分析瘫痪支柱;
-> 新增 decision_trace; tool_result_recovery 文件保留但未注册；persistent_summary 退役。
+> Phase37 (2026-07-11): stuck weight 30→0.6; guard-feedback minStepGap 0→3; error-audit 删分析瘫痪支柱; 新增 decision_trace + session_summary。
+> Phase42 (2026-07-28): VARIANT_META 精简 32→18。删变体：scene_memory_recall / code_quality_feedback / guard_feedback_rule_2/3/4 / post_verify_pass / truncation_recover_guard。删文件：persistent-summary.ts / tool-result-recovery.ts。
 
 | archival_summary | variant | weight:0, decay:0, thr:0, minStepGap:0（自身频率控制：<50K不触发/50K-100K每3轮/>100K每轮） | archival-summary.ts |
 | edit_failure_loop | detector | rootCause:'stuck_loop', priority:'critical', phase:'post_step' | detectors/edit-failure-loop.ts |
-> v3 (2026-07-14): 新增 archival_summary（归档层）+ edit_failure_loop（Edit循环检测）；persistent_summary 正式退役；archive_recover 注销注册
+> v3 (2026-07-14): 新增 archival_summary（归档层）+ edit_failure_loop（Edit循环检测）；persistent_summary 退役 → Phase42 正式删除。
 
 ### 内建工具（tools/builtin）
 

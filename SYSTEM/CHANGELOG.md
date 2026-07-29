@@ -1142,3 +1142,30 @@ updated: 2026-07-23
 - **尾部 append 安全**：尾部内容本就是每轮可变的，追加 system-reminder 在任何情况下不伤缓存前缀
 - **确定性优先**：全管线确定性规则，不依赖 LLM（ContextCompressionEngine 验证了 651ms/4257 条）
 - **任务聚合确保高精度**：置信度 >0.6 才显示，宁可少显示也不能误导 AI
+
+---
+
+### Phase42 — 注入变体精简与废弃文件清理（2026-07-28）
+
+#### 变更
+
+- **VARIANT_META 精简**: 32→18 变体（-44%）。删除 7 个死变体：`scene_memory_recall`（15 天零触发）、`code_quality_feedback`（零触发）、`guard_feedback_rule_2/3/4`（Phase38j 已精简）、`post_verify_pass`（文档/代码矛盾修复）、`truncation_recover_guard`（v3 已废弃）
+  - `packages/agent-core/src/agent/turn/variant-registry.ts`
+
+#### 文件删除（送回收站）
+
+| 文件 | 理由 |
+|:----|:----|
+| `packages/agent-core/src/agent/injection/persistent-summary.ts` | v3 已废弃，被 ArchivalSummaryInjector 替代 |
+| `packages/agent-core/src/agent/injection/tool-result-recovery.ts` | 依赖 Micro/ArchiveRecover 已废弃，从未注册 |
+
+#### 代码清理
+
+- `manager.ts`：移除 ToolResultRecoveryInjector 注释残留（2 处）
+- 注册注入器 17→16，移除废弃注释计数
+
+#### 文档同步
+
+- `SYSTEM/injection-system.md`：更新变体注册表表格、注入器计数、变体组表、弃用标注、时间戳
+- `SYSTEM/MAP.md`：注入器计数 17→16
+- `SYSTEM-INDEX.md`：移除 persistent-summary.ts 引用

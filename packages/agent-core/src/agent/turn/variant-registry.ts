@@ -289,7 +289,7 @@ export const VARIANT_META: Record<string, VariantMeta> = {
 
   // B组: post — 工具执行后反馈（post_edit/post_search 已移除 — 冗余，由 step_after 覆盖）
   post_write_large:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
-  post_verify_pass:            { weight: 0.5, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
+  // post_verify_pass 已移除 — 冗余，由 step_after 覆盖
   post_verify_fail:            { weight: 0.9, decayPerStep: 0.88, threshold: 0.40, minStepGap: 3 },
   post_memory:                 { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 4 },
 
@@ -297,19 +297,14 @@ export const VARIANT_META: Record<string, VariantMeta> = {
   step_after_edit:             { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5, interceptThreshold: 3 },
 
   // ── Phase 12: 反馈信号闭环 variants ────────────────────────────
-  // Note: guard_feedback_rule_1 不走 inject() 路径，在 Phase12 实施时已清理
-  guard_feedback_rule_2:      { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
-  guard_feedback_rule_3:      { weight: 0.8, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 2 },
+  // guard_feedback_rule_1/2/3/4 均已移除 — Phase38j 精简为仅 R1 阻断（不走 inject 路径）
   feedback_positive:          { weight: 0.6, decayPerStep: 0.80, threshold: 0.40, minStepGap: 5 },
 
   // ── Phase 13: 行为闭环与展示规范 ──────────────────────────────
-  guard_feedback_rule_4:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
   'guard-feedback':             { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
-  scene_memory_recall:       { weight: 0.8, decayPerStep: 0.88, threshold: 0.30, minStepGap: 5, interceptThreshold: 3 },
   // step_code_ref_quality 已移除 — 规则已合并到 system prompt
 
-  // ── Phase 18: 代码质量反馈 ────────────────────────────────────
-  code_quality_feedback:     { weight: 0.7, decayPerStep: 0.85, threshold: 0.35, minStepGap: 4, interceptThreshold: 3 },
+  // ── Phase 18: 代码质量反馈（code_quality_feedback 已移除 — 功能已合并到 qualityDegradeDetector）
 
   // ── Phase 21: 痛点感知（stuck 检测 → 文档导航）────────────────
   system_ref_stuck:          { weight: 0.4, decayPerStep: 0.85, threshold: 0.25, minStepGap: 8 },

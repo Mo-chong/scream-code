@@ -14,8 +14,6 @@ import { IntentInjector } from './intent-injector';
 import { ErrorAuditInjector } from './error-audit-injector';
 import { GuardInjector } from './guard-injector';
 import { SessionSummaryInjector } from './session-summary';
-// ❌ 废弃: tool-result-recovery（依赖 Micro/ArchiveRecover，已废弃）
-// import { ToolResultRecoveryInjector } from './tool-result-recovery';
 import { DecisionTraceInjector } from './decision-trace';
 import { KnowledgeMenuInjector } from './knowledge-menu';
 import { InjectionRouter, type InjectContext } from './router';
@@ -47,8 +45,6 @@ export class InjectionManager {
       ['error-audit', new ErrorAuditInjector(agent)],
       ['guard-feedback', this.guardInjector],
       ['session-summary', new SessionSummaryInjector(agent)],
-      // ❌ 废弃: tool-result-recovery（依赖 Micro/ArchiveRecover 已废弃，蒸馏塔归档层替代）
-      // ['tool-result-recovery', new ToolResultRecoveryInjector(agent)],
       ['decision-trace', new DecisionTraceInjector(agent)],
       ['knowledge-menu', new KnowledgeMenuInjector(agent)],
     ];

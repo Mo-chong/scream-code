@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD, SYSTEM-INDEX, 索引同步]
-updated: 2026-07-23
+updated: 2026-07-29
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -182,6 +182,7 @@ updated: YYYY-MM-DD
 | **CRLF 修复** | `.gitattributes` + git config | 全仓库 LF 归一化 |
 | **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表 |
 | **Phase42d 说明书查缺补漏** | `context-management.md` / `turn-control.md` / `injection-system.md` / `architecture-overview.md` | 补 SnipHinter+Checkpoint 文档+edit_error_fix 变体 |
+| **v0.11.2 合并（64 commits）** | `footer.ts` / `manager.ts` / `micro.ts` / `build-dev.sh` / `package.json` | 取 theirs 后逐一 grep 补 fork 增强 + pi-tui 版本手动覆盖导致脱节 + build-dev.sh 缺 web 构建 |
 
 ## 5. system.md 维护规则 [P0]
 
@@ -245,3 +246,57 @@ updated: YYYY-MM-DD
 - 控制行数不是目的，AI 消费质量才是唯一标准
 - "不取 ours/不取 theirs" 的逐段策略比二选一多花 30% 时间但产出质量高一个量级
 - 四轴评分框架是可复用的，以后每次上游合并 system.md 都按这个流程来
+
+### 5.6 v0.11.2 合并教训（全面审计）
+
+合并 v0.10.5→0.11.2（64 commits），核心不在于 system.md 冲突（上游未改），而在于**取 theirs 后 fork 增强的隐性丢失**和**环境依赖的隐性退化**。
+
+#### 机制问题：取 theirs 可能丢 fork 增强
+
+`git checkout --theirs` 不仅替换冲突区域的代码，还可能删掉 fork 在该文件中新增的独立功能。本次合并 4 次隐性丢失：
+
+| 文件 | 丢失内容 | 发现方式 | 补救 |
+|------|---------|---------|------|
+| `footer.ts` | `formatCacheStats()` 缓存率+🧊统计 | 用户报 UI 不对 | 从旧版本还原函数 |
+| `micro.ts` | `contentArchive?.archive()` 存档 | grep 验证发现 `=0` | 手动补回 |
+| `manager.ts` | `flushContextFacts()` 引用已死方法 | 运行时崩溃 | 删 orphan finally |
+| `dispatch.ts` | /web 斜杠命令 | 用户报 unknown | 补 registry+dispatch |
+
+**教训**：取 theirs 后两步走——① grep 检查 fork 增强关键字（`VEC0_`、`processTags`、`contentArchive`、`formatCache`）② `scream --version` + 核心功能测试。
+
+#### 环境退化：pi-tui 版本脱节
+
+**现象**：`package.json` 声明 `^0.80.31`，但物理安装的 `node_modules/@liutod-scream/pi-tui` 是旧 `0.80.10`。
+
+**根因**：v0.10.0 合并后用了 `npm pack + tar 解压` 手动装旧版 0.80.10。pnpm install 不覆盖已有 node_modules，版本永久卡死。
+
+**教训**：合并后检查关键依赖物理版本：`node -e "console.log(require('@liutod-scream/pi-tui/package.json').version)"`。版本不对 → `rm -rf node_modules/xxx apps/scream-code/node_modules/xxx` 清空重装。
+
+#### 构建流程缺失：web 前端资产
+
+**现象**：合并后 `scream web` 报错，`dist/public/` 不存在。
+
+**根因**：`build-dev.sh` 只有两段 tsdown 构建，缺 vite build + copy-web-assets。
+
+**教训**：大版本合并后重新审视 `build-dev.sh`——上游新增的平台/UI 可能依赖新的构建步骤。
+
+#### 全面审计检查清单（合并后必做）
+
+```bash
+# 1. Fork 增强关键字存活
+grep -c "VEC0_MIGRATION" packages/memory/src/store.ts
+grep -c "processTags" packages/memory/src/consolidator.ts
+grep -c "contentArchive?.archive" packages/agent-core/src/agent/compaction/micro.ts
+grep -c "McpBrowserSkillInjector" packages/agent-core/src/agent/injection/manager.ts
+grep -c "onnxruntime-node" apps/scream-code/tsdown.config.ts
+
+# 2. 运行时
+scream --version
+scream web --port 8080   # 确认不是 MODULE_NOT_FOUND
+
+# 3. 依赖物理版本
+node -e "console.log(require('@liutod-scream/pi-tui/package.json').version)"
+
+# 4. 构建完整性
+ls apps/scream-code/dist/public/index.html
+```

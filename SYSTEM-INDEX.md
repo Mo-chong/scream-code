@@ -243,7 +243,6 @@
     agent/injection/goal.ts       → GoalInjector
     agent/injection/todo-list.ts  → TodoListReminderInjector
     agent/injection/session-summary.ts → SessionSummaryInjector（Phase36 新增，接管 session memory 注入）
-    agent/injection/persistent-summary.ts → PersistentSummaryInjector（Phase36 新增，基于 ILR 接管持久摘要注入）
     tools/builtin/memory/
       memory-lookup.ts            → MemoryLookup 工具
       memory-write.ts             → MemoryWrite 工具

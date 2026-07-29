@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/architecture, status/final]
 keywords: [架构, architecture, 全景, 子系统, 数据流, 蒸馏塔, v3]
-updated: 2026-07-17
+updated: 2026-07-29
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -408,20 +408,20 @@ L2 项目:  ZHU/AGENTS.md                    (6.3KB)  决策规范 + 格式契�
 
 ## §6 注入系统（已统一） [P1]
 
-**详细文档**: `SYSTEM/injection-system.md` | **源码**: `packages/agent-core/src/agent/injection/` (14 注册)
+**详细文档**: `SYSTEM/injection-system.md` | **源码**: `packages/agent-core/src/agent/injection/` (16 注册)
 
 ### 6.1 架构总览
 
 ```
-Layer 4: 14 个具体注入器 (injection/*.ts)        ← 注入内容生成
+Layer 4: 16 个具体注入器 (injection/*.ts)        ← 注入内容生成
 Layer 3: TurnFlow 集成 (turn/index.ts inject())   ← 注入前预处理
 Layer 2: 编排层 (router.ts + manager.ts)          ← 路由/调度/预算
 Layer 1: 抽象基类 DynamicInjector (injector.ts)   ← 接口契约
 Layer 0: 位置策略 InsertPosition (position-strategy.ts) ← 注入锚点
-Cross:   VariantScheduler (variant-registry.ts)   ← 30 变体残差调度
+Cross:   VariantScheduler (variant-registry.ts)   ← 18 变体残差调度
 ```
 
-### 6.2 15 个注册注入器（Phase37 后）
+### 6.2 16 个注册注入器（Phase42 精简）
 
 | 文件 | 变体 | 等级 | 触发 |
 |------|------|------|------|
@@ -433,14 +433,15 @@ Cross:   VariantScheduler (variant-registry.ts)   ← 30 变体残差调度
 | `working-set.ts` | `working_set` | B/C | working set 变化 |
 | `error-audit-injector.ts` | `error-audit` | B | FAA 趋势检测（超时/耗时膨胀）**分析瘫痪已砍** |
 | `session-summary.ts` 🆕 | `session_summary` | B | step=1 / compaction 后 |
-| `tool-result-recovery.ts` 🆕 | `tool_result_recovery` | B | ILR>0.3 + hasHighValue |
+| `knowledge-menu.ts` 🆕 | `knowledge_menu` | A | 知识库菜单引导 |
 | `goal.ts` | `goal` | C | 计划模式 step |
 | `todo-list.ts` | `todo_list` | C | todo 列表变化 |
 | `wolfpack.ts` | `wolfpack` | C | WolfPack 调用 |
 | `plugin-session-start.ts` | `plugin_session_start` | C | 插件会话启动 |
 | ~~`quality.ts` 🗑️~~ | ~~`quality_escalate`~~ | — | — | **已删除** Phase38j（由 qualityDegradeDetector 替代） |
-| `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） |
-| `guard-injector.ts` | `guard-feedback` | C | checkGuard Rule 2/3/4 观察（minStepGap 0→3） |
+| `stuck.ts` | `system_ref_stuck` | D | 同文件编辑≥3 / 同工具报错≥2（Phase37: weight 30→0.6） |
+| `mcp-browser-skill.ts` 🆕 | `mcp_browser_skill` | D | Chrome DevTools MCP 连接时单次注入 |
+| `guard-injector.ts` | `guard-feedback` | C | Phase38j 精简，仅 R1 阻断 |
 
 ### 6.3 残差注意力公式
 
