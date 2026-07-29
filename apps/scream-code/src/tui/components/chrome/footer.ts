@@ -22,6 +22,7 @@ import {
   type GitStatusCache,
 } from '#/utils/git/git-status';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
+import { maskingStats } from '@scream-code/agent-core/turn-step';
 
 // Toolbar tips — rotates every 10s. Most tips are short and pair up (two
 // joined by " | ") when space allows; tips flagged `solo` are long or
@@ -191,28 +192,47 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
   return colors.textDim;
 }
 
-/** Cache hit ratio color: green when ≥80%, yellow when ≥50%, red below. */
+/** Pick cache ratio color: green (≥80%) / yellow (≥50%) / red (<50%) */
 function pickCacheColor(ratio: number): string {
   if (ratio >= 0.8) return '#4ADE80';
   if (ratio >= 0.5) return '#FACC15';
   return '#EF4444';
 }
 
-/** Format the ⚡ cache hit ratio stats line. Only shown when API returns cache data. */
+/**
+ * Format cache hit ratio with color and masking/compaction stats.
+ * Returns colored string like: "⚡ 单:96.3% 总:96.6%  🧊 -0.8M 掩蔽:566 压缩:32"
+ * If no cache data, returns empty string.
+ */
 function formatCacheStats(state: AppState): string {
   const hit = state.cacheHitTokens ?? 0;
   const miss = state.cacheMissTokens ?? 0;
   const totalTotal = hit + miss;
   if (totalTotal <= 0) return '';
 
-  const ratio = totalTotal > 0 ? hit / totalTotal : 0;
+  const ratio = hit / totalTotal;
   const { lastStepCacheHit, lastStepCacheMiss = 0 } = state;
   const singleStepTotal = lastStepCacheHit + lastStepCacheMiss;
   const singleRatio = singleStepTotal > 0 ? lastStepCacheHit / singleStepTotal : 0;
 
-  const label = (s: string) => chalk.dim(s);
-  const digits = (s: string) => chalk.white(s);
-  return ` ⚡ ${label('单')}:${digits((singleRatio * 100).toFixed(1) + '%')}  ${label('总')}:${digits((ratio * 100).toFixed(1) + '%')}`;
+  const dim = (s: string) => chalk.dim(s);
+  const white = (s: string) => chalk.white(s);
+  const green = (s: string) => chalk.hex(pickCacheColor(singleRatio))(s);
+  const totalColor = (s: string) => chalk.hex(pickCacheColor(ratio))(s);
+
+  let text = `⚡ ${dim('单')}:${green((singleRatio * 100).toFixed(1) + '%')}  ${dim('总')}:${totalColor((ratio * 100).toFixed(1) + '%')}`;
+
+  // 🧊 masking/compaction stats
+  const m = maskingStats.perTurn;
+  if (m && (m.fullyMasked > 0 || m.compressed > 0)) {
+    const mb = totalTotal > 0 ? ((m.totalBytes ?? 0) / 1_000_000).toFixed(1) : '0';
+    const parts: string[] = [];
+    if (m.fullyMasked > 0) parts.push(`${dim('掩蔽')}${white(':' + m.fullyMasked)}`);
+    if (m.compressed > 0) parts.push(`${dim('压缩')}${white(':' + m.compressed)}`);
+    text += `  ${dim('🧊')} -${white(mb + 'M')} ${parts.join(' ')}`;
+  }
+
+  return text;
 }
 
 // ── Gradient status line for footer line 2 ───────────────────────────
@@ -489,9 +509,7 @@ export class FooterComponent implements Component {
       const contextPart = chalk.hex(contextColor)(
         formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens),
       );
-      // Cache hit ratio + masking/compaction stats
-      const cacheStats = formatCacheStats(state);
-      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}${cacheStats}`);
+      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
       rightText = `${ccDot} ${contextPart}${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
@@ -524,6 +542,14 @@ export class FooterComponent implements Component {
       }
     }
 
-    return [truncateToWidth(line1, width, '…')];
+    // ── Line 2: short path (last 2) + centered cache hit ratio + 🧊 stats ──
+    const cacheStats = formatCacheStats(state);
+    const cwdParts = state.workDir.replace(/\\/g, '/').split('/').filter(Boolean);
+    const shortCwd = chalk.hex(colors.textDim)(cwdParts.slice(-2).join('/'));
+    const line2 = cacheStats !== ''
+      ? shortCwd + ' '.repeat(Math.max(0, width - visibleWidth(shortCwd + ' ' + cacheStats))) + ' ' + cacheStats
+      : '';
+
+    return [truncateToWidth(line1, width, '…'), line2];
   }
 }
