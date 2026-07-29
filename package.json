@@ -57,10 +57,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "onnxruntime-node"
-    ],
-    "patchedDependencies": {
-      "@earendil-works/pi-tui@0.78.1": "patches/@earendil-works__pi-tui@0.78.1.patch"
-    }
+    ]
   },
   "packageManager": "pnpm@10.33.0"
 }

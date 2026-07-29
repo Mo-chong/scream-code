@@ -62,10 +62,10 @@ export class InjectionManager {
     return this.router;
   }
 
-  async inject(ctx: InjectContext): Promise<void> {
+  async inject(ctx?: InjectContext): Promise<void> {
     const context: InjectContext = {
-      ...ctx,
-      predictedHitRatio: ctx.predictedHitRatio ?? this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
+      ...(ctx ?? {} as InjectContext),
+      predictedHitRatio: ctx?.predictedHitRatio ?? this.agent.fullCompaction?.strategy?.getPredictedHitRatio?.(),
     };
 
     // Step 0: 拦截系统预批准消息 — 优先占 budget 槽

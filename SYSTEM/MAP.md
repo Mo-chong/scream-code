@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/index, status/final]
 keywords: [地图, map, 模块, 文件索引]
-updated: 2026-07-17
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -55,8 +55,9 @@ updated: 2026-07-17
 │   ├─ markit.md 🆕 v0.10.5      — 文档引擎: FetchURL 转 PDF/Office/EPUB → markdown（mammoth/turndown/mupdf）
 │   └─ mcp-server.md              — MCP server配置/工具类型/权重
 
-├─ CLI/TUI
-│   └─ cli-tui.md                 — dispatch→scream-tui→dialog链路
+├─ CLI/TUI/Web
+│   ├─ cli-tui.md                 — dispatch→scream-tui→dialog链路
+│   └─ web-server.md 🆕 v0.11.2  — Vue3 SPA + WebSocket 实时通信（`/web` 命令、三栏工作台、多会话持久化）
 
 ├─ 拦截日志
 │   └─ interception.md            — 环形缓冲区/W驱动采样/磁盘持久化

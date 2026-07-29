@@ -918,6 +918,27 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
 3. `?.` 不防方法签名变化——`obj?.method()` 在 `obj` 存在但 `method` 不存在时一样抛 TypeError
 4. 批量修改时同步更新测试文件的 mock（`requestComponentRender: vi.fn()` → `requestRender: vi.fn()`）
 
+### 上游重构覆盖 fork 增强 — ContentArchive 未及时补回（v0.11.2 合并）
+
+**现象**：合并后 `micro.ts` 的 ContentArchive 存档调用丢失，`grep -c "contentArchive?.archive" micro.ts = 0`。
+
+**根因**：上游 v0.11.2 完全重构了 `micro.ts` 的 `compact()` 方法（`findSupersededPaths` 替代旧增长逻辑）。`git checkout --theirs` 直接覆盖了我们的 ContentArchive 存档增强。口头声明"已补回"但实际没做 Edit。
+
+**解决**：在 `isOversizedTruncatable` 块截断内容前加 `this.agent.contentArchive?.archive('micro:' + toolCallId, textContent, { source: 'microCompact' })`。
+
+**教训**：
+1. 取 theirs 后必须 grep 检查所有 fork 增强是否还在，不能凭记忆说"已补回"
+2. 修复后 grep 验证数值：`grep -c "contentArchive?.archive" micro.ts` 确认 ≥1
+3. LSP.references 查 `contentArchive?.archive` 也会显示该方法的所有调用方
+
+### 上游导出函数缩水 — memory/index.ts 取 ours 保 9 个 tags 导出（v0.11.2 合并）
+
+**现象**：上游将 memory/index.ts 的 tags 导出从 9 个砍到 2 个（只剩 `normalizeTags` + `generateTags`），我们的 `processTags`/`computeTagBudget`/`TAG_CONFIG` 等导出全部丢失。
+
+**解决**：`git checkout --ours` 保留 HEAD 版本，保持 fork 增强的 9 个 tags 导出函数。
+
+**教训**：合并 `memory/index.ts` 时先 diff 双方的导出列表，不要假设上游不会砍导出。如果 exports 差距大，一律取 ours。
+
 
 ## 缓存与上下文管理
 

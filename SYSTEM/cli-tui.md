@@ -145,3 +145,15 @@ function memoBadges(tags: string[] | undefined): string {
 | max thinking effort 选择器 | `components/model-selector/` | model selector 新增 `maxThinkingEffort` 字段 |
 | pi-tui 0.80.14→0.80.19 | `@liutod-scream/pi-tui` | ConPTY 写分块、全转录回放、resize debounce |
 | 组件级动画 tick | `components/chrome/footer.ts` | 自持有 footer 状态定时器，不再依赖全量 TUI 定时器 |
+
+---
+
+## v0.11.2 新增：Web UI
+
+| 元素 | 位置 | 说明 |
+|------|------|------|
+| Web 服务器 | `apps/scream-code/src/web/server.ts` | WebSocket 实时通信，端口可配置 |
+| Vue3 前端 | `apps/scream-code/src/web/frontend/` | SPA 三栏工作台，30+ 组件 |
+| `/web` 命令 | `apps/scream-code/src/cli/run-web.ts` | CLI 入口：`scream web` 启动服务器 |
+| 多会话 | `frontend/src/store/sessions.ts` | 会话切换/持久化 |
+| Goal/Todo 面板 | `frontend/src/components/GoalPanel.vue` | Goal 查看/更新/完成 |

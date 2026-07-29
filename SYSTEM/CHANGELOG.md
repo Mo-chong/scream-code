@@ -2,7 +2,7 @@
 ---
 tags: [type/changelog, status/final, domain/system]
 keywords: [changelog, 开发日志, Phase, CHANGELOG, 更新日志]
-updated: 2026-07-15
+updated: 2026-07-23
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -15,6 +15,44 @@ updated: 2026-07-15
 | 路径标注 [P1] | 每个条目必须含文件路径或行号 | AI 可导航至具体文件 |
 | 时间戳 [P0] | 每个 `###` 必须有日期 | 禁止无日期条目 |
 | 禁止 [P0] | 混写两线 / 无路径 / 无日期 / 概括废话 / 新旧倒置 | 上游倒序、二开正向 |
+
+---
+
+## v0.11.2 — 合并上游 v0.10.5→0.11.2（2026-07-23）
+
+### 重大变更
+- **Web UI 完整引入**：Vue3 SPA + WebSocket 实时通信。包括 `/web` 命令、独立 web CLI、三栏工作台、多会话持久化、Goal/Todo 面板、Markdown/CodeBlock/DiffLines 渲染、权限审批面板等 30+ 组件。新增 `apps/scream-code/src/web/`（~80 文件）
+- **Web MVP**：支持远程连接（port 配置）、Goal/Todo/Approval 面板、连接状态显示、自动重连
+
+### 新功能
+- **Goal 系统增强**：`/goal update` 命令、GoalGrader 改进、3-strike blocked 审计、WriteGoalNote 提示
+- **Shell 输出完整保留**：`ToolResultBuilder.artifactSink` — Bash 工具截断后完整输出写入临时文件，可通过 Read 工具恢复
+- **所有 TUI 组件 freeze 保护**：`packages/agent-core/src/tui/` 添加 freeze 检测，防止死渲染
+
+### 优化
+- pi-tui 0.80.14→0.80.31（4 次升级：tight-mode 窄屏、footer 定时器、resize 优化）
+- memoize token 估算、tail-bias tool output、scan cache、rg-pattern-sanitize
+- Goal 完成提醒（WriteGoalNote → UpdateGoal `complete` 流程）
+
+### 修复
+- Web port 冲突友好提示
+- Markdown 渲染完整（代码块、图片、表格）
+- RPC 协议扩展（updateGoalObjective、getTodos、TodoUpdatedEvent）
+- 多个 TUI 视觉 & 稳定性 bug
+
+### 二开影响
+中高。11 文件冲突。
+
+| 文件 | 策略 |
+|------|------|
+| `footer.ts`, `pulse-wave-loader.ts`, `full.ts`, `context/index.ts`, `turn/index.ts`, `result-builder.ts` | 取 theirs（上游重构，无 fork 依赖） |
+| `bash.ts` | 互补合并（`sanitize: true` + `artifactSink` 合并） |
+| `memory/index.ts` | 取 ours（fork 增强导 9 个 tags 函数，上游只导 2 个） |
+| `memory-write.ts` | 取 ours + 互补（保留 `processTags`，吸收上游 `stripMemoryTags`） |
+| `micro.ts` | 取 theirs + 补回 ContentArchive archive() |
+| `package.json` | 取 theirs + 补回 `pnpm.onlyBuiltDependencies` + `patchedDependencies` |
+
+`system.md`: 零改动。上游无 system.md 变更。fork 增强全部存活。
 
 ---
 
