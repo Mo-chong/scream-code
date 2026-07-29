@@ -37,6 +37,18 @@ cd "$SCRIPT_DIR/apps/scream-code"
 echo "✅ scream-code 构建完成"
 echo ""
 
+# === [3/3] 构建 web 前端资产（Vue3 SPA）===
+echo "━━━ [3/3] 构建 web 前端资产 ━━━"
+cd "$SCRIPT_DIR/apps/scream-code"
+if [ -d "src/web/frontend/node_modules" ] || [ -d "node_modules/vite" ]; then
+  "$NODE" ../../node_modules/vite/bin/vite.js build src/web/frontend 2>/dev/null && \
+  "$NODE" scripts/copy-web-assets.mjs 2>/dev/null && \
+  echo "✅ web 前端构建完成" || echo "⚠️ web 前端构建跳过（可能缺依赖）"
+else
+  echo "⚠️  vite 未安装，跳过 web 前端构建（不影响 CLI 功能）"
+fi
+echo ""
+
 echo "╔═══════════════════════════════════════════╗"
 echo "║  🎉 全部构建完成                          ║"
 echo "║  重启 scream 加载新代码                   ║"
