@@ -152,6 +152,13 @@ export const BUILTIN_SLASH_COMMANDS = [
 
   // ── 集成 ──
   {
+    name: 'web',
+    aliases: ['w'],
+    description: '启动 Web UI（浏览器界面）。用法: /web',
+    priority: 111,
+    availability: 'idle-only',
+  },
+  {
     name: 'mcp',
     aliases: [],
     description: 'registry.mcp_desc',

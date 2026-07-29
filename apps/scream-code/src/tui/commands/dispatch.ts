@@ -8,7 +8,9 @@ import type { ResolvedTheme } from '../theme/colors';
 import {
   getLlmNotSetMessage,
 } from '../constant/scream-tui';
+import { exec } from 'node:child_process';
 import { formatErrorMessage } from '../utils/event-payload';
+import { openUrl } from '../utils/open-url';
 import { parseSlashInput } from './parse';
 import {
   resolveSlashCommandInput,
@@ -313,6 +315,22 @@ async function handleBuiltInSlashCommand(
       return;
     case 'cc-connect':
       await handleChannelCommand(host, args);
+      return;
+    case 'web':
+      // Fork a child process to run `scream web` so the TUI stays interactive.
+      // The web server inherits the same agent-core backend.
+      try {
+        const port = Number(args) || 8080;
+        const child = exec(`"${process.execPath}" "${process.argv[1]}" web --port ${port}`, (err) => {
+          if (err && !err.killed) host.showError(`Web UI crashed: ${err.message}`);
+        });
+        child.unref();
+        host.showStatus(`Web UI: http://localhost:${port}`);
+        // Try to open in default browser
+        openUrl(`http://localhost:${port}`);
+      } catch (e) {
+        host.showError(`启动 Web UI 失败: ${(e as Error).message}`);
+      }
       return;
     case 'compact':
       await handleCompactCommand(host, args);
