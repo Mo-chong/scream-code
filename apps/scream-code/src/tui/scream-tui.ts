@@ -1,6 +1,7 @@
 import {
   type Component,
   type Focusable,
+  setTightMode,
 } from '@liutod-scream/pi-tui';
 import type {
   ApprovalRequest,
@@ -161,6 +162,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   deferUserMessages = false;
   aborted = false;
   private isShuttingDown = false;
+  private tightModeHandler: (() => void) | null = null;
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
   private readonly updatePrefetched: boolean;
@@ -290,6 +292,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   async start(): Promise<void> {
+    this.tightModeHandler = (): void => {
+      setTightMode((process.stdout.columns ?? 80) < 60);
+    };
+    this.tightModeHandler();
+    process.stdout.on('resize', this.tightModeHandler);
     this.lifecycleController.installSignalHandlers();
     try {
       const shouldReplayHistory = await this.initMainTui();
@@ -385,6 +392,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
+    if (this.tightModeHandler !== null) {
+      process.stdout.off('resize', this.tightModeHandler);
+      this.tightModeHandler = null;
+    }
+    setTightMode(false);
     this.lifecycleController.stopCcConnectPolling();
     this.lifecycleController.uninstallSignalHandlers();
     this.aborted = true;
@@ -400,10 +412,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
     this.state.footer.dispose();
-    this.showStatus(t('tui.organizing_memory'), this.state.theme.colors.textDim);
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
     await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
@@ -764,7 +772,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).
-    this.state.terminal.write('\x1b[3J');
+    this.state.terminal.write('\u001B[3J');
     this.transcriptController.clearAndRedraw();
     // Force a full redraw: requestRender(true) resets previousLines so pi-tui
     // can't skip the render by diffing against stale old content.

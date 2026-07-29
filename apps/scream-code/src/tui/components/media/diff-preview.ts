@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import { diffWords } from 'diff';
 
 import type { ColorPalette } from '#/tui/theme/colors';
+import { highlightLines, langFromPath } from './code-highlight';
 
 export type DiffLineKind = 'context' | 'add' | 'delete';
 
@@ -30,6 +31,85 @@ function makeDiffStyles(colors: ColorPalette): DiffStyles {
     gutter: (s) => chalk.hex(colors.diffGutter)(s),
     meta: (s) => chalk.hex(colors.diffMeta)(s),
   };
+}
+
+const ANSI_RE = /\u001B\[[0-9;]*m/;
+const ANSI_RESET_RE = /\u001B\[(?:0|39)m/g;
+
+/**
+ * Extract the leading ANSI SGR prefix a chalk-style color function applies,
+ * e.g. `\x1b[38;2;121;235;0m` for a truecolor hex. Returns `''` when the
+ * function emits no color (chalk level 0 / non-color environment).
+ */
+function extractAnsiPrefix(fn: (s: string) => string): string {
+  const sentinel = '\u0000';
+  const styled = fn(sentinel);
+  const idx = styled.indexOf(sentinel);
+  return idx >= 0 ? styled.slice(0, idx) : '';
+}
+
+/** Visualize leading whitespace: tabs as `->`, leading spaces as `·`. */
+function visualizeIndent(line: string): { text: string; indentEnd: number } {
+  let i = 0;
+  let visual = '';
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '\t') {
+      visual += '->';
+      i++;
+      continue;
+    }
+    if (ch === ' ') {
+      visual += '·';
+      i++;
+      continue;
+    }
+    break;
+  }
+  return { text: visual + line.slice(i), indentEnd: visual.length };
+}
+
+/**
+ * Render a diff line's code with leading-whitespace visualization (tabs as
+ * `->`, spaces as `·`, dimmed) and optional syntax highlighting. Highlighting
+ * runs on the raw code first; indent visualization then runs on the
+ * highlighted string - leading whitespace carries no token color, so it is
+ * still plain and can be replaced and dimmed without disturbing the tokens.
+ *
+ * When highlighting is on and produced token colors, the diff line color is
+ * layered as the base foreground: syntax tokens override it, but every ANSI
+ * reset re-injects the diff color so non-token spans (punctuation, operators,
+ * whitespace) stay green/red instead of falling back to the terminal default.
+ * When highlighting is off (streaming) or produced no token colors, the code
+ * part is colored with the diff line color instead.
+ */
+function renderDiffCode(
+  code: string,
+  colorFn: (s: string) => string,
+  highlight: boolean,
+  lang: string | undefined,
+): string {
+  const source = highlight ? (highlightLines(code, lang)[0] ?? code) : code;
+  const { text, indentEnd } = visualizeIndent(source);
+  const indent = text.slice(0, indentEnd);
+  const rest = text.slice(indentEnd);
+  const dimIndent = indent.length > 0 ? chalk.dim(indent) : indent;
+  if (highlight && ANSI_RE.test(rest)) {
+    // Layer the diff color as the base foreground: syntax tokens override it,
+    // but every ANSI reset re-injects the diff color so non-token spans
+    // (punctuation, operators, whitespace) stay green/red instead of falling
+    // back to the terminal default. Function-form replace avoids any risk of
+    // `$` pattern interpretation in the prefix string.
+    // Note: colorFn must be a foreground-only chalk function (e.g. chalk.hex).
+    // Compound functions (chalk.bold.hex) would leave non-foreground attributes
+    // un-reset by the trailing \x1b[39m.
+    const prefix = extractAnsiPrefix(colorFn);
+    if (prefix.length > 0) {
+      return dimIndent + prefix + rest.replace(ANSI_RESET_RE, (m) => m + prefix) + '\u001B[39m';
+    }
+    return dimIndent + rest;
+  }
+  return dimIndent + colorFn(rest);
 }
 
 /**
@@ -183,6 +263,8 @@ export function renderDiffLines(
   maxLines?: number,
 ): string[] {
   const s = makeDiffStyles(colors);
+  const lang = langFromPath(path);
+  const doHighlight = !isIncomplete && lang !== undefined;
   const diffLines = computeDiffLines(oldText, newText, oldStart ?? 1, newStart ?? 1, isIncomplete);
   const changedLines = diffLines.filter((l) => l.kind !== 'context');
   const added = changedLines.filter((l) => l.kind === 'add').length;
@@ -215,7 +297,11 @@ export function renderDiffLines(
     const line = shown[i]!;
     const marker = line.kind === 'add' ? '+' : '-';
     const color = line.kind === 'add' ? s.add : s.del;
-    output.push(s.gutter(String(line.lineNum).padStart(4) + ' ') + color(marker + ' ' + line.code));
+    output.push(
+      s.gutter(String(line.lineNum).padStart(4) + ' ') +
+        color(`${marker} `) +
+        renderDiffCode(line.code, color, doHighlight, lang),
+    );
     i += 1;
   }
 
@@ -294,11 +380,20 @@ function buildClusters(
   };
 }
 
-function formatDiffRow(line: DiffLine, s: DiffStyles): string {
+function formatDiffRow(
+  line: DiffLine,
+  s: DiffStyles,
+  doHighlight: boolean,
+  lang: string | undefined,
+): string {
   const gutter = s.gutter(String(line.lineNum).padStart(4) + ' ');
-  if (line.kind === 'add') return gutter + s.add('+ ' + line.code);
-  if (line.kind === 'delete') return gutter + s.del('- ' + line.code);
-  return gutter + '  ' + line.code;
+  if (line.kind === 'add') {
+    return gutter + s.add('+ ') + renderDiffCode(line.code, s.add, doHighlight, lang);
+  }
+  if (line.kind === 'delete') {
+    return gutter + s.del('- ') + renderDiffCode(line.code, s.del, doHighlight, lang);
+  }
+  return gutter + '  ' + renderDiffCode(line.code, (x) => x, doHighlight, lang);
 }
 
 /**
@@ -318,6 +413,8 @@ export function renderDiffLinesClustered(
   opts: ClusteredDiffOptions = {},
 ): string[] {
   const s = makeDiffStyles(colors);
+  const lang = langFromPath(path);
+  const doHighlight = !(opts.isIncomplete ?? false) && lang !== undefined;
   const contextLines = opts.contextLines ?? 3;
   const maxLines = opts.maxLines;
   const diffLines = computeDiffLines(oldText, newText, 1, 1, opts.isIncomplete ?? false);
@@ -385,7 +482,7 @@ export function renderDiffLinesClustered(
         i += 2;
         continue;
       }
-      output.push(formatDiffRow(line, s));
+      output.push(formatDiffRow(line, s, doHighlight, lang));
       body++;
       if (line.kind !== 'context') shownChanges++;
       prevEnd = i;

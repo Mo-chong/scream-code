@@ -14,12 +14,14 @@ function createMockHost(): SessionEventHost {
   const streamingUI = {
     setStep: vi.fn(),
     setTurnId: vi.fn(),
+    resetLiveText: vi.fn(),
     resetToolUi: vi.fn(),
     flushNow: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),
     finalizeAssistantStream: vi.fn(),
     finalizeTurn: vi.fn(),
     registerToolCall: vi.fn(),
+    completeToolResult: vi.fn(),
     scheduleFlush: vi.fn(),
     appendAssistantDelta: vi.fn(),
     appendThinkingDelta: vi.fn(),
@@ -193,6 +195,25 @@ describe('SessionEventHandler', () => {
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
   });
 
+  it('resets live text and tool UI on step retrying', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.retrying'),
+        turnId: 1,
+        attempt: 1,
+        nextAttempt: 2,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.streamingUI.resetLiveText).toHaveBeenCalled();
+    expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
+    expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2 });
+  });
+
   it('auto-drains queued messages into a boundary steer on step completed', () => {
     const host = createMockHost();
     const steer = vi.fn().mockResolvedValue(undefined);
@@ -266,6 +287,47 @@ describe('SessionEventHandler', () => {
 
     expect(steer).not.toHaveBeenCalled();
     expect(host.state.queuedMessages).toHaveLength(1);
+  });
+
+  it('updates the todo panel only from core todo.updated snapshots', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const setTodoList = vi.mocked(host.streamingUI.setTodoList);
+    const completeToolResult = vi.mocked(host.streamingUI.completeToolResult);
+    completeToolResult.mockReturnValue({
+      id: 'call_todo',
+      name: 'TodoList',
+      args: { todos: [{ title: 'stale tool args', status: 'pending' }] },
+    });
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        turnId: 1,
+        toolCallId: 'call_todo',
+        output: 'Todo list updated.',
+        isError: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(setTodoList).not.toHaveBeenCalled();
+
+    handler.handleEvent(
+      {
+        ...baseEvent('todo.updated'),
+        todos: [
+          { title: 'core snapshot', status: 'in_progress', phase: 'Core' },
+          { title: 'next step', status: 'pending', phase: 'TUI' },
+        ],
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(setTodoList).toHaveBeenCalledTimes(1);
+    expect(setTodoList).toHaveBeenCalledWith([
+      { title: 'core snapshot', status: 'in_progress', phase: 'Core' },
+      { title: 'next step', status: 'pending', phase: 'TUI' },
+    ]);
   });
 
   it('accumulates subagent token usage by profile name', () => {

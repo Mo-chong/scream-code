@@ -38,6 +38,7 @@ import type {
   UpdateSessionMetadataPayload,
   CreateGoalPayload,
   UpdateGoalStatusPayload,
+  UpdateGoalObjectivePayload,
   SetGoalBudgetPayload,
 } from '#/rpc';
 import type { PromisableMethods } from '#/utils/types';
@@ -275,12 +276,20 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).updateGoalStatus(payload);
   }
 
+  updateGoalObjective({ agentId, ...payload }: AgentScopedPayload<UpdateGoalObjectivePayload>) {
+    return this.getAgent(agentId).updateGoalObjective(payload);
+  }
+
   cancelGoal({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return this.getAgent(agentId).cancelGoal(payload);
   }
 
   getGoal({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return this.getAgent(agentId).getGoal(payload);
+  }
+
+  getTodos({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).getTodos(payload);
   }
 
   setGoalBudget({ agentId, ...payload }: AgentScopedPayload<SetGoalBudgetPayload>) {

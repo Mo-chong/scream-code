@@ -16,6 +16,7 @@ import {
   type SDKAPI,
   type SDKRPCClient,
   type SessionMeta,
+  type TodoItem,
   type ToolCallRequest,
   type ToolCallResponse,
 } from '@scream-code/agent-core';
@@ -125,6 +126,10 @@ export interface CreateGoalRpcInput extends SessionIdRpcInput {
 
 export interface UpdateGoalStatusRpcInput extends SessionIdRpcInput {
   readonly status: 'active' | 'complete' | 'paused' | 'blocked';
+}
+
+export interface UpdateGoalObjectiveRpcInput extends SessionIdRpcInput {
+  readonly objective: string;
 }
 
 export interface SetGoalBudgetRpcInput extends SessionIdRpcInput {
@@ -356,6 +361,15 @@ export class SDKRpcClient {
     });
   }
 
+  async updateGoalObjective(input: UpdateGoalObjectiveRpcInput): Promise<import('@scream-code/agent-core').GoalSnapshotData> {
+    const rpc = await this.getRpc();
+    return rpc.updateGoalObjective({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      objective: input.objective,
+    });
+  }
+
   async cancelGoal(input: SessionIdRpcInput): Promise<import('@scream-code/agent-core').GoalSnapshotData | null> {
     const rpc = await this.getRpc();
     return rpc.cancelGoal({
@@ -367,6 +381,14 @@ export class SDKRpcClient {
   async getGoal(input: SessionIdRpcInput): Promise<import('@scream-code/agent-core').GetGoalResult> {
     const rpc = await this.getRpc();
     return rpc.getGoal({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async getTodos(input: SessionIdRpcInput): Promise<readonly TodoItem[]> {
+    const rpc = await this.getRpc();
+    return rpc.getTodos({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
     });

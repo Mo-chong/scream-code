@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD, SYSTEM-INDEX, 索引同步]
-updated: 2026-07-17
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -182,3 +182,66 @@ updated: YYYY-MM-DD
 | **CRLF 修复** | `.gitattributes` + git config | 全仓库 LF 归一化 |
 | **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表 |
 | **Phase42d 说明书查缺补漏** | `context-management.md` / `turn-control.md` / `injection-system.md` / `architecture-overview.md` | 补 SnipHinter+Checkpoint 文档+edit_error_fix 变体 |
+
+## 5. system.md 维护规则 [P0]
+
+上游合并时 `packages/agent-core/src/profile/default/system.md` 的特殊保护规则。
+
+### 5.1 基本原则
+
+| 规则 | 说明 |
+|------|------|
+| **永不允许上游全量覆盖** | 本地 system.md 是定制精简版（~234 行），上游是通用版（~2000 行含模板）。全量覆盖 = 丢失 `[Pn]` 权重体系 + CONTRACT + 紧凑记号法 |
+| **必须逐段对比吸收** | 不取 ours 也不取 theirs。每段独立判断：HEAD 保留 + 上游吸收 + 都不留 |
+| **吸收标准：AI 消费价值** | 每段内容用四轴评分：注意力 / 防幻觉 / 防降智 / 能力提升。不达标的段落放弃 |
+
+### 5.2 四轴评估框架
+
+```
+| 维度 | 评分说明 | 高分信号 |
+|------|---------|---------|
+| 注意力 | 能否让 AI 更快锁定关键决策点 | `[P0]` 标记、禁令式短句、"Never" 句式 |
+| 防幻觉 | 能否阻止 AI 编造/猜测/跳过验证 | "Never fabricate"、完整验证流程、不可跳过步骤 |
+| 防降智 | 能否阻止 AI 偷懒/走捷径/重复错误 | 完整决策树、"No substitute commands"、失败处理流程 |
+| 能力提升 | 能否让 AI 做更多/更好的事 | Fusion Plan 指南、Memory vs Knowledge 对比、子代理详细指引 |
+```
+
+### 5.3 本地不可替换资产
+
+以下内容为本地定制，上游必无，永不可丢弃：
+
+- **`<format>` 紧凑记号法**（`key: value — definition | A → B → C — flow`）— 注意力引导核心
+- **`[P0][P1][P2]` 优先级权重体系** — 上游全是散文，无权重标记
+- **`# CONTRACT [P0]`** — 防幻第一盾牌，上游无此章节
+- **`# Engineering judgment [P0]`** — 保守决策框架，上游无
+- **`## Tool rules [P1]` + `## Tool mapping [P1]`** — 工具限制规则，格式更优
+- **`## Tool reference [P2]`** — 上游无此参考表
+
+### 5.4 上游值得吸收的内容类型
+
+合并时发现以下类型值得吸收（按价值排序）：
+
+| 优先级 | 内容类型 | 示例 |
+|--------|---------|------|
+| 高 | **完整验证协议** | Verification Protocol（何时验/怎么验/失败重试/去重） |
+| 高 | **结构化交付格式** | Delivering Results（一结果二文件三验证四遗留） |
+| 高 | **Memory vs Knowledge 对比** | "sticky notes vs reference library" |
+| 中 | **子代理详细指南** | oracle/writer 的适用场景描述 |
+| 中 | **WolfPack/Fusion Plan** | 完整使用条件与示例 |
+| 低 | **AGENTS.md 哲学** | 解释性内容，对 AI 行为无直接影响 |
+
+### 5.5 v0.10.5 成功经验
+
+合并 v0.10.1→v0.10.5 时上游 system.md 重写了 ~388 行（原来 `# Role [P0]` 一行扩展到完整 DIY/Delegate 决策框架 + Prompt and Tool Use + Available Subagents + Verification Protocol + Memory Memos + 知识库 + 编码指南 + 环境等 15 个章节）。
+
+**执行过程**：
+1. 取出两版全文（HEAD 234 行 / 上游 388 行冲突区），逐段对比四轴评分
+2. 列出"不可替换资产"（HEAD 独有）和"值得吸收"（上游高价值）两张表
+3. 保留 HEAD 全部 234 行骨架，不丢失任何 `[Pn]` 标记和 CONTRACT
+4. 插入上游高价值内容：Delivering Results（新增章节）、Verification 增强（决策树 + 不降级规则）、Fusion Plan、Memory vs Knowledge 对比、Subagents 补充
+5. 最终 257 行零冲突
+
+**关键教训**：
+- 控制行数不是目的，AI 消费质量才是唯一标准
+- "不取 ours/不取 theirs" 的逐段策略比二选一多花 30% 时间但产出质量高一个量级
+- 四轴评分框架是可复用的，以后每次上游合并 system.md 都按这个流程来

@@ -4,10 +4,8 @@ import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
-import { assertWireFormat, project } from './projector';
-import { stabilizePrefix } from './prefix-stabilizer';
-import { flags } from '../../flags';
-import { statSync } from 'node:fs';
+import { messageFingerprint, stablePrefixLength } from './prefix-fingerprint';
+import { project } from './projector';
 import {
   USER_PROMPT_ORIGIN,
   type AgentContextData,
@@ -48,20 +46,21 @@ export class ContextMemory {
   private openSteps: Map<string, ContextMessage> = new Map();
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
-  /** Number of turns where micro-compaction actually reduced messages. Exposed via getMetrics(). */
-  private _microCompactCount = 0;
-  /** Number of turns where prefix stabilizer did not need to mutate the prefix. Exposed via getMetrics(). */
-  private _stabilizeHitCount = 0;
+
+  /**
+   * Per-message fingerprints captured from the last message list handed to
+   * the LLM via {@link messagesForLLM}. Used to measure prefix stability
+   * across calls: a provider prompt cache only hits when the leading
+   * messages are byte-identical to the previous request, so the length of
+   * the matching prefix here approximates the cacheable prefix length.
+   *
+   * Reset on {@link clear}; a compaction naturally produces a 0-length
+   * stable prefix (the summary replaces the head), which is the correct
+   * cache-break signal rather than a reset.
+   */
+  private lastSentFingerprints: string[] = [];
 
   constructor(protected readonly agent: Agent) {}
-
-  /** Returns runtime pipeline counters (micro-compact, prefix-stabilize) for observability. */
-  getMetrics(): { microCompactCount: number; stabilizeHitCount: number } {
-    return {
-      microCompactCount: this._microCompactCount,
-      stabilizeHitCount: this._stabilizeHitCount,
-    };
-  }
 
   snapshot(): ContextMemorySnapshot {
     return {
@@ -95,134 +94,14 @@ export class ContextMemory {
     });
   }
 
-  /**
-   * Remove all system-reminder messages whose text content contains a given prefix.
-   * Skips protected messages. Used by updatePersistentSummary to prevent
-   * tail decay from old [summary] messages.
-   */
-  removeSystemRemindersByPrefix(prefix: string): void {
-    for (let i = this._history.length - 1; i >= 0; i--) {
-      const msg = this._history[i]!;
-      if (msg.protected) continue;
-      const content = msg.content;
-      const text = typeof content === 'string'
-        ? content
-        : (Array.isArray(content) ? (content as any[]).find((p: any) => p.type === 'text')?.text ?? '' : '');
-      if (text.includes(prefix)) {
-        this._history.splice(i, 1);
-      }
-    }
-  }
-
-  appendSystemReminder(content: string, origin: PromptOrigin, isProtected?: boolean): void {
+  appendSystemReminder(content: string, origin: PromptOrigin): void {
     const text = `<system-reminder>\n${content}\n</system-reminder>`;
-    // 合并注入：检查 _history / deferredMessages 最后一条是否也是 user role system-reminder，
-    // 是则追加到已有内容，避免连续多条 user role 违反 LLM API 交替约束。
-    const lastMsg = this.deferredMessages.length > 0
-      ? this.deferredMessages[this.deferredMessages.length - 1]
-      : this._history[this._history.length - 1];
-    if (lastMsg?.role === 'user' && lastMsg.content[0]?.type === 'text' && lastMsg.content[0].text.startsWith('<system-reminder>')) {
-      lastMsg.content[0].text += '\n' + text;
-      return;
-    }
     this.appendMessage({
       role: 'user',
       content: [{ type: 'text', text }],
       toolCalls: [],
       origin,
-      ...(isProtected ? { protected: true } : {}),
     });
-  }
-
-  /**
-   * Phase4 注意力管控：从尾部搜索最后一条 system-reminder，在其后插入新提醒（利用 primacy effect）。
-   * 若无任何 system-reminder，则追加到 history 最前面。
-   */
-  insertSystemReminderAtHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
-    const text = `<system-reminder>\n${content}\n</system-reminder>`;
-    const insertMsg: ContextMessage = {
-      role: 'user',
-      content: [{ type: 'text', text }],
-      toolCalls: [],
-      origin,
-      ...(isProtected ? { protected: true as const } : {}),
-    };
-    // 从尾部向前找最后一条 system-reminder
-    let lastReminderIdx = -1;
-    for (let i = this._history.length - 1; i >= 0; i--) {
-      const c = this._history[i]!.content;
-      const firstPart = Array.isArray(c) ? (c[0] as { text?: string }) : undefined;
-      if (firstPart?.text?.includes('<system-reminder>')) {
-        lastReminderIdx = i;
-        break;
-      }
-    }
-    if (lastReminderIdx === -1) {
-      this._history.unshift(insertMsg);
-    } else {
-      this._history.splice(lastReminderIdx + 1, 0, insertMsg);
-    }
-  }
-
-  /**
-   * Phase4 注意力管控：在历史列表前 1/3 位置插入提醒（避免 U 形死区，near_head 位置）。
-   */
-  insertSystemReminderAtNearHead(content: string, origin: PromptOrigin, isProtected?: boolean): void {
-    const text = `<system-reminder>\n${content}\n</system-reminder>`;
-    const insertMsg: ContextMessage = {
-      role: 'user',
-      content: [{ type: 'text', text }],
-      toolCalls: [],
-      origin,
-      ...(isProtected ? { protected: true as const } : {}),
-    };
-    const nearHeadPos = Math.max(1, Math.floor(this._history.length / 3));
-    this._history.splice(nearHeadPos, 0, insertMsg);
-  }
-
-  // ─── Context Facts (Phase B') ───────────────────────────────────────
-  private _contextFacts: Map<string, { value: string; level: string }> = new Map();
-
-  /** Record a fact for the aggregated [Context Facts] block.
-   *  Called by injectors to publish key-value pairs instead of
-   *  (or alongside) direct appendSystemReminder calls.
-   *  Facts are cleared at the start of each dispatch cycle. */
-  recordFact(key: string, value: string, level: string = 'info'): void {
-    this._contextFacts.set(key, { value, level });
-  }
-
-  /** Format and clear all collected facts. Returns the formatted block
-   *  text or null if no facts were recorded. */
-  flushContextFacts(): string | null {
-    if (this._contextFacts.size === 0) return null;
-    const lines: string[] = ['[Context Facts]'];
-    for (const [key, { value, level }] of this._contextFacts) {
-      const icon =
-        level === 'error' ? '  ⚠' :
-        level === 'warn'  ? '  •' :
-        '   ';
-      lines.push(`${icon} ${key}: ${value}`);
-    }
-    this._contextFacts.clear();
-    return lines.join('\n');
-  }
-
-  /**
-   * Phase22.2: 将 history 中 origin 为 S/A 级的 system-reminder 标记为 protected，
-   * 使其在 compaction 时被跳过。
-   */
-  protectHighLevelReminders(highOrigins: Set<string>): void {
-    for (const msg of this._history) {
-      const originStr = msg.origin !== undefined ? String(msg.origin) : '';
-      if (
-        msg.role === 'user' &&
-        originStr.length > 0 &&
-        highOrigins.has(originStr) &&
-        !msg.protected
-      ) {
-        (msg as { protected?: boolean }).protected = true;
-      }
-    }
   }
 
   clear(): void {
@@ -233,8 +112,7 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
-    this._microCompactCount = 0;
-    this._stabilizeHitCount = 0;
+    this.lastSentFingerprints = [];
     this.agent.injection.onContextClear();
     this.agent.emitStatusUpdated();
   }
@@ -303,17 +181,24 @@ export class ContextMemory {
 
   }
 
+  /**
+   * Apply a full compaction summary.
+   *
+   * Prefix-stability note: this is a **replaceHead** operation, not a
+   * replaceTail. The first `compactedCount` messages are collapsed into a
+   * single summary message; the trailing recent messages are preserved
+   * verbatim. This necessarily breaks the provider prompt cache for the
+   * whole prefix (the summary is new content), which is inherent to
+   * summarization and cannot be avoided. After compaction the new prefix
+   * `[summary, ...tail]` is stable again until the next compaction or
+   * micro-compaction cutoff advance, so subsequent append-only steps resume
+   * hitting the cache.
+   */
   applyCompaction(summary: CompactionResult): void {
     this.agent.records.logRecord({
       type: 'context.apply_compaction',
       ...summary,
     });
-    // 压缩后清理孤儿 tool 消息——它们对应的 tool_calls 已被压缩掉，
-    // 保留会导致 Anthropic API 400: "role:'tool' without preceding tool_calls"
-    let remaining = this._history.slice(summary.compactedCount);
-    while (remaining.length > 0 && remaining[0]!.role === 'tool') {
-      remaining = remaining.slice(1);
-    }
     this._history = [
       {
         role: 'assistant',
@@ -321,7 +206,7 @@ export class ContextMemory {
         toolCalls: [],
         origin: { kind: 'compaction_summary' },
       },
-      ...remaining,
+      ...this._history.slice(summary.compactedCount),
     ];
     // Prune open-step mappings by reference instead of clearing them all:
     // a step that is still in flight lives at the history tail and survives
@@ -340,8 +225,6 @@ export class ContextMemory {
     this.agent.injection.onContextCompacted(summary.compactedCount);
     this.agent.emitStatusUpdated();
     this.agent.microCompaction.reset();
-    // Phase22.2: compaction 后重新保护 S/A 级提醒
-    this.protectHighLevelReminders(new Set(['system', 'scream_code']));
   }
 
   data(): AgentContextData {
@@ -368,24 +251,76 @@ export class ContextMemory {
     // Apply micro-compaction before projecting: old tool results are
     // truncated to a short marker, freeing context tokens without an
     // LLM call. Detect() is a no-op when the micro-compaction flag is
-    // off (SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0) or when the
-    // BATCH_SIZE gate has not been reached
-    // (registry numDefault=8, override via SCREAM_CODE_MICRO_BATCH_SIZE).
+    // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
+    //
+    // Prefix-stability note: detect() only ever advances the cutoff
+    // forward (never retreats), and compact() replaces old tool results
+    // with a stable marker that does not change once written. So a given
+    // message's bytes change at most once (full -> marker) and then stay
+    // fixed. The transition is a one-time cache break; steady-state
+    // append-only turns still hit the cache. LLM-bound callers should
+    // prefer {@link messagesForLLM} which adds prefix-stability
+    // observability on top of this getter.
     this.agent.microCompaction.detect();
-    const lenBeforeCompact = this.history.length;
-    let msgs: readonly ContextMessage[] = this.agent.microCompaction.compact(this.history);
-    if (msgs.length < lenBeforeCompact) ++this._microCompactCount;
-    // Prefix stabilisation: replace volatile fields (timestamps, UUIDs)
-    // in system-role messages so the KV-cache prefix is stable across turns.
-    // Compare serialized form — stabilizePrefix never changes array length
-    // (it operates on message content, not structure), so a length check
-    // would always increment and provide no signal.
-    const serializedBeforeStab = JSON.stringify(msgs);
-    msgs = stabilizePrefix(msgs);
-    if (JSON.stringify(msgs) === serializedBeforeStab) ++this._stabilizeHitCount;
-    const result = project(msgs);
-    assertWireFormat(result);
-    return result;
+    return project(this.agent.microCompaction.compact(this.history));
+  }
+
+  /**
+   * Build the message list for an LLM call, with prefix-stability
+   * observation.
+   *
+   * This is the LLM-bound counterpart of the {@link messages} getter: it
+   * runs the same detect + compact + project pipeline, then fingerprints
+   * the result and logs how much of the prefix survived since the last
+   * call. A stable prefix length equal to the previous message count means
+   * the provider prompt cache should hit; a smaller value means an early
+   * message mutated (compaction summary, micro-compaction truncation, or a
+   * projection repair) and the cache broke from that index.
+   *
+   * Behavior is otherwise identical to the getter - this is observation
+   * only, it does not alter the messages returned.
+   */
+  messagesForLLM(): Message[] {
+    // detect() is also run by fullCompaction.beforeStep at the step
+    // boundary; mirroring it here keeps this path behavior-identical to
+    // the `messages` getter when called directly (e.g. tests).
+    this.agent.microCompaction.detect();
+    const messages = project(this.agent.microCompaction.compact(this.history));
+    this.observePrefixStability(messages);
+    return messages;
+  }
+
+  /**
+   * Compare the projected messages against the last LLM-bound batch and
+   * log the stable-prefix length. Pure observation: no state that affects
+   * message content is mutated, only the fingerprint baseline used by the
+   * next call's comparison.
+   */
+  private observePrefixStability(messages: readonly Message[]): void {
+    const prev = this.lastSentFingerprints;
+    const stable = stablePrefixLength(prev, messages);
+    // Capture this call's fingerprints for the next comparison. Computed
+    // unconditionally so the baseline always reflects the latest sent
+    // bytes, even when nothing is logged.
+    this.lastSentFingerprints = messages.map(messageFingerprint);
+
+    // First call in a session has no baseline; nothing to compare.
+    if (prev.length === 0) return;
+
+    const appended = messages.length - prev.length;
+    const prefixIntact = stable >= prev.length;
+    // Only log when the prefix broke (the interesting event). A pure
+    // append (prefixIntact && appended > 0) is the cache-friendly happy
+    // path and would just noise the log.
+    if (prefixIntact) return;
+
+    this.agent.log.debug('prefix-stability: provider prompt cache prefix broke', {
+      stablePrefixLength: stable,
+      prevMessageCount: prev.length,
+      currentMessageCount: messages.length,
+      appendedSinceLast: appended,
+      breakIndex: stable,
+    });
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {
@@ -438,35 +373,6 @@ export class ContextMemory {
         return;
       }
       case 'tool.result': {
-        // Point A: 存档原始工具输出（截断/压缩前保留完整内容）
-        // gated by content-archive flag (default: true)
-        if (flags.enabled('content-archive')) {
-          // 查找对应的 tool.call 以获取工具名称和参数（用于文件版本追踪）
-          let filePath: string | undefined;
-          let fileMtime: number | undefined;
-          let fileSize: number | undefined;
-          for (const [, step] of this.openSteps) {
-            const tc = step.toolCalls.find(c => c.id === event.toolCallId);
-            if (tc) {
-              const args = typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments;
-              const pathArg: string | undefined = args?.path;
-              if (pathArg && (tc.name === 'Read' || tc.name === 'Edit' || tc.name === 'Write')) {
-                try {
-                  const st = statSync(pathArg);
-                  filePath = pathArg;
-                  fileMtime = st.mtimeMs;
-                  fileSize = st.size;
-                } catch { /* stat 失败—跳过文件信息 */ }
-              }
-              break;
-            }
-          }
-          this.agent.contentArchive?.archive(
-            `tool:${event.toolCallId}`,
-            event.result.output,
-            { source: 'toolResult', filePath, fileMtime, fileSize },
-          );
-        }
         const message = createToolMessage(event.toolCallId, toolResultOutputForModel(event.result));
         this.pushHistory({
           ...message,
@@ -545,51 +451,47 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
   return truncateContentParts(output);
 }
 
-/**
- * Collapse consecutive duplicate lines in a string, keeping only the first
- * occurrence of each run.  This saves tokens on repetitive output patterns
- * (progress bars, polling loops, repeated error messages).
- */
-function collapseDuplicateLines(text: string, threshold: number = 3): string {
-  const lines = text.split('\n');
-  const out: string[] = [];
-  let runCount = 1;
-  for (let i = 0; i < lines.length; i++) {
-    if (i > 0 && lines[i] === lines[i - 1]) {
-      runCount++;
-      if (runCount > threshold) continue; // skip this duplicate
-    } else {
-      runCount = 1;
-    }
-    out.push(lines[i]!);
-  }
-  return out.join('\n');
-}
-
-/** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS. */
+/** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS.
+ *  Tail-biased: keeps 25% head + 75% tail so error messages and test
+ *  failures (usually at the end) survive truncation. */
 function truncateToolOutput(text: string): string {
-  // P1-3: collapse consecutive duplicate lines (keep first N, skip rest)
-  text = collapseDuplicateLines(text);
   if (estimateTokens(text) <= MAX_TOOL_RESULT_TOKENS) return text;
-  // Walk backwards to find a safe cut point within budget, reserving room
-  // for the truncation notice.
   const noticeTokens = estimateTokens(TOOL_TRUNCATION_NOTICE);
   const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
   if (budget <= 0) return TOOL_TRUNCATION_NOTICE.trim();
 
-  // Character-level truncation: preserve the first ~budget tokens' worth of text.
-  let kept = '';
-  let tokens = 0;
+  const headBudget = Math.floor(budget * 0.25);
+  const tailBudget = budget - headBudget;
+
+  // Collect head (forward iteration).
+  let head = '';
+  let headTokens = 0;
   for (const ch of text) {
     const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
-    if (tokens + chTokens > budget) break;
-    kept += ch;
-    tokens += chTokens;
+    if (headTokens + chTokens > headBudget) break;
+    head += ch;
+    headTokens += chTokens;
   }
-  return kept + TOOL_TRUNCATION_NOTICE;
+
+  // Collect tail (backward iteration, collect then reverse to avoid O(n²) prepend).
+  const reversed = [...text].toReversed();
+  const tailChars: string[] = [];
+  let tailTokens = 0;
+  for (const ch of reversed) {
+    const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+    if (tailTokens + chTokens > tailBudget) break;
+    tailChars.push(ch);
+    tailTokens += chTokens;
+  }
+  const tail = tailChars.toReversed().join('');
+
+  const omitted = Math.max(0, Math.round(estimateTokens(text) - headTokens - tailTokens));
+  const notice = `\n[content truncated - ~${omitted} tokens omitted]\n`;
+  return head + notice + tail;
 }
 
-/** Truncate oversized text parts in a ContentPart array. */
+/** Truncate oversized text parts in a ContentPart array.
+ *  Tail-biased: keeps 25% head + 75% tail. */
 function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
   let totalTokens = 0;
   for (const p of parts) {
@@ -601,34 +503,75 @@ function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
   const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
   if (budget <= 0) return [{ type: 'text', text: TOOL_TRUNCATION_NOTICE.trim() }];
 
-  const result: ContentPart[] = [];
-  let used = 0;
-  for (const p of parts) {
+  const headBudget = Math.floor(budget * 0.25);
+  const tailBudget = budget - headBudget;
+
+  // Forward pass: collect head parts.
+  const headParts: ContentPart[] = [];
+  let headUsed = 0;
+  let headEnd = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
     if (p.type !== 'text') {
-      result.push(p);
+      headParts.push(p);
+      headEnd = i + 1;
       continue;
     }
     const partTokens = estimateTokens(p.text);
-    if (used + partTokens <= budget) {
-      result.push(p);
-      used += partTokens;
+    if (headUsed + partTokens <= headBudget) {
+      headParts.push(p);
+      headUsed += partTokens;
+      headEnd = i + 1;
     } else {
-      // Partial truncation of this text part.
-      const remaining = budget - used;
-      let kept = '';
-      let t = 0;
-      for (const ch of p.text) {
-        const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
-        if (t + chTokens > remaining) break;
-        kept += ch;
-        t += chTokens;
+      const remaining = headBudget - headUsed;
+      if (remaining > 0) {
+        let kept = '';
+        let t = 0;
+        for (const ch of p.text) {
+          const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+          if (t + chTokens > remaining) break;
+          kept += ch;
+          t += chTokens;
+        }
+        if (kept.length > 0) headParts.push({ type: 'text', text: kept });
       }
-      if (kept.length > 0) result.push({ type: 'text', text: kept });
       break;
     }
   }
-  result.push({ type: 'text', text: TOOL_TRUNCATION_NOTICE });
-  return result;
+
+  // Backward pass: collect tail parts (from end, skipping head range).
+  const tailParts: ContentPart[] = [];
+  let tailUsed = 0;
+  for (let i = parts.length - 1; i >= headEnd; i--) {
+    const p = parts[i]!;
+    if (p.type !== 'text') {
+      tailParts.unshift(p);
+      continue;
+    }
+    const partTokens = estimateTokens(p.text);
+    if (tailUsed + partTokens <= tailBudget) {
+      tailParts.unshift(p);
+      tailUsed += partTokens;
+    } else {
+      const remaining = tailBudget - tailUsed;
+      if (remaining > 0) {
+        const chars = [...p.text];
+        let kept = '';
+        let t = 0;
+        for (let j = chars.length - 1; j >= 0; j--) {
+          const chTokens = chars[j]!.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+          if (t + chTokens > remaining) break;
+          kept = chars[j]! + kept;
+          t += chTokens;
+        }
+        if (kept.length > 0) tailParts.unshift({ type: 'text', text: kept });
+      }
+      break;
+    }
+  }
+
+  const omitted = Math.max(0, Math.round(totalTokens - headUsed - tailUsed));
+  return [...headParts, { type: 'text', text: `[content truncated - ~${omitted} tokens omitted]` }, ...tailParts];
 }
 
 function isEmptyOutputText(output: string): boolean {

@@ -538,11 +538,17 @@ readonly contentArchive: ContentArchive;
         // status === 'active'
         return this.goal.resumeGoal({}, 'user');
       },
+      updateGoalObjective: async (payload) => {
+        return this.goal.updateObjective({ objective: payload.objective }, 'user');
+      },
       cancelGoal: async () => {
         return this.goal.cancelGoal('user');
       },
       getGoal: () => {
         return this.goal.getGoal();
+      },
+      getTodos: () => {
+        return this.tools.getTodos();
       },
       setGoalBudget: async (payload) => {
         const { value, unit } = payload;

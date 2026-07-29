@@ -27,16 +27,18 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { isAbortError } from '../../../loop/errors';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { isSensitiveFile, SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../policies/sensitive';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { ensureRgPath, rgUnavailableMessage } from '../../support/rg-locator';
+import { isRegexSyntaxError, sanitizeRgPattern } from '../../support/rg-pattern-sanitize';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { ToolResultBuilder } from '../../support/result-builder';
 import type { ToolResultDisplay } from '../../display';
 import type { WorkspaceConfig } from '../../support/workspace';
-import GREP_DESCRIPTION from './grep.md';
+import grepDescriptionTemplate from './grep.md';
 
 export const GrepInputSchema = z.object({
   pattern: z.string().describe('Regular expression to search for.'),
@@ -173,6 +175,10 @@ const SENSITIVE_GLOBS_TO_EXCLUDE = [
 // line-oriented output without NUL delimiters.
 const CONTENT_LINE_RE = /^(.*?)([:-])(\d+)\2/;
 
+const GREP_DESCRIPTION = renderPrompt(grepDescriptionTemplate, {
+  DEFAULT_HEAD_LIMIT,
+});
+
 export class GrepTool implements BuiltinTool<GrepInput> {
   readonly name = 'Grep' as const;
   readonly description = GREP_DESCRIPTION;
@@ -234,6 +240,40 @@ export class GrepTool implements BuiltinTool<GrepInput> {
         signal,
       );
       if (runResult.kind === 'tool-error') return runResult.result;
+    }
+
+    // Regex syntax error (e.g. `fetchFoo(`, `${platform}`) -> retry once with
+    // --fixed-strings so literal fragment searches succeed without erroring.
+    // If the fallback also fails, keep the original result so the user sees
+    // the regex parse error from the first attempt (not an empty stderr from
+    // the consumed fallback stream).
+    if (
+      runResult.exitCode !== 0 &&
+      runResult.exitCode !== 1 &&
+      !runResult.timedOut &&
+      isRegexSyntaxError(runResult.stderrText)
+    ) {
+      const fallback = await runRipgrepOnce(
+        this.jian,
+        buildRgArgs(rgPath, args, searchPaths, false, true),
+        signal,
+      );
+      if (fallback.kind === 'tool-error') return fallback.result;
+      if (shouldRetryRipgrepEagain(fallback)) {
+        const retry = await runRipgrepOnce(
+          this.jian,
+          buildRgArgs(rgPath, args, searchPaths, true, true),
+          signal,
+        );
+        if (retry.kind === 'tool-error') return retry.result;
+        if (retry.exitCode === 0 || retry.exitCode === 1) {
+          runResult = retry;
+        }
+      } else if (fallback.exitCode === 0 || fallback.exitCode === 1) {
+        runResult = fallback;
+      }
+      // else: fallback also failed - runResult retains the original regex
+      // error so the user sees the parse error, not an empty fallback stderr.
     }
 
     const { exitCode, stderrText, bufferTruncated, stderrTruncated, timedOut } = runResult;
@@ -353,7 +393,7 @@ export class GrepTool implements BuiltinTool<GrepInput> {
 
     const builder = new ToolResultBuilder();
     builder.write(combined);
-    const result = builder.ok(sideChannelMessages.join('\n'));
+    const result = await builder.ok(sideChannelMessages.join('\n'));
     const display = buildSearchResultsDisplay(args, limited, mode, contentIncludesLineNumbers);
     if (display === undefined) return result;
     if (result.isError === true) return result;
@@ -640,10 +680,14 @@ function buildRgArgs(
   args: GrepInput,
   searchPaths: readonly string[],
   singleThreaded = false,
+  literal = false,
 ): string[] {
   const cmd: string[] = [rgPath];
   if (singleThreaded) cmd.push('-j', '1');
   cmd.push('--hidden');
+  // `--fixed-strings` treats the pattern as a literal string. Used by the
+  // fallback path when the original regex pattern triggers a syntax error.
+  if (literal) cmd.push('--fixed-strings');
   const mode = args.output_mode ?? 'files_with_matches';
   // `content` mode returns matching lines verbatim. Capping columns here would
   // make rg replace any line wider than the cap with a placeholder, silently
@@ -694,7 +738,11 @@ function buildRgArgs(
   // tool default", head_limit=0 means "unlimited", while `rg --max-count 0`
   // means "zero matches per file". Pagination happens in post-processing.
 
-  cmd.push('--', args.pattern, ...searchPaths);
+  // Sanitize braces that cannot form a valid quantifier so common literal
+  // fragments like `${platform}` do not trigger a regex syntax error. Skipped
+  // in literal mode where the pattern is treated as a plain string anyway.
+  const pattern = literal ? args.pattern : sanitizeRgPattern(args.pattern);
+  cmd.push('--', pattern, ...searchPaths);
   return cmd;
 }
 

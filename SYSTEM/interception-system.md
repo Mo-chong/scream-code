@@ -3,7 +3,7 @@ tags: [type/reference, domain/interception, status/final]
 keywords: [拦截, interception, 决策, 优先级, 根因合并, InterceptionManager]
 updated: 2026-07-12
 ---
-<!-- maintain: 以 AI 消费体验为中心 -->
+<!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
 # 拦截管理系统 — InterceptionManager
 
 > **定位：实现参考** — [`attention-system.md`](attention-system.md)（统一大脑）定义 AI 的完整 5 步流程。本文件只负责执行层：detectors 怎么注册、消息怎么合并、递进怎么计算。

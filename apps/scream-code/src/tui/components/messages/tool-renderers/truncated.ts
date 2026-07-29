@@ -1,5 +1,6 @@
 import type { Component } from '@liutod-scream/pi-tui';
 import { Text } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -41,15 +42,18 @@ function truncateTailBytes(text: string, maxBytes: number): string {
 
 /**
  * Component that renders tool output with wrap-aware line truncation.
- * Uses pi-tui's Text component to compute actual visual wrapped lines,
- * then caps at PREVIEW_LINES. This handles long single-line output (e.g.
- * JSON blobs) that would otherwise wrap to dozens of visual rows.
+ * Uses pi-tui's Text component to compute actual visual wrapped lines, then
+ * caps at `maxLines`. When collapsed the TAIL is shown (newest output, where
+ * command errors land) with an expand hint at the top; when expanded the full
+ * output is shown with a collapse hint at the top. Handles long single-line
+ * output (e.g. JSON blobs) that would otherwise wrap to dozens of visual rows.
  */
 export class TruncatedOutputComponent implements Component {
   private readonly textComponent: Text;
   private readonly expanded: boolean;
   private readonly maxLines: number;
   private readonly hintFormatter: ((remaining: number) => string) | undefined;
+  private readonly collapseHintFormatter: (() => string) | undefined;
 
   constructor(
     output: string,
@@ -60,18 +64,28 @@ export class TruncatedOutputComponent implements Component {
       maxLines?: number;
       maxBytes?: number;
       hintFormatter?: (remaining: number) => string;
+      collapseHintFormatter?: () => string;
     },
   ) {
     this.expanded = options.expanded;
     this.maxLines = options.maxLines ?? PREVIEW_LINES;
     this.hintFormatter = options.hintFormatter;
+    this.collapseHintFormatter = options.collapseHintFormatter;
     const tint = options.isError ? chalk.hex(options.colors.error) : chalk.dim;
     const cleaned = trimTrailingEmptyLines(output.split('\n')).join('\n');
+    // Error output may contain ANSI codes from the command (npm/npx color
+    // output in PTY mode). \x1b[0m drops the error tint, background codes
+    // render as solid color blocks. Strip them so the tint applies uniformly.
+    const stripped = options.isError ? cleaned.replaceAll(/\u001B\[[0-9;]*m/g, '') : cleaned;
     const truncated =
       options.maxBytes === undefined
-        ? cleaned
-        : truncateTailBytes(cleaned, options.maxBytes);
-    this.textComponent = new Text(tint(truncated), 2, 0);
+        ? stripped
+        : truncateTailBytes(stripped, options.maxBytes);
+    // Tint per-line so each line carries its own ANSI reset. Without this the
+    // trailing padding Text.render appends inherits the fg color, and terminals
+    // that paint colored spaces show a solid color block instead of text.
+    const tinted = truncated.split('\n').map((line) => tint(line)).join('\n');
+    this.textComponent = new Text(tinted, 2, 0);
   }
 
   invalidate(): void {
@@ -81,16 +95,26 @@ export class TruncatedOutputComponent implements Component {
   render(width: number): string[] {
     const contentLines = this.textComponent.render(width);
 
-    if (this.expanded || contentLines.length <= this.maxLines) {
+    if (contentLines.length <= this.maxLines) {
       return contentLines;
     }
 
-    const shown = contentLines.slice(0, this.maxLines);
+    if (this.expanded) {
+      const collapseHint = this.collapseHintFormatter
+        ? this.collapseHintFormatter()
+        : t('shell.collapse_hint');
+      return [chalk.dim(collapseHint), ...contentLines];
+    }
+
+    // Collapsed: show the TAIL (newest output, where errors land) and surface
+    // an expand hint at the TOP so the preview reads top-down without the
+    // hidden head pushing the useful lines out of view.
     const remaining = contentLines.length - this.maxLines;
-    const hint = this.hintFormatter
+    const tail = contentLines.slice(-this.maxLines);
+    const expandHint = this.hintFormatter
       ? this.hintFormatter(remaining)
-      : `... (${String(remaining)} more lines, ctrl+o to expand)`;
-    return [...shown, chalk.dim(hint)];
+      : t('shell.more_lines', { count: String(remaining) });
+    return [chalk.dim(expandHint), ...tail];
   }
 }
 
