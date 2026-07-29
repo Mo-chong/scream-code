@@ -529,10 +529,8 @@ export class BashTool implements BuiltinTool<BashInput> {
     }, timeoutMs);
 
     try {
-<<<<<<< HEAD
-      const builder = new ToolResultBuilder({ sanitize: true });
-=======
       const builder = new ToolResultBuilder({
+        sanitize: true,
         artifactSink: async (fullOutput) => {
           // Persist the full, untruncated output to a temp file so the model
           // can recover the elided middle via the Read tool. The path is the
@@ -542,7 +540,6 @@ export class BashTool implements BuiltinTool<BashInput> {
           return artifactPath;
         },
       });
->>>>>>> 0.11.2
       const [, exitCode] = await Promise.all([
         Promise.all([
           readStreamIntoBuilder(proc.stdout, builder),
