@@ -82,20 +82,7 @@ export class InjectionManager {
       }
     }
 
-    try {
       await this.router.dispatch(context);
-    } finally {
-      // Phase B': flush aggregated [Context Facts] after all injectors have run.
-      // Must be in finally to clear map even if dispatch throws.
-      const factsBlock = this.agent.context.flushContextFacts();
-      if (factsBlock !== null) {
-        // Inject at tail (append) to preserve prefix cache hit ratio ~98%
-        this.agent.context.appendSystemReminder(factsBlock, {
-          kind: 'injection',
-          variant: 'context-facts',
-        }, false);
-      }
-    }
   }
 
   /** Reset per-turn state on router + scheduler. */

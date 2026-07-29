@@ -191,6 +191,29 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
   return colors.textDim;
 }
 
+/** Cache hit ratio color: green when ≥80%, yellow when ≥50%, red below. */
+function pickCacheColor(ratio: number): string {
+  if (ratio >= 0.8) return '#4ADE80';
+  if (ratio >= 0.5) return '#FACC15';
+  return '#EF4444';
+}
+
+/** Format the ⚡ cache hit ratio stats line. */
+function formatCacheStats(state: AppState): string {
+  const { cacheHitTokens, cacheMissTokens } = state;
+  const totalTotal = cacheHitTokens + cacheMissTokens;
+  if (totalTotal <= 0) return '';
+
+  const ratio = cacheHitTokens / totalTotal;
+  const { lastStepCacheHit, lastStepCacheMiss = 0 } = state;
+  const singleStepTotal = lastStepCacheHit + lastStepCacheMiss;
+  const singleRatio = singleStepTotal > 0 ? lastStepCacheHit / singleStepTotal : 1;
+
+  const label = (s: string) => chalk.dim(s);
+  const digits = (s: string) => chalk.white(s);
+  return ` ${label('⚡')} ${label('单')}:${digits((singleRatio * 100).toFixed(1) + '%')}  ${label('总')}:${digits((ratio * 100).toFixed(1) + '%')}`;
+}
+
 // ── Gradient status line for footer line 2 ───────────────────────────
 
 // Keep active-status motion inside the product's cool/acid palette. Red and
@@ -465,7 +488,9 @@ export class FooterComponent implements Component {
       const contextPart = chalk.hex(contextColor)(
         formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens),
       );
-      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
+      // Cache hit ratio + masking/compaction stats
+      const cacheStats = formatCacheStats(state);
+      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}${cacheStats}`);
       rightText = `${ccDot} ${contextPart}${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
