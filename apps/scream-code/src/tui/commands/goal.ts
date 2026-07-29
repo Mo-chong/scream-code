@@ -5,6 +5,7 @@ import type { SlashCommandHost } from './dispatch';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
 import { isBusy } from '../utils/app-state';
 import { detectGoalConflict } from '../utils/goal-loop-conflict';
+import { refineGoal } from '../../utils/goal-refiner';
 
 const GOAL_STATUS_DISMISS_MS = 10_000;
 
@@ -17,9 +18,11 @@ const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'off']);
 
 export type ParsedGoalCommand =
   | { readonly kind: 'status' }
+  | { readonly kind: 'setup' }
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'off' }
+  | { readonly kind: 'update'; readonly objective: string }
   | { readonly kind: 'create'; readonly objective: string; readonly replace: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly severity?: 'error' | 'hint' };
 
@@ -38,6 +41,20 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const first = tokens[0];
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'off' };
+  }
+
+  // `/goal setup` launches a guided, LLM-refined goal flow; any trailing
+  // text is ignored (use `/goal -- setup` to create a goal literally named setup).
+  if (first === 'setup') {
+    return { kind: 'setup' };
+  }
+
+  if (first === 'update') {
+    const objective = tokens.slice(1).join(' ').trim();
+    if (objective.length === 0) {
+      return { kind: 'error', severity: 'hint', message: t('goal.need_desc') };
+    }
+    return { kind: 'update', objective };
   }
 
   let index = 0;
@@ -74,6 +91,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
     case 'status':
       await showGoalStatus(host);
       return;
+    case 'setup':
+      await guidedGoalSetup(host);
+      return;
     case 'pause':
       await pauseGoal(host);
       return;
@@ -82,6 +102,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       return;
     case 'off':
       await handleGoalOffCommand(host);
+      return;
+    case 'update':
+      await updateGoalObjective(host, parsed);
       return;
     case 'create':
       await createGoal(host, parsed);
@@ -108,6 +131,59 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
 
   // Launch configuration wizard
   await showGoalConfigWizard(host, session, parsed.objective, parsed.replace);
+}
+
+// ── Guided goal setup (LLM-refined objective) ──────────────────────────
+
+/**
+ * Guided goal creation: collect a brief task description, refine it via the
+ * LLM into a single objective sentence, let the user confirm/edit, then enter
+ * the standard configuration wizard. Falls back to the raw description if the
+ * LLM call fails.
+ */
+async function guidedGoalSetup(host: SlashCommandHost): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(t('error.no_session'));
+    return;
+  }
+
+  if (detectGoalConflict(host.state.appState, 'enable_goal') === 'goal_active') {
+    host.showNotice(
+      t('goal.storm_breaker'),
+      t('goal.conflict_loop'),
+    );
+    return;
+  }
+
+  const { TextInputDialogComponent } = await import('../components/dialogs/text-input-dialog');
+
+  // Step 1: user briefly describes the task (must be non-empty)
+  const initialDesc = await promptText(host, TextInputDialogComponent, {
+    title: t('goal.setup_title_initial'),
+    subtitle: t('goal.setup_desc_hint'),
+    placeholder: t('goal.setup_desc_placeholder'),
+    allowEmpty: false,
+  });
+  if (initialDesc === undefined) return;
+
+  // Step 2: LLM refines the description into a single objective sentence
+  host.showStatus(t('goal.setup_refining'));
+  const objective = await refineGoal(session, initialDesc);
+
+  // Step 3: user confirms or edits the refined objective
+  const confirmed = await promptText(host, TextInputDialogComponent, {
+    title: t('goal.setup_title_confirm'),
+    subtitle: t('goal.setup_confirm_hint'),
+    placeholder: objective,
+    initialValue: objective,
+    allowEmpty: true,
+  });
+  if (confirmed === undefined) return;
+  const finalObjective = confirmed.trim() || objective;
+
+  // Step 4: enter the existing configuration wizard (turns/tokens/time)
+  await showGoalConfigWizard(host, session, finalObjective, false);
 }
 
 // ── Goal Configuration Wizard ──────────────────────────────────────────
@@ -199,6 +275,35 @@ function promptNumber(
   });
 }
 
+/** Prompt user for free-form text. Returns undefined on cancel. */
+function promptText(
+  host: SlashCommandHost,
+  TextInputDialogComponent: typeof import('../components/dialogs/text-input-dialog').TextInputDialogComponent,
+  opts: { title: string; subtitle: string; placeholder: string; initialValue?: string; allowEmpty: boolean },
+): Promise<string | undefined> {
+  return new Promise<string | undefined>((resolve) => {
+    const dialog = new TextInputDialogComponent(
+      (result) => {
+        host.restoreEditor();
+        if (result.kind !== 'ok') {
+          resolve(undefined);
+          return;
+        }
+        resolve(result.value.trim());
+      },
+      {
+        title: opts.title,
+        subtitle: opts.subtitle,
+        placeholder: opts.placeholder,
+        initialValue: opts.initialValue,
+        allowEmpty: opts.allowEmpty,
+        colors: host.state.theme.colors,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
 async function pauseGoal(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
@@ -245,6 +350,31 @@ async function resumeGoal(host: SlashCommandHost): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     host.showError(t('goal.resume_failed', { msg: message }));
+  }
+}
+
+async function updateGoalObjective(
+  host: SlashCommandHost,
+  parsed: ParsedGoalCommand & { kind: 'update' },
+): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(t('error.no_session'));
+    return;
+  }
+
+  try {
+    const result = await session.getGoal();
+    if (result.goal === null) {
+      host.showStatus(t('goal.no_active'));
+      return;
+    }
+
+    await session.updateGoalObjective(parsed.objective);
+    host.showStatus(t('goal.updated', { objective: parsed.objective }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(t('goal.update_failed', { msg: message }));
   }
 }
 

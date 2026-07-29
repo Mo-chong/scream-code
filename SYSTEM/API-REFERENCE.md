@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/api, status/final]
 keywords: [API, 接口, 参考, 签名, 域]
-updated: 2026-07-17
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -1160,7 +1160,36 @@ class CheckpointManager {
 /forward    → 撤销回退，回到 AI 最新状态
 ```
 
-### 8.3 约束
+### 8.3 SteerInterrupt（v0.10.5）
+<!-- ref: SteerInterrupt -->
+
+**文件**: `packages/agent-core/src/loop/steer-interrupt.ts`
+
+```typescript
+interface SteerInterrupt {
+  reason: string
+  type: 'user_interrupt' | 'system_interrupt' | 'steer_event'
+  step: number
+}
+```
+
+通过 pi-tui 事件捕获用户中断 / steer 事件，挂起当前工具执行而非丢弃。中断后 AI 可以从断点继续。
+
+### 8.4 markit 文档引擎（v0.10.5）
+<!-- ref: markit -->
+
+**文件**: `packages/agent-core/src/markit/index.ts`
+
+FetchURL 工具增强：将 PDF、Office（docx/pptx/xlsx）、EPUB 文档转换为 markdown。依赖外部转换器（mammoth/turndown/mupdf），构建时标记为 external。
+
+### 8.5 DomesticSearch（v0.10.5）
+<!-- ref: domesticSearch -->
+
+**文件**: `packages/agent-core/src/tools/providers/domestic-search.ts`
+
+Web search 超时/失败时的国内引擎 fallback。配合 search-timeout.ts 硬超时机制，失败时显示 visible failure reason。
+
+### 8.6 约束
 <!-- ref: archiveRecoverConstraints -->
 
 - ArchiveRecoverTool 不封装 archive()（工具模型不应直接写 archive）

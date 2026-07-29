@@ -6,6 +6,7 @@ import type {
   CompactOptions,
   GetGoalResult,
   GoalSnapshotData,
+  TodoItem,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
@@ -474,6 +475,11 @@ export class Session {
     return this.rpc.updateGoalStatus({ sessionId: this.id, status });
   }
 
+  async updateGoalObjective(objective: string): Promise<GoalSnapshotData> {
+    this.ensureOpen();
+    return this.rpc.updateGoalObjective({ sessionId: this.id, objective });
+  }
+
   async cancelGoal(): Promise<GoalSnapshotData | null> {
     this.ensureOpen();
     return this.rpc.cancelGoal({ sessionId: this.id });
@@ -482,6 +488,11 @@ export class Session {
   async getGoal(): Promise<GetGoalResult> {
     this.ensureOpen();
     return this.rpc.getGoal({ sessionId: this.id });
+  }
+
+  async getTodos(): Promise<readonly TodoItem[]> {
+    this.ensureOpen();
+    return this.rpc.getTodos({ sessionId: this.id });
   }
 
   async setGoalBudget(value: number, unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours'): Promise<GoalSnapshotData> {

@@ -30,7 +30,7 @@ export const en: Record<string, string> = {
   'status.composing': 'Writing',
   'status.tool': 'Running',
   'status.waiting': 'Waiting',
-  'status.reconnecting': 'Reconnecting',
+  'status.reconnecting': 'Reconnect attempt',
 
   // ─── Approval ─────────────────
   'approval.allow_once': 'Allow Once',
@@ -113,16 +113,7 @@ export const en: Record<string, string> = {
   'footer.tasks_running': '{count} tasks running',
   'footer.agents_running': '{count} agents running',
 
-  // ─── Lifecycle ────────────────
-  'lifecycle.memory_countdown': 'No activity for 15 min, about to extract session memories',
-  'lifecycle.memory_cancel_hint': 'Press Ctrl+W to cancel (auto-starts in {seconds}s)',
-  'lifecycle.memory_cancelled': 'Memory extraction cancelled',
-  'lifecycle.memory_processing': 'Extracting session memories...',
-  'lifecycle.memory_done': 'Extracted {count} memories to notebook',
-  'lifecycle.memory_none': 'No new memories to extract',
-  'lifecycle.memory_failed': 'Memory extraction failed, try again later',
 
-  // ─── Input ────────────────────
   'input.replay_blocked': 'Cannot send input while session history is replaying.',
   'input.send_failed': 'Send failed: {message}',
   'input.guide_failed': 'Guide failed: {message}',
@@ -249,11 +240,19 @@ export const en: Record<string, string> = {
   'goal.resume_failed': 'Failed to resume goal: {msg}',
   'goal.cancel_failed': 'Failed to cancel goal: {msg}',
   'goal.status_failed': 'Failed to get goal status: {msg}',
+  'goal.updated': 'Goal objective updated: {objective}',
+  'goal.update_failed': 'Failed to update goal: {msg}',
   'goal.resume_hint': 'Continue the current goal.',
   'goal.wizard_title': 'Goal: {objective}',
   'goal.budget_turns_hint': 'Turn limit (0 = unlimited)',
   'goal.budget_tokens_hint': 'Token limit (0 = unlimited)',
   'goal.budget_time_hint': 'Time limit in minutes (0 = unlimited)',
+  'goal.setup_title_initial': 'Goal Setup (1/2)',
+  'goal.setup_desc_hint': 'Describe your task briefly:',
+  'goal.setup_desc_placeholder': 'e.g. refactor auth module',
+  'goal.setup_refining': 'Refining objective...',
+  'goal.setup_title_confirm': 'Goal Setup (2/2)',
+  'goal.setup_confirm_hint': 'Refined objective (edit if needed):',
 
   // ─── Update ───────────────────
   'update.timeout': 'Timed out, possibly due to network issues.',
@@ -759,9 +758,13 @@ export const en: Record<string, string> = {
   'goalpanel.paused': '⏸ Paused',
   'goalpanel.no_goal': 'No goal set',
   'goalpanel.create_goal': 'Create and start a goal',
+  'goalpanel.setup_goal': 'Guided goal setup',
   'goalpanel.pause_goal': 'Pause current goal',
   'goalpanel.resume_goal': 'Resume paused goal',
   'goalpanel.cancel_goal': 'Cancel current goal',
+  'goalpanel.update_goal': 'Update current objective',
+  'goalpanel.status_goal': 'Show goal status',
+  'goalpanel.replace_goal': 'Replace goal (resets progress)',
   'goalpanel.no_stop_condition': '  No stop condition — runs until evaluated complete.',
 
   // ─── Knowledge result viewer ────
@@ -947,7 +950,8 @@ export const en: Record<string, string> = {
   'thinking.in_progress': 'Thinking...',
 
   // ─── shell-execution ───────────
-  'shell.more_lines': '...({count} more lines, press ctrl+o to expand)',
+  'shell.more_lines': '▸ {count} lines hidden, press ctrl+o to expand',
+  'shell.collapse_hint': '▾ Press ctrl+o to collapse',
 
   // ─── cc-connect channel config ──
   'ccconnect.note_botfather': 'Create a bot at @BotFather first',
@@ -1096,7 +1100,6 @@ export const en: Record<string, string> = {
 
   // ─── ScreamTUI ─────────────────
   'tui.resume_warning': 'Warning: {warning}',
-  'tui.organizing_memory': 'Organizing session memory...',
   'tui.skill_failed': 'Skill "{skill}" failed: {message}',
   'tui.replay_no_new_session': 'Cannot start a new session during history replay.',
 

@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/tui, status/final]
 keywords: [CLI, TUI, 调试, debug, 日志查看]
-updated: 2026-07-08
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -134,3 +134,14 @@ function memoBadges(tags: string[] | undefined): string {
 ### 需要重启
 
 改源码后需要 `cd apps/scream-code && pnpm build` 重新编译才能看到图标。
+
+---
+
+## v0.10.5 新增 UI 元素
+
+| 元素 | 文件 | 说明 |
+|------|------|------|
+| 权限模式徽章 | `components/chrome/footer.ts` | editor top border 显示当前 permission mode（`allow / ask / auto`） |
+| max thinking effort 选择器 | `components/model-selector/` | model selector 新增 `maxThinkingEffort` 字段 |
+| pi-tui 0.80.14→0.80.19 | `@liutod-scream/pi-tui` | ConPTY 写分块、全转录回放、resize debounce |
+| 组件级动画 tick | `components/chrome/footer.ts` | 自持有 footer 状态定时器，不再依赖全量 TUI 定时器 |

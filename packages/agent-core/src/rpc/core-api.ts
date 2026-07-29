@@ -8,6 +8,7 @@ import type { McpServerConfig } from '#/config/schema';
 import type { ExperimentalFlagMap } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
+import type { TodoItem } from '#/todo';
 import type { BackgroundTaskInfo } from '#/tools/builtin';
 import type { ContentPart } from '@scream-code/ltod';
 
@@ -337,6 +338,10 @@ export interface UpdateGoalStatusPayload {
   readonly status: 'active' | 'complete' | 'paused' | 'blocked';
 }
 
+export interface UpdateGoalObjectivePayload {
+  readonly objective: string;
+}
+
 export interface SetGoalBudgetPayload {
   readonly value: number;
   readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
@@ -404,8 +409,10 @@ export interface AgentAPI {
   generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
   updateGoalStatus: (payload: UpdateGoalStatusPayload) => GoalSnapshotData | null;
+  updateGoalObjective: (payload: UpdateGoalObjectivePayload) => GoalSnapshotData;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;
   getGoal: (payload: EmptyPayload) => GetGoalResult;
+  getTodos: (payload: EmptyPayload) => readonly TodoItem[];
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
   getWolfpackMode: (payload: EmptyPayload) => boolean;
 }

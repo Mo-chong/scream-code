@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/injection, status/final]
 keywords: [注入, injection, DynamicInjector, 残差, residual, 变体, variant]
-updated: 2026-07-17
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -10,9 +10,10 @@ updated: 2026-07-17
 > **参见：** [`architecture-overview.md`](architecture-overview.md)（架构全景） | [`turn-control.md`](turn-control.md)（回合调度） | [`attention-system.md`](attention-system.md)（注意力分配） | [`API-REFERENCE.md`](API-REFERENCE.md)（接口签名） | [`pitfalls.md`](pitfalls.md)（踩坑记录）
 >
 > 指令权重体系、变体注册表、残差注意力门控、注入管线与预算系统。
-> 16 个 DynamicInjector（Phase41 新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控）。
+> 17 个 DynamicInjector（Phase41 新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控；v0.10.5 新增 McpBrowserSkillInjector）。
 > **演变**：路径 B 已清零（Phase22）。路径 C (GuardInjector) 已完成迁移（Phase33）。
-> Phase41 (2026-07-15)：新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控 | 注入器达 16 个。
+> Phase41 (2026-07-15)：新增 KnowledgeMenuInjector + output-constraint + domain-analyzer 域门控。
+> **v0.10.5 (2026-07-23)**：新增 McpBrowserSkillInjector — Chrome DevTools MCP 连接时注入 browser skill guide，单次触发（injectedAt 守卫）。注入器达 17 个。
 > Phase37 (2026-07-11)：stuck weight 30→0.6 | error-audit 删分析瘫痪支柱。
 > **v3 (2026-07-14)**：PersistentSummaryInjector→废弃（被 ArchivalSummaryInjector 归档层替代）。
 > TruncationTracker→Micro/ArchiveRecover 已废弃，自动恢复走归档层。
@@ -362,7 +363,7 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 ## 6. 注入器清单 (Injector Catalog)
 
 > 别名：注入器列表 / DynamicInjector 清单
-> 对应代码：DynamicInjector (injection/injector.ts) + 16 个注册子类
+> 对应代码：DynamicInjector (injection/injector.ts) + 17 个注册子类
 
 ### 当前注入器
 
@@ -385,8 +386,9 @@ TurnFlow.handleAfterStep()  ← 本轮工具调用后
 | ~~`quality.ts`~~ 🗑️ | ~~`quality_escalate`~~ | ~~AFTER_TOOL_CALL~~ | — | — | ❌ | **已删除** Phase38j（由 qualityDegradeDetector 替代） |
 | `stuck.ts` | `system_ref_stuck` | AFTER_TOOL_CALL | D | 同文件编辑≥3 / 同工具报错≥2（weight 30→0.6） | ✅ |
 | `guard-injector.ts` | `guard-feedback` | AFTER_TOOL_CALL | C | **Phase38j 精简为仅 R1 阻断**（R2/R3/R4 由 permissionEnforcerDetector 接管） | ✅ |
+| `mcp-browser-skill.ts` 🆕 v0.10.5 | `mcp_browser_skill` | AFTER_TOOL_CALL | D | Chrome DevTools MCP 连接时单次注入 browser skill guide（injectedAt 守卫） | ✅ |
 
-> **注册总数**: 16 个。`guard-injector.ts` GuardInjector 已注册并通过统一管线调度。
+> **注册总数**: 17 个。v0.10.5 新增 McpBrowserSkillInjector。
 > Phase37 (2026-07-11) 新增：DecisionTraceInjector（决策链）、ToolResultRecoveryInjector（工具恢复）、SessionSummaryInjector（会话摘要）。
 > 迁移历程：v0.8.4 Phase 22 — 路径 B（4 个硬编码注入函数 stash/anti_confabulation/quality/intent）全部迁入路径 A（DynamicInjector 管线）。`turn/injectors/` 中旧版硬编码文件已删除。
 

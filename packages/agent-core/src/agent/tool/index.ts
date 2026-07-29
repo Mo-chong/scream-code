@@ -13,6 +13,7 @@ import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
+import type { TodoItem } from '../../todo';
 import * as b from '../../tools/builtin';
 import { LspTool } from '../../tools/builtin/lsp-tool';
 import { CodeGraphTool } from '../../tools/builtin/codegraph';
@@ -28,6 +29,14 @@ import type {
 } from './types';
 
 export * from './types';
+
+function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
+  return todos.map((todo) => ({
+    title: todo.title,
+    status: todo.status,
+    phase: todo.phase,
+  }));
+}
 
 const CRITERIA_SYSTEM_PROMPT = [
   'You generate concrete, verifiable acceptance criteria for a given objective.',
@@ -67,6 +76,13 @@ function buildGraderPrompt(objective: string, criteria: string, output: string):
     '',
     '## Agent Output',
     output || '(no output captured)',
+    '',
+    'The Agent Output section contains the following optional parts, in order:',
+    '1. The agent\'s natural-language summary of what was done this turn.',
+    '2. "## Cross-turn working notes" — short notes the agent recorded using the WriteGoalNote tool across continuation turns. These notes capture key findings, constraints, decisions, and partial results. Treat them as supplementary context when evaluating whether the acceptance criteria are met; they are not the deliverable itself.',
+    '3. "## Changes this turn" — a git diff stat (or a note if git is unavailable) showing which files were modified. Use it to verify that the claimed work has an actual code footprint.',
+    '',
+    'If the Agent Output does not contain a "## Cross-turn working notes" section, add a non-blocking issue: "No cross-turn working notes were provided. Use WriteGoalNote to record key findings, constraints, and partial results across turns." This issue alone must not cause a FAIL.',
     '',
     'Evaluate each dimension independently against the acceptance criteria, then decide overall PASS/FAIL.',
     'When FAIL, list every specific issue with an actionable fix direction so the agent knows exactly what to address next.',
@@ -256,12 +272,24 @@ export class ToolManager {
   }
 
   updateStore<K extends ToolStoreKey>(key: K, value: ToolStoreData[K]): void {
+    const storedValue = (
+      key === 'todo'
+        ? cloneTodos((value ?? []) as readonly TodoItem[])
+        : value
+    ) as ToolStoreData[K];
     this.agent.records.logRecord({
       type: 'tools.update_store',
       key,
-      value,
+      value: storedValue,
     });
-    this.store[key] = value;
+    this.store[key] = storedValue;
+    if (key === 'todo') {
+      this.agent.emitEvent({ type: 'todo.updated', todos: this.getTodos() });
+    }
+  }
+
+  getTodos(): readonly TodoItem[] {
+    return cloneTodos(this.store.todo ?? []);
   }
 
   registerUserTool(input: UserToolRegistration): void {

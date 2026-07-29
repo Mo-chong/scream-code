@@ -1,15 +1,19 @@
 import type { Agent } from '#/agent';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 
 import {
   GOAL_BLOCKED_REMINDER_NAME,
   GOAL_COMPLETION_REMINDER_NAME,
+  type GoalNote,
 } from '../../../agent/goal';
 import {
   buildGoalBlockedReasonPrompt,
   buildGoalCompletionSummaryPrompt,
   buildGradingFeedbackPrompt,
 } from './outcome-prompts';
+import { GraderEmissionGuard } from './emission-guard';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -25,12 +29,24 @@ export const UpdateGoalToolInputSchema = z
     status: z
       .enum(['active', 'complete', 'paused', 'blocked'])
       .describe('The lifecycle status to set for the current goal.'),
+    reason: z
+      .string()
+      .optional()
+      .describe('Optional reason for the status change, especially for blocked.'),
   })
   .strict();
 
 export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 
 const MAX_GRADER_OUTPUT_CHARS = 4000;
+/** Maximum characters of `git diff --stat HEAD` to append to the grader input. */
+const MAX_DIFF_STAT_CHARS = 2000;
+
+/**
+ * Module-level emission guard. Deduplicates grader FAIL feedback per goal so
+ * the referee cannot trap the agent in a loop by repeating the same reason.
+ */
+const graderEmissionGuard = new GraderEmissionGuard();
 
 function extractRecentOutput(history: readonly { role: string; content: { type: string; text?: string }[] }[]): string {
   const parts: string[] = [];
@@ -47,6 +63,56 @@ function extractRecentOutput(history: readonly { role: string; content: { type: 
   }
   const joined = parts.join('\n\n');
   return joined.length > MAX_GRADER_OUTPUT_CHARS ? `${joined.slice(0, MAX_GRADER_OUTPUT_CHARS)}…` : joined;
+}
+
+/**
+ * Append cross-turn working notes to the output seen by the grader. Notes are
+ * written by the agent across continuation turns, so they provide focused
+ * context (key findings, constraints, partial results) without exposing the
+ * full text of previously rejected outputs.
+ */
+function appendGoalNotes(output: string, notes: readonly GoalNote[]): string {
+  if (notes.length === 0) return output;
+  const noteLines = notes.map((note) => `• ${note.content}`).join('\n');
+  return `${output}\n\n## Cross-turn working notes\n${noteLines}`;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Fetch a concise git diff stat against HEAD for the current working directory.
+ * Using HEAD includes both staged and unstaged changes, so the reviewer sees
+ * every file touched during the turn even if the agent ran `git add`. Returns
+ * `null` when there are no changes. Throws when git is unavailable or the
+ * directory is not a git repository.
+ */
+/** Exported for testing only. */
+export async function fetchGitDiffStat(cwd: string): Promise<string | null> {
+  const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], { cwd });
+  const stat = stdout.trim();
+  return stat.length > 0 ? stat : null;
+}
+
+/**
+ * Append a git diff stat to the grader input so the reviewer can correlate the
+ * agent's claims with the actual files changed during the turn. Very large
+ * stats are truncated to avoid overflowing the reviewer's context window. When
+ * git is unavailable, a note is appended so the reviewer knows why no diff is
+ * present.
+ */
+async function appendGitDiffStat(output: string, cwd: string): Promise<string> {
+  let stat: string | null;
+  try {
+    stat = await fetchGitDiffStat(cwd);
+  } catch {
+    return `${output}\n\n## Changes this turn\n(Git diff unavailable — workspace may not be a git repository or git is not installed.)`;
+  }
+  if (stat === null) return output;
+  const trimmed =
+    stat.length > MAX_DIFF_STAT_CHARS
+      ? `${stat.slice(0, MAX_DIFF_STAT_CHARS)}…\n(diff stat truncated)`
+      : stat;
+  return `${output}\n\n## Changes this turn\n${trimmed}`;
 }
 
 export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
@@ -75,14 +141,21 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           return this.handleComplete(goal);
         }
         if (args.status === 'blocked') {
-          const blocked = await goal.markBlocked({}, 'model');
+          const blocked = await goal.markBlocked(
+            args.reason !== undefined ? { reason: args.reason } : {},
+            'model',
+          );
           if (blocked !== null) {
             this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {
               kind: 'system_trigger',
               name: GOAL_BLOCKED_REMINDER_NAME,
             });
+            return { output: 'Goal marked blocked.', stopTurn: true };
           }
-          return { output: 'Goal marked blocked.', stopTurn: true };
+          // Not enough consecutive blocked attempts; goal stays active.
+          return {
+            output: 'Goal remains active. Report the same blocker in subsequent turns to confirm it cannot be resolved. Continue working on the goal in the meantime.',
+          };
         }
         await goal.pauseGoal({}, 'model');
         return { output: 'Goal paused.', stopTurn: true };
@@ -95,6 +168,8 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     if (!goalState) return { output: 'No active goal.' };
 
     const output = extractRecentOutput(this.agent.context.history);
+    const outputWithNotes = appendGoalNotes(output, goalState.notes);
+    const outputWithContext = await appendGitDiffStat(outputWithNotes, this.agent.config?.cwd ?? '');
 
     // Pause goal to prevent continuation loop from interfering during grading.
     try {
@@ -105,7 +180,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
 
     let rawGrade: unknown;
     try {
-      rawGrade = await this.grader(goalState.objective, goalState.completionCriterion, output);
+      rawGrade = await this.grader(goalState.objective, goalState.completionCriterion, outputWithContext);
     } catch (error) {
       const resumeError = await resumeAfterGrading(goal);
       if (resumeError !== undefined) return resumeError;
@@ -133,6 +208,11 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     if (grade.pass) {
       try {
         const completed = await goal.markComplete({}, 'model');
+        // Clear the emission-guard dedup bucket for this goal so a subsequent
+        // goal with the same objective does not inherit stale dedup state.
+        // Called after markComplete resolves (whether null or a snapshot) so
+        // the bucket is cleared as soon as the referee accepts the goal.
+        graderEmissionGuard.resetGoal(goalState.objective);
         if (completed === null) {
           return toolError('Failed to mark verified goal complete', goal);
         }
@@ -146,8 +226,18 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
       return { output: `Goal verified and marked complete.\n${grade.reason}`, stopTurn: true };
     }
 
-    this.appendGradingFeedback(grade.reason);
-    return { output: `Verification failed: ${grade.reason}. Continue working.` };
+    // Deduplicate grader feedback before injection. If the referee repeats a
+    // reason already seen for this goal, skip injecting it into context (the
+    // agent already has the earlier feedback) and nudge it to address that.
+    const denoised = graderEmissionGuard.filter(grade.reason, goalState.objective);
+    if (denoised !== null) {
+      this.appendGradingFeedback(denoised);
+      return { output: `Verification failed: ${denoised}. Continue working.` };
+    }
+    return {
+      output:
+        'Previous verification feedback still applies. Address the earlier feedback and retry.',
+    };
   }
 
   private appendGradingFeedback(reason: string): void {

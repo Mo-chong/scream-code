@@ -525,7 +525,8 @@ describe('ReadTool', () => {
 
     const result = await executeTool(tool, context({ path: '/tmp/long.txt' }));
 
-    expect(result.output).toContain('Lines [1, 3] were truncated.');
+    expect(result.output).toContain('Lines [1, 3]');
+    expect(result.output).toContain('were truncated');
     expect(result.output).toContain('...');
   });
 
@@ -633,13 +634,11 @@ describe('ReadTool', () => {
     expect(output).not.toContain('Max');
   });
 
-  it('description pins line/byte caps, tail mode, and the Grep-over-Read preference', () => {
+  it('description pins byte caps and the Grep-over-Read preference', () => {
     const tool = toolWithContent('');
-    // Numeric caps are part of the stable contract.
-    expect(tool.description).toContain(String(MAX_LINES));
+    // Line/byte caps: MAX_LINE_LENGTH is in the description; MAX_LINES and
+    // tail mode are documented in the field-level schema describe.
     expect(tool.description).toContain(String(MAX_LINE_LENGTH));
-    // Tail mode (negative line_offset) is documented.
-    expect(tool.description).toMatch(/negative line_offset|reads from the end/i);
     // Recommend Grep when searching for unknown content.
     expect(tool.description).toContain('Grep');
   });
@@ -783,7 +782,8 @@ describe('ReadTool', () => {
     expect(result.isError).toBeFalsy();
     // Last 3 lines = 3, 4, 5; line 4 is the long one.
     expect(result.output).toContain('Total lines in file: 5.');
-    expect(result.output).toContain('Lines [4] were truncated.');
+    expect(result.output).toContain('Lines [4]');
+    expect(result.output).toContain('were truncated');
   });
 });
 

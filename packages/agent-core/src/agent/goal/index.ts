@@ -14,10 +14,13 @@ import type { AgentRecordOf } from '../records/types';
 /** Maximum objective length in characters. */
 const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 
+/** Consecutive markBlocked calls with the same reason required before blocking. */
+const BLOCKED_STREAK_THRESHOLD = 3;
+
 /** Maximum number of working notes kept per goal. */
-const MAX_GOAL_NOTES = 30;
+const MAX_GOAL_NOTES = 60;
 /** Maximum characters per note. */
-const MAX_NOTE_LENGTH = 200;
+const MAX_NOTE_LENGTH = 400;
 
 export interface GoalNote {
   readonly content: string;
@@ -52,6 +55,8 @@ interface GoalState {
   budgetLimits: GoalBudgetLimits;
   terminalReason?: string;
   notes: GoalNote[];
+  blockedStreak: number;
+  lastBlockedReason?: string;
 }
 
 export interface GoalBudgetReport {
@@ -65,6 +70,29 @@ export interface GoalBudgetReport {
   readonly turnBudgetReached: boolean;
   readonly wallClockBudgetReached: boolean;
   readonly overBudget: boolean;
+}
+
+/**
+ * Returns true when any configured budget has less than `threshold` of its
+ * allowance remaining (e.g. 0.2 = under 20% left). Budgets that are not
+ * configured (null) are ignored. Used to steer the model toward convergence
+ * before a hard over-budget block fires.
+ */
+export function isBudgetNearExhaustion(budget: GoalBudgetReport, threshold: number): boolean {
+  if (budget.turnBudget !== null && budget.remainingTurns !== null && budget.turnBudget > 0) {
+    if (budget.remainingTurns / budget.turnBudget < threshold) return true;
+  }
+  if (budget.tokenBudget !== null && budget.remainingTokens !== null && budget.tokenBudget > 0) {
+    if (budget.remainingTokens / budget.tokenBudget < threshold) return true;
+  }
+  if (
+    budget.wallClockBudgetMs !== null &&
+    budget.remainingWallClockMs !== null &&
+    budget.wallClockBudgetMs > 0
+  ) {
+    if (budget.remainingWallClockMs / budget.wallClockBudgetMs < threshold) return true;
+  }
+  return false;
 }
 
 export interface GoalSnapshot {
@@ -150,6 +178,7 @@ export class GoalMode {
       wallClockMs: 0,
       budgetLimits: {},
       notes: [],
+      blockedStreak: 0,
     };
     this.state = state;
   }
@@ -171,6 +200,7 @@ export class GoalMode {
       state.wallClockResumedAt = undefined;
     }
     if (record.budgetLimits !== undefined) state.budgetLimits = record.budgetLimits;
+    if (record.objective !== undefined) state.objective = record.objective;
   }
 
   restoreClear(_record: AgentRecordOf<'goal.clear'>): void {
@@ -227,6 +257,7 @@ export class GoalMode {
       wallClockResumedAt: Date.now(),
       budgetLimits: {},
       notes: [],
+      blockedStreak: 0,
     };
 
     this.persistState(state);
@@ -284,6 +315,8 @@ export class GoalMode {
       );
     }
     state.terminalReason = undefined;
+    state.blockedStreak = 0;
+    state.lastBlockedReason = undefined;
     this.applyStatus(state, 'active');
     this.persistState(state, {
       change: { kind: 'lifecycle', status: 'active', reason: input.reason, actor },
@@ -300,6 +333,39 @@ export class GoalMode {
     state.budgetLimits = { ...state.budgetLimits, ...input.budgetLimits };
     this.persistState(state);
     this.appendGoalUpdate({ budgetLimits: state.budgetLimits });
+    return this.toSnapshot(state);
+  }
+
+  async updateObjective(
+    input: { objective: string },
+    _actor: GoalActor = 'user',
+  ): Promise<GoalSnapshot> {
+    const state = this.requireState();
+    const objective = input.objective.trim();
+    if (objective.length === 0) {
+      throw new ScreamError(ErrorCodes.GOAL_OBJECTIVE_EMPTY, 'Goal objective cannot be empty');
+    }
+    if (state.status === 'complete') {
+      throw new ScreamError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        'Cannot update a completed goal.',
+      );
+    }
+    if (state.status === 'blocked') {
+      throw new ScreamError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        'Cannot update a blocked goal. Resume it first.',
+      );
+    }
+    state.objective = objective;
+    // Append a note so the agent and grader know the objective changed.
+    const noteContent = `Goal objective updated by user: ${objective}`.slice(0, MAX_NOTE_LENGTH);
+    state.notes.push({ content: noteContent, time: Date.now() });
+    if (state.notes.length > MAX_GOAL_NOTES) {
+      state.notes = state.notes.slice(-MAX_GOAL_NOTES);
+    }
+    this.persistState(state);
+    this.appendGoalUpdate({ objective });
     return this.toSnapshot(state);
   }
 
@@ -324,8 +390,28 @@ export class GoalMode {
   ): Promise<GoalSnapshot | null> {
     const state = this.state;
     if (state === undefined || state.status !== 'active') return null;
+
+    // 3-strike audit: only for model-initiated blocks. User/runtime/system
+    // blocks (budget exhaustion, user interrupt) take effect immediately.
+    if (actor === 'model') {
+      const reason = input.reason ?? '';
+      if (reason === (state.lastBlockedReason ?? '')) {
+        state.blockedStreak += 1;
+      } else {
+        state.blockedStreak = 1;
+        state.lastBlockedReason = reason;
+      }
+
+      if (state.blockedStreak < BLOCKED_STREAK_THRESHOLD) {
+        this.persistState(state, { silent: true });
+        return null;
+      }
+    }
+
     this.applyStatus(state, 'blocked');
     state.terminalReason = input.reason;
+    state.blockedStreak = 0;
+    state.lastBlockedReason = undefined;
     this.persistState(state, {
       change: { kind: 'lifecycle', status: 'blocked', reason: input.reason, actor },
     });
@@ -367,7 +453,7 @@ export class GoalMode {
     if (state === undefined || state.status !== 'active') return null;
     const delta = Math.max(0, tokenDelta);
     state.tokensUsed += delta;
-    this.persistState(state, { silent: true });
+    this.persistState(state);
     this.appendGoalUpdate({ tokensUsed: state.tokensUsed });
     return this.toSnapshot(state);
   }
@@ -390,7 +476,7 @@ export class GoalMode {
     if (state.notes.length > MAX_GOAL_NOTES) {
       state.notes = state.notes.slice(-MAX_GOAL_NOTES);
     }
-    this.persistState(state, { silent: true });
+    this.persistState(state);
     return this.toSnapshot(state);
   }
 
@@ -477,7 +563,7 @@ export class GoalMode {
       wallClockMs: liveWallClockMs(state, Date.now()),
       budget: computeBudgetReport(state, Date.now()),
       terminalReason: state.terminalReason,
-      notes: state.notes,
+      notes: state.notes.map((note) => ({ ...note })),
     };
   }
 }

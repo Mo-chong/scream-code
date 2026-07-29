@@ -30,7 +30,7 @@ export const zh: Record<string, string> = {
   'status.composing': '输出中',
   'status.tool': '执行中',
   'status.waiting': '等待响应',
-  'status.reconnecting': '重连',
+  'status.reconnecting': '重连尝试中',
 
   // ─── 审批 ─────────────────────
   'approval.allow_once': '批准一次',
@@ -113,16 +113,7 @@ export const zh: Record<string, string> = {
   'footer.tasks_running': '{count}个任务 运行中',
   'footer.agents_running': '{count}个代理 运行中',
 
-  // ─── 生命周期 ─────────────────
-  'lifecycle.memory_countdown': '15 分钟未操作，即将整理会话记忆',
-  'lifecycle.memory_cancel_hint': '按 Ctrl+W 取消（{seconds} 秒后自动开始）',
-  'lifecycle.memory_cancelled': '已取消记忆提取',
-  'lifecycle.memory_processing': '正在整理会话记忆...',
-  'lifecycle.memory_done': '已沉淀 {count} 条记忆至备忘录',
-  'lifecycle.memory_none': '本次无需沉淀新记忆',
-  'lifecycle.memory_failed': '记忆整理失败，稍后再试',
 
-  // ─── 输入 ─────────────────────
   'input.replay_blocked': '会话历史正在回放时无法发送输入。',
   'input.send_failed': '发送失败：{message}',
   'input.guide_failed': '引导失败：{message}',
@@ -249,11 +240,19 @@ export const zh: Record<string, string> = {
   'goal.resume_failed': '恢复目标失败：{msg}',
   'goal.cancel_failed': '取消目标失败：{msg}',
   'goal.status_failed': '获取目标状态失败：{msg}',
+  'goal.updated': '目标已更新：{objective}',
+  'goal.update_failed': '更新目标失败：{msg}',
   'goal.resume_hint': '继续执行当前目标。',
   'goal.wizard_title': '目标：{objective}',
   'goal.budget_turns_hint': '轮次限制（0 = 不限制）',
   'goal.budget_tokens_hint': 'Token 限制（0 = 不限制）',
   'goal.budget_time_hint': '时间限制，单位分钟（0 = 不限制）',
+  'goal.setup_title_initial': '目标引导 (1/2)',
+  'goal.setup_desc_hint': '简述你的任务：',
+  'goal.setup_desc_placeholder': '例如：重构认证模块',
+  'goal.setup_refining': '正在提炼目标...',
+  'goal.setup_title_confirm': '目标引导 (2/2)',
+  'goal.setup_confirm_hint': '已提炼目标（可编辑后确认）：',
 
   // ─── 更新 ─────────────────────
   'update.timeout': '超时，可能因网络原因卡住。',
@@ -759,9 +758,13 @@ export const zh: Record<string, string> = {
   'goalpanel.paused': '⏸ 已暂停',
   'goalpanel.no_goal': '未开启任务',
   'goalpanel.create_goal': '创建并启动目标',
+  'goalpanel.setup_goal': '引导式目标创建',
   'goalpanel.pause_goal': '暂停当前目标',
   'goalpanel.resume_goal': '恢复已暂停的目标',
   'goalpanel.cancel_goal': '取消当前目标',
+  'goalpanel.update_goal': '修改当前目标',
+  'goalpanel.status_goal': '查看目标状态',
+  'goalpanel.replace_goal': '替换目标（重置进度）',
   'goalpanel.no_stop_condition': '  No stop condition — runs until evaluated complete.',
 
   // ─── 知识结果查看器 ─────────────
@@ -947,7 +950,8 @@ export const zh: Record<string, string> = {
   'thinking.in_progress': '思考中...',
 
   // ─── shell-execution ───────────
-  'shell.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
+  'shell.more_lines': '▸ 还有 {count} 行，按 ctrl+o 展开',
+  'shell.collapse_hint': '▾ 按 ctrl+o 折叠',
 
   // ─── cc-connect 通道配置 ──────
   'ccconnect.note_botfather': '需先在 @BotFather 创建 bot',
@@ -1096,7 +1100,6 @@ export const zh: Record<string, string> = {
 
   // ─── ScreamTUI ─────────────────
   'tui.resume_warning': '警告：{warning}',
-  'tui.organizing_memory': '正在整理会话记忆...',
   'tui.skill_failed': 'Skill "{skill}" 执行失败：{message}',
   'tui.replay_no_new_session': '历史回放期间无法启动新会话。',
 

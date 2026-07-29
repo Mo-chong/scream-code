@@ -7,12 +7,12 @@
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
-import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
+import { sliceByColumn, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState } from '#/tui/types';
+import type { AppState, GoalBadgeInfo } from '#/tui/types';
 import { shimmerText } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
@@ -22,7 +22,6 @@ import {
   type GitStatusCache,
 } from '#/utils/git/git-status';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
-import { maskingStats } from '@scream-code/agent-core/turn-step';
 
 // Toolbar tips — rotates every 10s. Most tips are short and pair up (two
 // joined by " | ") when space allows; tips flagged `solo` are long or
@@ -157,6 +156,27 @@ function formatContextStatus(usage: number, tokens?: number, maxTokens?: number)
   return t('footer.context_short', { pct });
 }
 
+/** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */
+function formatGoalDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`;
+}
+
+/** Build the footer goal badge: `GOAL 3m · 7 turns`.
+ *
+ * The TUI only receives `goal.updated` events on state changes, so we keep a
+ * local base timestamp and add the elapsed time since the last snapshot to
+ * produce a live wall-clock reading between sparse events.
+ */
+function formatGoalBadge(goal: GoalBadgeInfo): string {
+  const elapsedSinceSnapshot = Date.now() - goal.wallClockBaseAt;
+  const liveWallClockMs = goal.wallClockMs + Math.max(0, elapsedSinceSnapshot);
+  return `GOAL ${formatGoalDuration(liveWallClockMs)} · ${goal.turnsUsed} turns`;
+}
+
 // Context-usage threshold coloring. Pure percent — works uniformly across
 // all model context windows (256k / 1M / etc.) without hardcoding absolute
 // token counts that misfire when the window size differs from the assumed
@@ -171,13 +191,6 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
   return colors.textDim;
 }
 
-/** 缓存率颜色：≥90 绿, 80-89.9 黄, <80 红 */
-function pickCacheColor(rate: number, colors: ColorPalette): string {
-  if (rate >= 90) return colors.success;
-  if (rate >= 80) return colors.warning;
-  return colors.error;
-}
-
 // ── Gradient status line for footer line 2 ───────────────────────────
 
 // Keep active-status motion inside the product's cool/acid palette. Red and
@@ -186,7 +199,7 @@ function pickCacheColor(rate: number, colors: ColorPalette): string {
 const BRAND_COLORS = ['#79eb00', '#56D4DD', '#4ADE80', '#FACC15'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
-const SPINNER_TICK_MS = 120;
+const SPINNER_TICK_MS = 60;
 
 function hexToRgb(hex: string): [number, number, number] {
   const v = parseInt(hex.slice(1), 16);
@@ -216,9 +229,10 @@ function buildStatusLine(
     return t('status.idle');
   }
 
-  // Reconnection takes priority over normal status display. Each retry
-  // fires ~20s apart and counts up to the provider's maxAttempts.
-  if (reconnectAttempt > 0) {
+  // Reconnection indicator only shows during the 'waiting' phase. Once
+  // the model starts thinking/composing or a tool runs, the retry has
+  // succeeded and the normal status should be displayed instead.
+  if (reconnectAttempt > 0 && streamingPhase === 'waiting') {
     return chalk.hex('#E85454').bold('◎') + ' ' +
       chalk.hex('#E85454')(`${t('status.reconnecting')} ${String(reconnectAttempt)}`);
   }
@@ -260,6 +274,38 @@ export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): s
   return `${base} ${pullRequest}`;
 }
 
+/**
+ * Middle-truncate a (possibly ANSI-colored) string to `maxWidth` visible
+ * columns, keeping a head and a tail fragment joined by `ellipsis`. The
+ * remaining budget is split roughly in half so both the start and the end of
+ * the original content stay visible - e.g. `GOAL 3m · 7 turns` becomes
+ * `GOAL… turns` (head `GOAL`, tail `turns`). ANSI styling is preserved via
+ * sliceByColumn, which carries the active SGR state into the tail; a reset is
+ * emitted around the ellipsis so a colour opened in the head never bleeds
+ * across it. Exported for unit testing.
+ */
+export function truncateMiddle(line: string, maxWidth: number, ellipsis: string): string {
+  if (maxWidth <= 0) return '';
+  const textWidth = visibleWidth(line);
+  if (textWidth <= maxWidth) return line;
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (ellipsisWidth >= maxWidth) {
+    // Ellipsis alone fills the budget: fall back to a head-only truncation.
+    return truncateToWidth(line, maxWidth, ellipsis);
+  }
+  const keepWidth = maxWidth - ellipsisWidth;
+  const headWidth = Math.max(0, Math.ceil(keepWidth / 2));
+  const tailWidth = keepWidth - headWidth;
+  const head = headWidth > 0 ? sliceByColumn(line, 0, headWidth) : '';
+  const tail = tailWidth > 0 ? sliceByColumn(line, textWidth - tailWidth, tailWidth) : '';
+  // Reset around the ellipsis: the head may have opened a colour that is not
+  // closed at the cut, and the tail re-applies its own SGR state via
+  // sliceByColumn's pendingAnsi carry-over, so the resets isolate the ellipsis
+  // without corrupting either side.
+  const RESET = '\u001B[0m';
+  return head + RESET + ellipsis + RESET + tail;
+}
+
 export class FooterComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
@@ -285,22 +331,19 @@ export class FooterComponent implements Component {
     this.onGitStatusChange = onGitStatusChange;
     this.gitCacheWorkDir = state.workDir;
     this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
+    this.#restartStatusTimer(state.streamingPhase, state.goalActive);
   }
 
   setState(state: AppState): void {
     const previousPhase = this.state?.streamingPhase;
+    const previousGoalActive = this.state?.goalActive;
     if (state.workDir !== this.gitCacheWorkDir) {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // Keep one wall-clock-driven animation source independent from token/tool
-    // output. It uses the normal full-render scheduler (the pre-component-tick
-    // path), so frames coalesce with stream renders instead of competing with
-    // them as requestComponentRender jobs. Thinking needs 30fps for the model
-    // shimmer; other active phases use the spinner's 120ms cadence.
-    if (state.streamingPhase !== previousPhase) {
-      this.#restartStatusTimer(state.streamingPhase);
+    if (state.streamingPhase !== previousPhase || state.goalActive !== previousGoalActive) {
+      this.#restartStatusTimer(state.streamingPhase, state.goalActive);
     }
   }
 
@@ -337,10 +380,13 @@ export class FooterComponent implements Component {
 
   // ── Active status animation ─────────────────────────────────────────
 
-  #restartStatusTimer(phase: AppState['streamingPhase']): void {
+  #restartStatusTimer(
+    phase: AppState['streamingPhase'],
+    goalActive: boolean,
+  ): void {
     this.#stopStatusTimer();
-    if (phase === 'idle') return;
-    const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
+    if (phase === 'idle' && !goalActive) return;
+    const intervalMs = 1000 / 60;
     this.statusTimer = setInterval(() => {
       this.ui.requestRender();
     }, intervalMs);
@@ -366,8 +412,9 @@ export class FooterComponent implements Component {
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
     if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
-    if (state.goalActive) {
-      left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
+    if (state.goalActive && state.goal) {
+      const goalLabel = formatGoalBadge(state.goal);
+      left.push(chalk.hex(colors.primary).bold(goalLabel));
     }
 
     const model = shortenModel(modelDisplayName(state));
@@ -424,61 +471,33 @@ export class FooterComponent implements Component {
     const rightWidth = visibleWidth(rightText);
     const gap = 3;
 
+    const ellipsis = chalk.hex(colors.textDim)('…');
+
+    // Three-stage progressive truncation keeps the footer on a single line at
+    // any terminal width:
+    //   1. Shrink LEFT with a middle ellipsis (head + tail kept) until
+    //      LEFT + gap + RIGHT fits, so RIGHT stays visible.
+    //   2. If RIGHT still cannot fit after shrinking LEFT (its width plus the
+    //      gap already exceeds the line), drop RIGHT and show LEFT alone,
+    //      padded to the full width.
+    //   3. If LEFT alone exceeds the width, truncate LEFT to the width.
     let line1: string;
     if (leftWidth + gap + rightWidth <= width) {
       const pad = width - leftWidth - rightWidth;
       line1 = leftLine + ' '.repeat(pad) + rightText;
-    } else if (leftWidth <= width) {
-      line1 = leftLine;
     } else {
-      line1 = truncateToWidth(leftLine, width, '…');
-    }
-
-    const lines = [truncateToWidth(line1, width)];
-
-    // 第2行：左路径 + 居中缓存率
-    const { lastStepCacheHit, lastStepCacheMiss, cacheHitTokens, cacheMissTokens, lastStepTokenInput } = state;
-    const stepTotal = lastStepTokenInput;
-    const totalTotal = cacheHitTokens + cacheMissTokens;
-    {
-      const dim = chalk.hex(colors.textDim);
-      // 启动目录（末两层）
-      const cwdParts = process.cwd().replace(/\\/g, '/').split('/').filter(Boolean);
-      const shortCwd = dim(cwdParts.slice(-2).join('\\'));
-      const bolt = chalk.hex(colors.success)('⚡');
-      let rate1Str: string;
-      let rate2Str: string;
-      let c1: string;
-      let c2: string;
-      if (stepTotal > 0 && totalTotal > 0) {
-        const rate1 = lastStepCacheHit / stepTotal * 100;
-        const rate2 = cacheHitTokens / totalTotal * 100;
-        c1 = pickCacheColor(rate1, colors);
-        c2 = pickCacheColor(rate2, colors);
-        rate1Str = rate1.toFixed(1) + '%';
-        rate2Str = rate2.toFixed(1) + '%';
+      const targetLeft = width - gap - rightWidth;
+      if (targetLeft > 0) {
+        const shrunkLeft = truncateMiddle(leftLine, targetLeft, ellipsis);
+        const pad = width - visibleWidth(shrunkLeft) - rightWidth;
+        line1 = shrunkLeft + ' '.repeat(pad) + rightText;
+      } else if (leftWidth <= width) {
+        line1 = leftLine + ' '.repeat(width - leftWidth);
       } else {
-        c1 = dim;
-        c2 = dim;
-        rate1Str = dim('—');
-        rate2Str = dim('—');
+        line1 = truncateMiddle(leftLine, width, ellipsis);
       }
-      const cacheText = ` ${bolt} ${dim('单:')}${chalk.hex(c1)(rate1Str)}  ${dim('总:')}${chalk.hex(c2)(rate2Str)} `;
-      // 第二行右侧：遮蔽统计（bytesSaved>0 时显示）
-      const m = maskingStats.perTurn;
-      let maskSuffix = '';
-      if (m.bytesSaved > 0) {
-        const label = chalk.hex(colors.warning);
-        const digits = chalk.hex(colors.text);
-        const mb = (m.bytesSaved / (1024 * 1024)).toFixed(1);
-        const parts: string[] = [ `${label('掩蔽')}${digits(':'+m.fullyMasked)}` ];
-        if (m.compressed > 0) parts.push(`${label('压缩')}${digits(':'+m.compressed)}`);
-        maskSuffix = ` ${label('🧊')} -${mb}M ${parts.join(' ')}`;
-      }
-      const pad = Math.max(0, Math.floor((width - visibleWidth(shortCwd) - visibleWidth(cacheText) - visibleWidth(maskSuffix)) / 2));
-      lines.push(shortCwd + ' '.repeat(pad) + cacheText + maskSuffix);
     }
 
-    return lines;
+    return [truncateToWidth(line1, width, '…')];
   }
 }

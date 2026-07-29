@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/pitfalls, status/final]
 keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
-updated: 2026-07-11
+updated: 2026-07-23
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -901,6 +901,22 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
    - **根因**：`bin/scream` shim 写的是 `node packages/agent-core/dist/index.mjs`（库入口）。这个文件加载完就静静退出，不认识 `--version`。正确的 CLI 入口是 `apps/scream-code/dist/main.mjs`（CLI bundle，package.json 中 `bin` 字段指定的）
    - **修复**：3 个 shim（bash/cmd/ps1）全改为指向 `apps/scream-code/dist/main.mjs`
    - **教训**：写 shim 前查 `package.json#bin` 字段——它告诉你真正的 CLI 入口在哪。别猜。另：排查无输出时第一时间重定向 stdout/stderr 到文件，而不是猜 PowerShell 策略、猜 CWD、猜代理
+
+### pi-tui v0.80.19 移除 requestComponentRender → MoonLoader 运行时崩溃（v0.10.5 合并）
+
+**现象**：`scream` 启动后立即报 `TypeError: this.ui.requestComponentRender is not a function`，堆栈指向 `MoonLoader.updateDisplay`。
+
+**根因**：上游合并 v0.10.2→v0.10.5 一路将 pi-tui 从 0.80.14 升级到 0.80.19，中间版本移除了 `requestComponentRender(component)` 方法，只剩 `requestRender()`。`moon-loader.ts` 和 `pulse-wave-loader.ts` 直接调用 `this.ui.requestComponentRender(this)`（无可选链），运行时崩溃。
+
+**影响范围**：6 个源文件 + 6 个测试文件全部需要迁移。
+
+**修复**：`requestComponentRender(this)` → `requestRender()`。所有 `this.ui?.requestComponentRender(this)` 改为 `this.ui?.requestRender()`。注意 `?.` 只防 `ui` 为 undefined，不防方法不存在——方法不存在时一样崩。
+
+**教训**：
+1. 上游库升级要关注 CHANGELOG 中的 breaking changes，特别是方法移除
+2. 合并后第一步 `scream --version` 验证运行，不只看构建通过
+3. `?.` 不防方法签名变化——`obj?.method()` 在 `obj` 存在但 `method` 不存在时一样抛 TypeError
+4. 批量修改时同步更新测试文件的 mock（`requestComponentRender: vi.fn()` → `requestRender: vi.fn()`）
 
 
 ## 缓存与上下文管理

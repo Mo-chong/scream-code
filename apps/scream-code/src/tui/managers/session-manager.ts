@@ -171,7 +171,12 @@ export class SessionManager {
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
       sessionTitle: session.summary?.title ?? null,
-      goal: goal?.objective ?? null,
+      goal: goal ? {
+        objective: goal.objective,
+        turnsUsed: goal.turnsUsed ?? 0,
+        wallClockMs: goal.wallClockMs ?? 0,
+        wallClockBaseAt: Date.now(),
+      } : null,
       goalActive: goal?.status === 'active',
       goalContinuationCount: 0,
     });
@@ -188,7 +193,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   async closeSession(reason?: string): Promise<void> {
     const previous = this.unloadCurrentSession(reason ?? 'closing');
-    await previous?.close();
+    await previous?.close({ extractMemories: false });
   }
 
   private unloadCurrentSession(reason: string): Session | undefined {
