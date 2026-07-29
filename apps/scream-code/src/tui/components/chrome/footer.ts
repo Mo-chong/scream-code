@@ -225,7 +225,7 @@ function formatCacheStats(state: AppState): string {
   // 🧊 masking/compaction stats
   const m = maskingStats.perTurn;
   if (m && (m.fullyMasked > 0 || m.compressed > 0)) {
-    const mb = totalTotal > 0 ? ((m.totalBytes ?? 0) / 1_000_000).toFixed(1) : '0';
+    const mb = totalTotal > 0 ? ((m.bytesSaved ?? 0) / 1_000_000).toFixed(1) : '0';
     const parts: string[] = [];
     if (m.fullyMasked > 0) parts.push(`${dim('掩蔽')}${white(':' + m.fullyMasked)}`);
     if (m.compressed > 0) parts.push(`${dim('压缩')}${white(':' + m.compressed)}`);

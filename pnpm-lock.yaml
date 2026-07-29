@@ -73,7 +73,7 @@ importers:
   apps/scream-code:
     dependencies:
       '@liutod-scream/pi-tui':
-        specifier: ^0.80.31
+        specifier: 0.80.31
         version: 0.80.31
       '@mariozechner/clipboard':
         specifier: ^0.3.2
