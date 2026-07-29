@@ -132,13 +132,19 @@ runOneTurn()
 
 ---
 
-## [DEPRECATED] DebtLedger 分类债务账本 + knownPaths + BulkRead（已取消）
+## [DEPRECATED] DebtLedger 分类债务账本 + knownPaths + BulkRead（已删除）
 
-> **⚠️ 设计方案已取消（2026-07-29）。** 审计数据表明偏差链导致的 token 浪费不必用硬阻断来纠正，`tool-pattern` detector 的软提醒 + 收敛门注入已足够。
+> **⚠️ 已删除（2026-07-29）。** 审计数据表明偏差链导致的 token 浪费不必用硬阻断来纠正，`tool-pattern` detector 的软提醒 + 收敛门注入已足够。
 >
-> 以下为设计文档残留，不实施：
-> - `audit/debt-ledger.ts` — 不存在，不创建
-> - H3 分类阻断（exploration/tool_error/reasoning/gate）— 不实施
+> 已删除文件：
+> - `src/audit/debt-ledger.ts` — 216 行死代码，从未集成
+> - `src/audit/quality-score.ts` — 105 行死代码，从未集成
+> - `src/audit/quality-baseline.ts` — 143 行死代码，从未集成
+> - `src/audit/faithfulness.ts` — 79 行死代码，从未集成
+>
+> 以下设计文档残留（不实施，不创建）：
+
+> H3 分类阻断（exploration/tool_error/reasoning/gate）— 不实施
 > - H4 偏差链→阻断 Write/Edit — 不实施
 > - `knownPaths` 路径豁免 — 不实施
 > - `[BulkRead]` 批量标记 — 不实施
@@ -170,14 +176,13 @@ runOneTurn()
 
 | 机制 | 时机 | 说明 |
 |------|------|------|
-| recordQualityBaseline | session-end | 记录当前回合的质量指标（偏差链触发次数、债务峰值、收敛注入次数、反事实次数）|
-| getFeedbackInjection | session-start | 读取上一 session 的质量基线，若存在未解决的偏差模式则在首回合注入反馈 |
+| — | — | quality-baseline.ts 已删除（2026-07-29），不再有 session 质量记录。
 
 ---
 
-## [DEPRECATED] 探索债务模型（旧，被 DebtLedger 取代 2026-07-15）
+## [DEPRECATED] 探索债务模型（旧，与 DebtLedger 均已删除 2026-07-29）
 
-> ⚠️ 已废弃。替代为 `DebtLedger.exploration` 分类（见 §DebtLedger 分类债务账本）。以下保留仅供历史参考。
+> ⚠️ 已删除。debt-ledger.ts + quality-baseline.ts + quality-score.ts + faithfulness.ts 全部已删除。以下保留仅供历史参考。
 
 | 机制 | 规格 | 说明 |
 |------|------|------|

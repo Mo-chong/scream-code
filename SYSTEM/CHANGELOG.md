@@ -1156,13 +1156,13 @@ updated: 2026-07-29
 - **deviation_chain_intercept 降权**: weight 1.0→0.5, threshold 0.1→0.3, decay 0.99→0.95, minStepGap 0→4。偏差链从"最高权重硬拦截"降为"软提醒"。
   - `packages/agent-core/src/agent/turn/variant-registry.ts`
 
-#### 纪律系统减负 — DebtLedger + H4 + knownPaths + BulkRead 取消
+#### 纪律系统减负 — DebtLedger + H4 + knownPaths + BulkRead 取消 + 死代码删除
 
 审计数据表明，偏差链导致的 token 浪费（整体 →0.0001%）不值得用硬阻断纠正。软提醒（tool-pattern detector + deviation_chain_intercept 注入 + 收敛门）已足够。
 
 | 项 | 状态 |
 |:---|:-----|
-| DebtLedger 分类债务账本（4类+偿还+分类阻断） | ❌ 取消设计，不实施 |
+| DebtLedger 分类债务账本（4类+偿还+分类阻断） | ❌ 已删除（216行死代码，送回收站）|
 | H3 分类阻断（exploration≥12→封Read/Grep） | ❌ 取消 |
 | H4 偏差链→阻断 Write/Edit | ❌ 取消 |
 | knownPaths 路径豁免 | ❌ 取消 |
@@ -1172,6 +1172,22 @@ updated: 2026-07-29
 | deviation_chain_intercept 注入（weight 0.5） | ✅ 保留 |
 | 工具别名映射 + FIX_SUFFIX | ✅ 保留 |
 | turns/event-log + event-snapshot | ✅ 保留（用于可观测性） |
+
+删除文件（543 行零引用死代码，送回收站）：
+
+| 文件 | 行数 | 说明 |
+|:----|:----:|:-----|
+| `src/audit/debt-ledger.ts` | 216 | 分类债务账本，从未被任何生产文件引用 |
+| `src/audit/quality-score.ts` | 105 | 质量评分，零引用 |
+| `src/audit/quality-baseline.ts` | 143 | session 质量基线，零引用 |
+| `src/audit/faithfulness.ts` | 79 | 忠实性检测，零引用 |
+
+知识菜单清理：
+
+| 文件 | 改动 |
+|:----|:-----|
+| `knowledge-menu.ts` | 移除 `debt_model` 菜单项 + 清理债务/faithfulness/quality_score 提及 + 注入器计数 15→16 |
+| `domain-analyzer.ts` | 移除 `debt_model` 域门控模式匹配 |
 
 - `SYSTEM/turn-control.md`：生命周期流程图移除 DebtLedger/H4/H3，替换为轻量化描述
 

@@ -37,18 +37,16 @@ const KNOWLEDGE_SNIPPETS: Record<string, string> = {
     '在 >50K token 时，归档摘要追加到尾部（已注销注册 Phase43）。',
 
   debt_model:
-    '[Knowledge: 债务模型 (Exploration Debt)]\n' +
-    '每次低效探索 +0.5 债务。探索债务达 carryover+4 触发 WARNING 提醒，\n' +
-    '达 carryover+7 触发 CRITICAL 警告（将导致阻断）。\n' +
-    'Bash 超时不扣债（Win11 环境问题不扣 AI）。\n' +
-    '债务跨回合 carryover=min(2, floor(debt))，不会每次从零开始。\n' +
-    'codegraph 调用不减债（防 dummy call 作弊），靠自然衰减。',
+    '[Knowledge: 债务模型 — 🗑️ 已移除 (2026-07-29)]\n' +
+    'DebtLedger + quality-score + faithfulness 全部是死代码，已被删除。\n' +
+    '不再有探索债务阻断。偏差链只做软提醒（tool-pattern detector + 收敛门注入）。\n' +
+    'FIX_SUFFIX (Read 失败尾部推荐替代工具) 保留，零负担正收益。',
 
   audit_chain:
     '[Knowledge: 审计链 (Audit Chain)]\n' +
     '墨克尔事件审计链：event-log 的每一条记录都包含 SHA256 哈希，\n' +
     '形成 append-only 链。任何对历史记录的篡改会被 verify() 检测。\n' +
-    '记录类型：interception(deviations/convergence)、injection、faithfulness、quality_score。\n' +
+    '记录类型：interception(deviations/convergence)、injection。\n' +
     '纯后台记录，不消耗 context token，不打断 AI。',
 
   codegraph:
@@ -62,7 +60,7 @@ const KNOWLEDGE_SNIPPETS: Record<string, string> = {
 
   injection_system:
     '[Knowledge: 注入系统 (Injection System)]\n' +
-    '15 个 DynamicInjector，通过 InjectionRouter 的 6 道门 + maxInjectionsPerStep=5 管控。\n' +
+    '16 个 DynamicInjector，通过 InjectionRouter 的 6 道门 + maxInjectionsPerStep=5 管控。\n' +
     '注入器按优先级调度：session-start → user-prefs → guard-feedback → intent → error-audit → ...\n' +
     'Budget cap per step: 5 条注入。超出排队到下一步。\n' +
     'system_trigger(收敛门)穿透 budget；quality_escalate_ 穿透 budget。',
@@ -71,7 +69,7 @@ const KNOWLEDGE_SNIPPETS: Record<string, string> = {
     '[Knowledge: 拦截系统 (Interception)]\n' +
     '三段式：A组(工具执行前) → B组(工具结果后) → C组(AI响应后收敛门)。\n' +
     'A组: reference_policy(Edit前查调用方) + output_constraint(格式约束)\n' +
-    'B组: step_valid(空回复/事实冲突) + step_code_explore(探索债务) + code_explore(carryover)\n' +
+    'B组: step_valid(空回复/事实冲突) + step_code_explore(探索提示) + code_explore(跨回合引导)\n' +
     'C组: convergence gate (G1-G3) + 收敛硬限制',
 };
 
@@ -80,7 +78,6 @@ const MENU_ITEMS = [
   { id: 'deviation_chain', label: '偏差链', cn: '偏差链 — 质量偏差检测与收敛' },
   { id: 'convergence_gate', cn: '收敛门 — 输出质量门控与阻断' },
   { id: 'distillation_tower', cn: '蒸馏塔 — 工具结果压缩与归档' },
-  { id: 'debt_model', cn: '债务模型 — 探索债务机制' },
   { id: 'audit_chain', cn: '审计链 — 墨克尔事件审计' },
   { id: 'codegraph', cn: 'codegraph — 代码智能查询' },
   { id: 'injection_system', cn: '注入系统 — DynamicInjector 管线' },

@@ -157,16 +157,15 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 
 ### 2.5 注意力管理 + 债务模型 (Attention + Debt)
 
-**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `agent/audit/debt-ledger.ts` + `agent/injection/domain-analyzer.ts` | **系统说明书**: `SYSTEM/attention-system.md`
+**文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `packages/agent-core/src/agent/injection/domain-analyzer.ts` | **系统说明书**: `SYSTEM/attention-system.md`
 
-- **30 个变体**，分级 critical/normal/debug（critical=最高优先级，不跳过）
+- **18 个变体**（Phase42 精简），分级 critical/normal/debug
 - **残差公式**：`R = W × D^Δs` — `W` 基础权重、`D` 衰减因子、`Δs` 距上次注入步数差
 - **步级竞争保护**：同一步多个变体竞争注入机会，每步注入上限 5 个
 - **阈值衰减**：每次成功注入后 `T *= thresholdDecay`
-- **DebtLedger 分类债务账本**（Phase42，替代旧 addDebt）：4 类（exploration/tool_error/reasoning/gate）各自记债、各自偿还、分类阻断。正确调用自动还债。见 `attention-system.md` §⑥。
 - **域门控 Domain Gating**（Phase42）：推理关键词+工具调用→活跃域→跳过不相关注入器+域匹配优先级提升。见 `attention-system.md` §⑥。
 - **知识菜单 REQUEST:**（Phase42）：step 1 注入 8 域菜单，AI 主动请求知识。见 `knowledge-menu.ts`。
-- **忠实性检测 FaithfulnessCheck**（Phase42）：被动离线检查推理动词 vs 工具调用一致性。0 token 成本。见 `faithfulness.ts`。
+- **偏差链软提醒**：tool-pattern detector + deviation_chain_intercept 注入(weight 0.5) + 收敛门注入，不阻断工具
 - **qualityIndex 质量反馈**（Phase42）：5 维评分 + session-end 持久化 + session-start 按分注入反馈。见 `quality-score.ts` + `quality-baseline.ts`。
 - **工具别名映射 TOOL_ALIAS**（Phase42b）：`codegraph_explore`→MCP 全名，消除 "Tool not found" 报错。
 - **路径豁免 knownPaths + [BulkRead]**（Phase42b）：codegraph/LSP 返回的路径及批量读取豁免探索债。

@@ -22,7 +22,6 @@ const TOOL_DOMAIN_MAP: Record<string, string[]> = {
 const KEYWORD_DOMAIN_MAP: Array<{ pattern: RegExp; domains: string[] }> = [
   { pattern: /\b(偏差链|deviation|quality.*降|stuck|loop|循环|连续.*编辑)\b/i, domains: ['deviation_chain'] },
   { pattern: /\b(收敛门|convergence|gate.*阻断|拦截|block|gated)\b/i, domains: ['convergence_gate'] },
-  { pattern: /\b(债务|debt|exploration|探索|低效|inefficient|carryover)\b/i, domains: ['debt_model'] },
   { pattern: /\b(审计|audit|event.*log|记录|tracking|墨克尔|merkle|sha256)\b/i, domains: ['audit_chain'] },
   { pattern: /\b(codegraph|explore.*代码|symbol|调用图|call.*graph|依赖)\b/i, domains: ['codegraph'] },
   { pattern: /\b(注入|injection|injector|system.*prompt|router|dispatch)\b/i, domains: ['injection_system'] },

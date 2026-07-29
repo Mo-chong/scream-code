@@ -16,23 +16,21 @@ updated: 2026-07-29
 
 ```
 ├─ ☑ AI 全景入口（优先读）
-│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制(收敛门severity+addDebt)/上下文/偏差链+债务模型/数据流(Phase40)
+│   └─ architecture-overview.md      — 5层架构/注入系统/回合控制(收敛门severity)/上下文/偏差链软提醒/数据流(Phase40)
 
 ├─ 接口手册
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链3条件/U1-U6/Checkpoint双向回退(Phase42d)/DebtLedger已取消
+│   ├─ turn-control.md            — 回合生命周期/收敛门(HIGH/LOW)/偏差链3条件/U1-U6/Checkpoint双向回退(Phase42d)/DebtLedger已删除
 │   ├─ injection-system.md        — ☑ 注入系统：16个注入器(Phase41新增3+v0.10.5新增McpBrowserSkillInjector, Phase42删2废弃)/32→18变体精简
-│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + DebtLedger分类债务+偿还(Phase41)+域门控+知识菜单REQUEST+忠实性检测+质量反馈+knownPaths路径豁免+BulkRead+TOOL_ALIAS(Phase42b)
+│   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + 域门控+知识菜单REQUEST(Phase42)/质量反馈已删除+DEPRECATED节
 │   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors + quality-degrade消息改写(Phase38/39/40)
 │   └─ prompt-assembly.md         — 模板渲染/AGENTS合并/注入链路
 
-├─ 审计系统
-│   ├─ audit/faithfulness.ts    — 忠实性被动检测(Phase41 P0.5)
-│   ├─ audit/quality-score.ts   — 5维质量评分(Phase41 P1)
-│   ├─ audit/quality-baseline.ts— 质量基线持久化+反馈回路(Phase41 P2)
-│   └─ audit/debt-ledger.ts     — 分类债务账本(4类+偿还+分类阻断)(Phase41 refactor)
+├─ 审计系统（2026-07-29 精简）
+│   ├─ audit/ → 4 文件（debt-ledger/quality-score/quality-baseline/faithfulness）已删除，零引用死代码
+│   └─ agent/audit/file-action-audit.ts — FAA 保留 ✅
 
 ├─ AGENTS 架构
 │   └─ agents-hierarchy.md         — 三层加载链(.git→projectRoot→dirs→collect→budget) + 四维评估 + 语言规范

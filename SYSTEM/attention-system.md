@@ -81,7 +81,11 @@ AI 自主调用工具，无系统干预。
 
 本轮检测→反馈的摘要进入下轮的历史计数，用于递进升级。
 
-### ⑥ 债务分类账 — DebtLedger（Phase41）[P1]
+### ⑥ [DEPRECATED] 债务分类账 — DebtLedger（Phase41 → 已删除 2026-07-29）
+
+> **⚠️ 已删除。** `debt-ledger.ts` / `quality-score.ts` / `quality-baseline.ts` / `faithfulness.ts` 全部是零引用死代码，已送回收站。
+>
+> 以下方案原文保留供历史参考，不再实施：
 
 替代单一 `explorationDebt`，采用 4 类分类债务：
 
@@ -139,26 +143,25 @@ AI 自主调用工具，无系统干预。
 | AI 输出 `"REQUEST: <topic>"` | `resolveKnowledgeRequest()` 解析 |
 | `handleAfterStep` 处理 | 匹配 → `this.inject(knowledgeSnippet)` + 记录 event-log |
 
-8 领域（实际域标签）：`deviation_chain` / `convergence_gate` / `distillation_tower` / `debt_model` / `audit_chain` / `codegraph` / `injection_system` / `interception`
+8 领域（实际域标签）：`deviation_chain` / `convergence_gate` / `distillation_tower` / `audit_chain` / `codegraph` / `injection_system` / `interception`
 
 - 知识注入走正常 `inject()` 路径，**消耗 token**
 - 不匹配的 `REQUEST:` 静默忽略（返回 null）
 - 知识内容在 `KNOWLEDGE_SNIPPETS` 中预定义，无外部通道检索
 
-#### 忠实度检查 — FaithfulnessCheck [P1]
+#### 忠实度检查 — FaithfulnessCheck [已删除 2026-07-29]
 
-| 属性 | 值 |
-|------|-----|
+> ❌ `faithfulness.ts` 是零引用死代码，已送回收站。以下方案原文保留供参考。
 | 执行时机 | `handleAfterStep`（被动离线分析） |
 | Token 消耗 | 0（不参与推理路径，不注入 prompt） |
 | 输出 | event-log 事件（`kind: faithfulness`） |
 | 检测内容 | **AI 推理文本中的动词 vs 实际工具调用的一致性**（如说"edit"但实际调了 Read→mismatch） |
 
 - 高精度、低召回策略——只检明确不一致（6 组动词→工具映射），不猜测
-- 一致/不一致都记录 event-log（修复 Phase41 beta 中只记不一致导致分无区分度的 bug）
-- 结果在 session-end 聚合进 QualityScore faithfulness 维度（权重 0.20）
 
-#### 质量指数反馈 — qualityIndex [P1]
+#### 质量指数反馈 — qualityIndex [已删除 2026-07-29]
+
+> ❌ `quality-score.ts` + `quality-baseline.ts` 是零引用死代码，已送回收站。以下方案原文保留供历史参考：
 
 ```
 session-end → recordQualityBaseline() → computeQualityScore() → writeBaseline()
@@ -172,11 +175,11 @@ session-start → readBaseline() → getFeedbackInjection() → inject()
 | deviation | (1 - 偏差触发步数/总步数) × 100 | 0.25 |
 | convergence | (1 - 收敛门触发步数/总步数) × 100 | 0.20 |
 | toolAccuracy | (1 - 工具报错数/总调用数) × 100 | 0.25 |
-| faithfulness | 一致数/总检查数 × 100 | 0.20 |
-| debtHealth | (1 - finalDebt/debtCap) × 100 | 0.10 |
+| faithfulness | — | — | ❌ 已删除 |
+| debtHealth | — | — | ❌ 已删除 |
 
 - qualityIndex = 加权平均四舍五入，0-100
-- 持久化为 `~/.scream-code/quality-baseline.json` 单文件（非 50 条滚动存储）
+- 持久化：❌ 已删除（quality-baseline.ts 已送回收站）
 - session-start 按分注入反馈：<55 加 4 条硬约束，<70 给建议，≥85 且不降表扬
 
 ### ⑦ [DEPRECATED] 统一债务累积（addDebt，Phase40，已被 DebtLedger 取代 2026-07-15）
@@ -227,9 +230,9 @@ Header 标签：`[拦截/CRIT]` / `[拦截/NORM]` / `[拦截/DBG]`
 
 ---
 
-## [DEPRECATED] 探索债务模型（codegraph 触发，已被 DebtLedger 取代）
+## [DEPRECATED] 探索债务模型（已删除 2026-07-29）
 
-> ⚠️ 已废弃。以下描述的 `explorationDebt` / `carryover` 字段已从代码中完全清除。替代为 `DeptLedger.exploration` 分类（见 §⑥）。
+> ⚠️ 已删除。所有 4 个 audit 文件（debt-ledger / quality-score / quality-baseline / faithfulness）已送回收站。以下保留供历史参考。
 
 旧机制（Phase 17，2026-07-15 废弃）：
 - 连续 Read/Grep ≥3 次提醒，≥5 次阻断
@@ -343,7 +346,7 @@ MicroCompaction: 已废弃
   └─ 我没调记忆 → scene-memory normal hint
 
 我连续 Read/Grep 探索:
-  ├─ exploration 债务 ≥ 4 → 建议用 codegraph + maxFiles 三档引导（DebtLedger）
-  ├─ exploration 债务 ≥ 8 → 警告接近阻断
-  └─ exploration 债务 ≥ 12 → 阻断 Read/Grep（主动还债可解封）
-```
+  ├─ tool-pattern detector 软提醒 → 建议用 codegraph + maxFiles 三档引导
+  └─ 无硬阻断，纯提示
+
+> 偏差链系统已精简：tool-pattern detector(软提醒) + deviation_chain_intercept(weight 0.5) + 收敛门注入，不再阻断工具调用。
