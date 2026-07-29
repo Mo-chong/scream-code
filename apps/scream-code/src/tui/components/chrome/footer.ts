@@ -198,20 +198,21 @@ function pickCacheColor(ratio: number): string {
   return '#EF4444';
 }
 
-/** Format the ⚡ cache hit ratio stats line. */
+/** Format the ⚡ cache hit ratio stats line. Only shown when API returns cache data. */
 function formatCacheStats(state: AppState): string {
-  const { cacheHitTokens, cacheMissTokens } = state;
-  const totalTotal = cacheHitTokens + cacheMissTokens;
+  const hit = state.cacheHitTokens ?? 0;
+  const miss = state.cacheMissTokens ?? 0;
+  const totalTotal = hit + miss;
   if (totalTotal <= 0) return '';
 
-  const ratio = cacheHitTokens / totalTotal;
+  const ratio = totalTotal > 0 ? hit / totalTotal : 0;
   const { lastStepCacheHit, lastStepCacheMiss = 0 } = state;
   const singleStepTotal = lastStepCacheHit + lastStepCacheMiss;
-  const singleRatio = singleStepTotal > 0 ? lastStepCacheHit / singleStepTotal : 1;
+  const singleRatio = singleStepTotal > 0 ? lastStepCacheHit / singleStepTotal : 0;
 
   const label = (s: string) => chalk.dim(s);
   const digits = (s: string) => chalk.white(s);
-  return ` ${label('⚡')} ${label('单')}:${digits((singleRatio * 100).toFixed(1) + '%')}  ${label('总')}:${digits((ratio * 100).toFixed(1) + '%')}`;
+  return ` ⚡ ${label('单')}:${digits((singleRatio * 100).toFixed(1) + '%')}  ${label('总')}:${digits((ratio * 100).toFixed(1) + '%')}`;
 }
 
 // ── Gradient status line for footer line 2 ───────────────────────────
