@@ -323,6 +323,20 @@ export class MicroCompaction {
           paths !== undefined && paths.length > 0
             ? `[Superseded by a newer read of ${paths.join(', ')}]`
             : config.truncatedMarker;
+        // Point B: 存档原始工具结果（截断前保留完整内容）
+        const textContent =
+          typeof msg.content === 'string'
+            ? msg.content
+            : Array.isArray(msg.content)
+              ? msg.content.map((p: any) => p.text ?? '').join('')
+              : '';
+        if (textContent.length > 0 && toolCallId !== undefined) {
+          this.agent.contentArchive?.archive(
+            'micro:' + toolCallId,
+            textContent,
+            { source: 'microCompact' },
+          );
+        }
         result.push({
           ...msg,
           content: [{ type: 'text', text: marker } as ContentPart],
