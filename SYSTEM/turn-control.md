@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/turn, status/final]
-keywords: [回合, turn, TurnController, afterStep, runOneTurn, 债务模型, 收敛门, 偏差链, 墨克尔]
-updated: 2026-07-17
+keywords: [回合, turn, TurnController, afterStep, runOneTurn, 收敛门, 偏差链]
+updated: 2026-07-29
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -22,7 +22,6 @@ updated: 2026-07-17
 runOneTurn()
   │
   ├── perTurnSetup()              ← 重置所有状态
-  │   ├── DebtLedger/carryover 重置
   │   ├── eventLog.clear()
   │   ├── appendUserMessage(input)
   │   └── Phase 4: 意图注入
@@ -34,11 +33,10 @@ runOneTurn()
        ├── generate()             ← AI 生成回复
        │
        ├── afterStep()            ← 每一步结束后的处理
-       │   ├── 偏差链检测（4 条件：Edit≥3未查LSP / 行为变体跨回合累计 / 代码质量违规）
+       │   ├── 偏差链检测（3 条件：Edit≥3未查LSP / 行为变体跨回合累计 / 代码质量违规）
        │   ├── 反事实检测（confidence >= 3 → confabulationBlocked = true）
        │   ├── 质量升级检测（C→B→A→S）
-       │   ├── 工具后注入（C5: step_after_edit / step_after_verify_fail）
-       │   ├── DebtLedger分类债务账本（exploration/tool_error/reasoning/gate）+ 偿还机制
+       │   ├── 工具后注入（C5: step_after_edit）
        │   ├── 忠实性检测（faithfulness：被动，无 token 开销）
        │   ├── REQUEST 知识请求（protocol + step 1 inject）
        │   └── 健康检查 + resetInjectorStepState
@@ -46,8 +44,6 @@ runOneTurn()
        ├── prepareToolExecution() ← 工具执行前阻断
        │   ├── H1 dedup
        │   ├── H2 Bash error loop
-       │   ├── H3 DebtLedger分类阻断（exploration超限→封Read/Grep, tool_error超限→封Edit/Write, total≥25→全阻断）
-       │   ├── H4 偏差链+代码质量 → 阻断 Write/Edit
        │   └── H5 截断恢复
        │
        ├── shouldContinueAfterStop()  ← 收敛门（8 条件 + confabulation + pending-doc）
@@ -58,7 +54,6 @@ runOneTurn()
        │
        └── finalizeToolResult()  ← 工具结果返回
            ├── isError → addDebt(工具名, 0.5)（Bash 超时除外）
-           ├── inject codegraph/keyword 记录
            └── FAA 记录
 ```
 
@@ -69,9 +64,8 @@ runOneTurn()
 | 字段 | 类型 | 作用 |
 |------|------|------|
 | `confabulationBlocked` | boolean | Guard 和反事实检测设置，收敛门消费 |
-| `debtLedger` | DebtLedger | 分类债务账本（exploration/tool_error/reasoning/gate） |
 | `maxConvergenceInjections` | 3 | 收敛门最大注入次数 |
-| `deviationChainActive` | boolean | 偏差链激活标志 |
+| `deviationChainActive` | boolean | 偏差链激活标志（软提醒，不阻断工具） |
 
 ---
 
@@ -86,12 +80,11 @@ runOneTurn()
 ### afterStep()
 
 每次 AI 生成完一步后执行。包含所有检测和注入逻辑：
-- 偏差链 4 条件（C1: Edit≥3未查LSP / C3: 行为变体累计 / C4: 代码质量）
-- DebtLedger分类债务账本 + 偿还机制
+- 偏差链 3 条件（C1: Edit≥3未查LSP / C3: 行为变体累计 / C4: 代码质量）
 - 忠实性检测（faithfulness：被动无感，不占 token budget）
 - REQUEST 知识请求（协议：LLM → system 发 REQUEST，step 1 注入回答）
 - 语义重复检测 + 后置校验
-- C5 工具后注入
+- 工具后注入（step_after_edit）
 
 ### shouldContinueAfterStop()
 
@@ -99,9 +92,7 @@ runOneTurn()
 
 ### addDebt(reason, amount)
 
-**Phase40 新增，Phase42 起重构为 DebtLedger 分类账本（`audit/debt-ledger.ts`）**。
-`addDebt(reason, amount)` 通过 `toolToCategory(toolName)` 自动映射到 4 个分类（exploration/tool_error/reasoning/gate），不再使用 `carryover`。
-见 §DebtLedger 分类债务账本。
+**Phase40 新增。** 工具报错时记录（-0.5/次，Bash 超时除外），仅用于 tracking 不阻断。见 §FAA。
 
 ---
 
@@ -124,20 +115,13 @@ runOneTurn()
 | `scene_memory_recall` 变体 | 已有 scene-memory detector |
 | `step_after_edit` / `step_after_verify_fail` 变体 | 与其他机制重复 |
 
-### 3 个跨回合跟踪变体（INTERCEPT_VARIANTS）
-
-| 变体 | 阈值 | 检测什么 |
-|------|------|---------|
-| `guard_feedback_rule_2` | 3 | 声称无证据 |
-| `guard_feedback_rule_3` | 2 | 声称已修改无 Edit |
-| `guard_feedback_rule_4` | 3 | 用记忆不查代码 |
-
-### 3 个介入点
+### 介入点
 
 | 介入点 | 触发条件 | 效果 |
 |--------|---------|------|
-| G3 收敛门（HIGH） | AI 说"完成"时偏差链活跃未解决 | 注入 reason + 阻止回合结束 |
-| H4 硬阻断 | 偏差链活跃 + reason 含代码质量 + 写/Edit | syntheticResult.isError 阻断 |
+| 收敛门（HIGH） | AI 说"完成"时偏差链活跃未解决 | 注入 reason + 阻止回合结束 |
+
+> H4 硬阻断（偏差链→阻断 Write/Edit）已废弃（2026-07-29）。偏差链只通过收敛门和 tool-pattern detector 做软提醒，不直接阻断工具调用。
 
 ### 偏差链解析条件
 
@@ -148,60 +132,23 @@ runOneTurn()
 
 ---
 
-## DebtLedger 分类债务账本（Phase42，替代 explorationDebt）
+## [DEPRECATED] DebtLedger 分类债务账本 + knownPaths + BulkRead（已取消）
 
-从 Phase42 起，`explorationDebt` 单一债务升级为 **DebtLedger** 分类账本（`audit/debt-ledger.ts`）：
-4 类单独记债、单独引导、分类阻断。**有偿还债**（每步正确调用自动减债）。
-
-### 债务分类
-
-| 分类 | 加债场景 | 金额 | 加债入口 |
-|------|---------|:----:|---------|
-| `exploration` | 低效 Read/Grep/Glob/WebSearch | +0.5 | `addDebt('Read 报错')` → `toolToCategory('Read')` → exploration |
-| `tool_error` | Edit/Write/Bash 报错 | +0.5 | `addDebt('Edit 报错')` → `toolToCategory('Edit')` → tool_error |
-| `reasoning` | faithfulness mismatch（推理动词≠工具调用） | +0.3 | `checkFaithfulness()` → mismatch → `debtLedger.addDebt('reasoning')` |
-| `gate` | 收敛门 G3 拦截 | +1.0 | 收敛门触发时 `debtLedger.addDebt('gate', '收敛门拦截', 1.0)` |
-
-### 偿还机制
-
-| 机制 | 触发 | 金额 |
-|------|------|:----:|
-| `repayAll()` | 每次正确工具调用（在 handleAfterStep 中） | -0.05/类，总计 -0.2/步 |
-| streak bonus | 连续 3 次正确调用（某分类无加债） | 额外 -0.3（该分类），连胜计数器归零 |
-| `repayGate()` | 收敛门解决（流程完成） | -0.5（gate 分类）|
-
-### 定向阻断
-
-统一阈值 12.0（gate 8.0），安全网 total ≥ 25。在 B 组 prepareToolExecution 中由 `shouldBlockTool()` 直接阻断：
-
-| 条件 | 阻断范围 | 消息模板 |
-|------|---------|---------|
-| exploration ≥ 12 | 封 Read / Grep / Glob / WebSearch | "探索债务已达 N 点。用 codegraph_explore。" |
-| tool_error ≥ 12 | 封 Edit / Write | "工具错误债务 N 点。检查格式约束。" |
-| reasoning ≥ 12 | 无工具阻断（仅警告注入） | "推理不一致债务 N 点。" |
-| gate ≥ 8 | 全工具阻断 | "拦截债务高，需全面修正策略。" |
-| total ≥ 25 | 全阻断（安全网） | "总债务达上限，报告用户请求介入。" |
-
-> 与旧机制的差异：阻断不通过 InjectionRouter，不走 ToolPatternDetector（DebtLedger 直接阻断，不经过检测器管线）。阻断消息由 `DebtLedger.getGuidance()` 生成，**仅阻断超限分类的工具**，其他工具可正常还债。
-
-### ② Phase42b：工具别名 + 路径豁免 + 批量标记
-
-#### 工具别名映射（turn/index.ts A组）
-
-| AI 说的短名 | 系统转为 | 解决 |
-|-------------|---------|------|
-| `codegraph_explore` | `mcp__codegraph__codegraph_explore` | system.md 写短名，MCP 注册长名，AI 不混淆 |
-| `codegraph_node` | `mcp__codegraph__node` | 同上 |
-
-A组 prepareToolExecution 前：`TOOL_ALIAS[ctx.toolCall.name] ?? ctx.toolCall.name`，匹配到的直接改写 `ctx.toolCall.name`。
-
-#### knownPaths 路径豁免
-
-**机制：** codegraph/LSP 调用成功 → 提取输出中的源码路径（`.ts/.js/.tsx/.jsx/.py/.go/.rs`）→ 写入 `knownPaths: Set<string>` → `isExploratoryReadGrep()` 检查 Read 路径是否匹配 → 匹配则不算探索债。每 session newTurn 清空。
-
-#### [BulkRead] 批量标记
-
-**机制：** AI 在推理文本中声明 `[BulkRead: src/auth/*.ts]` → `checkFaithfulness()` 检测 → `bulkReadPatterns[]` 记录 → `isExploratoryReadGrep()` 前缀匹配（`src/auth/`）→ 豁免。
+> **⚠️ 设计方案已取消（2026-07-29）。** 审计数据表明偏差链导致的 token 浪费不必用硬阻断来纠正，`tool-pattern` detector 的软提醒 + 收敛门注入已足够。
+>
+> 以下为设计文档残留，不实施：
+> - `audit/debt-ledger.ts` — 不存在，不创建
+> - H3 分类阻断（exploration/tool_error/reasoning/gate）— 不实施
+> - H4 偏差链→阻断 Write/Edit — 不实施
+> - `knownPaths` 路径豁免 — 不实施
+> - `[BulkRead]` 批量标记 — 不实施
+>
+> 保留的轻量化机制：
+> - `tool-pattern` detector（连续 Read≥3→提示 codegraph）— 软提醒 ✅
+> - `deviation-chain` detector（跨回合延续 flag）— 软提醒 ✅
+> - `deviation_chain_intercept` 注入 weight 0.5（偏差链激活时注入提示）— 软提醒 ✅
+> - 工具别名映射（`codegraph_explore` → `mcp__codegraph__codegraph_explore`）— 保留 ✅
+> - FIX_SUFFIX（Read 失败尾部推荐 `/edit-fix/node/explore`）— 保留 ✅
 
 ---
 
@@ -308,7 +255,7 @@ CheckpointManager 为每个 Edit/Write 操作保存**双向快照**：
 
 ## [DEPRECATED] 关键常量变化（旧探索债务模型，Phase40 → 已废弃）
 
-> ⚠️ 已废弃。以下常量来自旧 `explorationDebt` 模型，已被 **DebtLedger** 替换。保留仅供参考。
+> ⚠️ 已废弃。以下常量来自旧 `explorationDebt` 模型，已被 **移除**（Phase42 取消）。保留仅供参考。
 
 | 常量 | 旧值 | 新值 | 备注 |
 |------|------|------|------|

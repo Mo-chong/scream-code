@@ -22,7 +22,7 @@ updated: 2026-07-29
 │   └─ API-REFERENCE.md           — 函数签名/类型定义/调用关系/配置项
 
 ├─ 执行架构
-│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链4条件/U1-U6/DebtLedger分类债务(4类+偿还+分类阻断)+faithfulness+已知路径豁免+BulkRead+Checkpoint双向回退(Phase42d)
+│   ├─ turn-control.md            — 回合生命周期/收敛门(severity HIGH/LOW)/偏差链3条件/U1-U6/Checkpoint双向回退(Phase42d)/DebtLedger已取消
 │   ├─ injection-system.md        — ☑ 注入系统：16个注入器(Phase41新增3+v0.10.5新增McpBrowserSkillInjector, Phase42删2废弃)/32→18变体精简
 │   ├─ attention-system.md    — ☑ 统一大脑：AI 全流程 5 步 + 3 级优先级 + DebtLedger分类债务+偿还(Phase41)+域门控+知识菜单REQUEST+忠实性检测+质量反馈+knownPaths路径豁免+BulkRead+TOOL_ALIAS(Phase42b)
 │   ├─ interception-system.md — ☑ 拦截执行层：InterceptionManager 9 detectors + quality-degrade消息改写(Phase38/39/40)

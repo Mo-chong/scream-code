@@ -2,7 +2,7 @@
 ---
 tags: [type/changelog, status/final, domain/system]
 keywords: [changelog, 开发日志, Phase, CHANGELOG, 更新日志]
-updated: 2026-07-23
+updated: 2026-07-29
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -501,6 +501,8 @@ updated: 2026-07-23
 
 
 ### Phase42 — 智能上下文注入：域门控 + 分类债务账本 DebtLedger（2026-07-15）
+
+> ⚠️ DebtLedger + knownPaths + BulkRead + H4 硬阻断 — **设计方案已取消（2026-07-29）**。见 §Phase42 注入变体精简（2026-07-28）。
 
 **新文件（4）：**
 - `audit/debt-ledger.ts` — 分类债务账本，替代 explorationDebt 一锅烩
@@ -1151,6 +1153,27 @@ updated: 2026-07-23
 
 - **VARIANT_META 精简**: 32→18 变体（-44%）。删除 7 个死变体：`scene_memory_recall`（15 天零触发）、`code_quality_feedback`（零触发）、`guard_feedback_rule_2/3/4`（Phase38j 已精简）、`post_verify_pass`（文档/代码矛盾修复）、`truncation_recover_guard`（v3 已废弃）
   - `packages/agent-core/src/agent/turn/variant-registry.ts`
+- **deviation_chain_intercept 降权**: weight 1.0→0.5, threshold 0.1→0.3, decay 0.99→0.95, minStepGap 0→4。偏差链从"最高权重硬拦截"降为"软提醒"。
+  - `packages/agent-core/src/agent/turn/variant-registry.ts`
+
+#### 纪律系统减负 — DebtLedger + H4 + knownPaths + BulkRead 取消
+
+审计数据表明，偏差链导致的 token 浪费（整体 →0.0001%）不值得用硬阻断纠正。软提醒（tool-pattern detector + deviation_chain_intercept 注入 + 收敛门）已足够。
+
+| 项 | 状态 |
+|:---|:-----|
+| DebtLedger 分类债务账本（4类+偿还+分类阻断） | ❌ 取消设计，不实施 |
+| H3 分类阻断（exploration≥12→封Read/Grep） | ❌ 取消 |
+| H4 偏差链→阻断 Write/Edit | ❌ 取消 |
+| knownPaths 路径豁免 | ❌ 取消 |
+| [BulkRead] 批量标记 | ❌ 取消 |
+| tool-pattern detector（连续Read≥3→提示codegraph） | ✅ 保留 |
+| deviation-chain detector（跨回合延续flag） | ✅ 保留 |
+| deviation_chain_intercept 注入（weight 0.5） | ✅ 保留 |
+| 工具别名映射 + FIX_SUFFIX | ✅ 保留 |
+| turns/event-log + event-snapshot | ✅ 保留（用于可观测性） |
+
+- `SYSTEM/turn-control.md`：生命周期流程图移除 DebtLedger/H4/H3，替换为轻量化描述
 
 #### 文件删除（送回收站）
 

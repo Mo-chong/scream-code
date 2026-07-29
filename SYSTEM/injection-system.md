@@ -81,7 +81,7 @@ export interface VariantMeta {
 
 | 变体名 | weight | decayPerStep | threshold | minStepGap | 等级 | 用途 |
 |--------|--------|-------------|-----------|-----------|------|------|
-| `deviation_chain_intercept` | 1.20 | 0.90 | 0.3 | 3 | A | 偏差链拦截 |
+| `deviation_chain_intercept` | 0.5 | 0.95 | 0.3 | 4 | A | 偏差链拦截（Phase42 降权：1.0→0.5，缩减硬阻断为软提醒）
 | `intent_*` (6变体) | 0.5-0.8 | 0.88-0.90 | 0.3 | 0-2 | A/B | 意图检测引导（fix_bug/refactor/add_feature/review/research/document） |
 | `prepare_*` (3变体) | 0.7-0.8 | 0.85 | 0.35-0.40 | 3-4 | B | 准备阶段注入（prepare_write/prepare_memory/prepare_verify） |
 | `post_*` (3变体) | 0.5-0.9 | 0.80-0.85 | 0.40 | 3-4 | C | 执行后注入（post_write_large/post_verify_fail/post_memory） |
@@ -150,7 +150,7 @@ VariantMeta.weight ← 基础权重
 
 | 变体组 | 包含变体数量 | 典型 weight | 典型 decayPerStep | 注入器覆盖 |
 |--------|------------|-------------|-------------------|-----------|
-| `deviation_chain_intercept` | 1 | 1.20 | 0.90 | 偏差链检测 |
+| `deviation_chain_intercept` | 1 | 0.50 | 0.95 | 偏差链检测（软提醒，不阻断） |
 | `intent_*` | 6 | 0.5-0.8 | 0.88-0.90 | intent-injector.ts |
 | `prepare_*` | 3 | 0.7-0.8 | 0.85 | prepare 注入器 (write/memory/verify) |
 | `post_*` | 3 | 0.5-0.9 | 0.80-0.85 | post 注入器 (write_large/verify_fail/memory) |

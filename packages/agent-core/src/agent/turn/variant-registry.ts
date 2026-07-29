@@ -271,7 +271,7 @@ export function getScore(variant: string, stepDelta: number): number {
 }
 
 export const VARIANT_META: Record<string, VariantMeta> = {
-  deviation_chain_intercept:   { weight: 1.0, decayPerStep: 0.99, threshold: 0.1, minStepGap: 0 },
+  deviation_chain_intercept:   { weight: 0.5, decayPerStep: 0.95, threshold: 0.3, minStepGap: 4 },
 
   // intent — 回合开始时注入，不跨步衰减
   intent_fix_bug:              { weight: 0.9, decayPerStep: 0.92, threshold: 0.3, minStepGap: 0 },
