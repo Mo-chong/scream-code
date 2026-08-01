@@ -25,6 +25,8 @@ import type {
   LoopMessageBuilder,
   LoopTerminalStepStopReason,
   LoopTurnStopReason,
+  MediaProjectionState,
+  RecordStepUsageResult,
   TurnResult,
 } from './types';
 
@@ -35,10 +37,19 @@ export interface RunTurnInput {
   readonly buildMessages: LoopMessageBuilder;
   readonly dispatchEvent: LoopEventDispatcher;
   readonly tools?: readonly ExecutableTool[] | undefined;
+  /**
+   * Per-step tool table builder. When present it wins over `tools` and is
+   * re-invoked before every step, so a tool loaded mid-turn is dispatchable
+   * on the very next step and runtime tool visibility stays fresh.
+   */
+  readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
+  readonly recordStepUsage?:
+    | ((usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>)
+    | undefined;
   /**
    * Poll for queued user steering while a tool batch is in flight. When it
    * flips true, the batch's tools are interrupted (user-cancellation abort)
@@ -56,18 +67,26 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     buildMessages,
     dispatchEvent,
     tools,
+    buildTools,
     hooks,
     log,
     maxSteps,
     maxRetryAttempts,
+    recordStepUsage: hostRecordStepUsage,
   } = input;
   let usage: TokenUsage = emptyUsage();
   let steps = 0;
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
-  const recordStepUsage = (stepUsage: TokenUsage): void => {
+  // Shared mutable state: once a step recovers via media degradation, all
+  // subsequent steps in this turn use the same projection directly.
+  const mediaProjection: MediaProjectionState = { mode: 'normal' };
+  const recordStepUsage = async (
+    stepUsage: TokenUsage,
+  ): Promise<RecordStepUsageResult | void> => {
     usage = addUsage(usage, stepUsage);
+    return hostRecordStepUsage?.(stepUsage);
   };
 
   try {
@@ -87,12 +106,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         dispatchEvent,
         llm,
         tools,
+        buildTools,
         hooks,
         log,
         currentStep: steps,
         maxRetryAttempts,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
+        mediaProjection,
       });
       activeStep = undefined;
 

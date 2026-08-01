@@ -48,6 +48,17 @@ export type LoopTerminalStepStopReason = Exclude<LoopStepStopReason, 'tool_use'>
 export type LoopTurnStopReason = LoopTerminalStepStopReason | 'aborted';
 
 /**
+ * Shared mutable state tracking the active media projection mode for a turn.
+ * When a step fails because the provider rejects media (too large, bad
+ * format), the recovery logic flips the mode and subsequent steps in the
+ * same turn use the degraded/stripped projection directly, avoiding a
+ * wasted failed request per step.
+ */
+export interface MediaProjectionState {
+  mode: 'normal' | 'degraded' | 'stripped';
+}
+
+/**
  * @deprecated Legacy umbrella union. Use `LoopStepStopReason` for per-step
  * model responses and `LoopTurnStopReason` for `TurnResult`.
  */
@@ -204,9 +215,19 @@ export interface ShouldContinueAfterStopResult {
   readonly continue: boolean;
 }
 
+/** Return value of `recordUsage` when the host wants to stop the turn early. */
+export interface RecordStepUsageResult {
+  readonly stopTurn?: boolean | undefined;
+}
+
+/** Return value of `afterStep` hook when it wants to stop the turn early. */
+export interface AfterStepResult {
+  readonly stopTurn?: boolean | undefined;
+}
+
 export type BeforeStepHook = (ctx: LoopStepHookContext) => Promise<BeforeStepResult | undefined>;
 
-export type AfterStepHook = (ctx: LoopAfterStepContext) => Promise<void>;
+export type AfterStepHook = (ctx: LoopAfterStepContext) => Promise<AfterStepResult | undefined>;
 
 export type PrepareToolExecutionHook = (
   ctx: ToolExecutionHookContext,
