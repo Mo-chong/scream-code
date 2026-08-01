@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/knowledge, status/final]
 keywords: [知识库, knowledge, chunk, 向量检索, FTS5, 蒸馏塔, SABCD, SYSTEM-INDEX, 索引同步]
-updated: 2026-07-29
+updated: 2026-08-01
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -183,6 +183,8 @@ updated: YYYY-MM-DD
 | **注：** 修改代码后必须更新对应 SYSTEM 文档的 `updated` 字段和版本表 |
 | **Phase42d 说明书查缺补漏** | `context-management.md` / `turn-control.md` / `injection-system.md` / `architecture-overview.md` | 补 SnipHinter+Checkpoint 文档+edit_error_fix 变体 |
 | **v0.11.2 合并（64 commits）** | `footer.ts` / `manager.ts` / `micro.ts` / `build-dev.sh` / `package.json` | 取 theirs 后逐一 grep 补 fork 增强 + pi-tui 版本手动覆盖导致脱节 + build-dev.sh 缺 web 构建 |
+| **Phase43 memos.map 崩溃修复（2026-08-01）** | `full.ts:738` / `extractor.ts` / `index.ts:650` | `parseMemoryMemos` 漏 await → Promise 被当数组 → `memos.map` TypeError → 补 await。详见 pitfalls.md + CHANGELOG Phase43 |
+| **Phase44 scream-life 接入+中文增强（2026-08-01）** | `D:/AI/scream-life/`（新项目）`~/.scream-code/mcp.json` `Core/decision-signals.ts` `Core/capture.ts` | 独立决策记忆 MCP 服务，非 scream-code 依赖；English-only 信号表加中文（零侵入数组追加）；Chroma code=null 是管道 EOF 假象非降级。详见 pitfalls.md + CHANGELOG Phase44 |
 
 ## 5. system.md 维护规则 [P0]
 

@@ -2,7 +2,7 @@
 ---
 tags: [type/changelog, status/final, domain/system]
 keywords: [changelog, 开发日志, Phase, CHANGELOG, 更新日志]
-updated: 2026-07-29
+updated: 2026-08-01
 ---
 
 > 更新规则 [P0]: 上游合并日志 / 二开发日志 两条线独立记录
@@ -15,6 +15,35 @@ updated: 2026-07-29
 | 路径标注 [P1] | 每个条目必须含文件路径或行号 | AI 可导航至具体文件 |
 | 时间戳 [P0] | 每个 `###` 必须有日期 | 禁止无日期条目 |
 | 禁止 [P0] | 混写两线 / 无路径 / 无日期 / 概括废话 / 新旧倒置 | 上游倒序、二开正向 |
+
+---
+
+## v0.11.6 — 合并上游 0.11.2→0.11.6（2026-07-29）
+
+### 新功能
+- **Bash 超时后台化**：长命令超时不杀，转后台继续跑（`background-tasks.ts` 新增），下次 Bash 调用汇报结果
+- **Decision Memory MCP**：推荐列表新增决策记忆服务器
+- **媒体投影**（`media-projection.ts`）：图片/媒体转文本，AI 可"看"图
+
+### 优化
+- **retry 增强**：LLM 调用失败自动重试更智能
+- **render-cache**：TUI 渲染缓存层，重复内容不重复绘制
+- **system.md 上游自增强**：Context Management / Verification / Anti-Drift（+26 行，已按 §5 吸收 5 项）
+- TUI 显示微调（thinking/tool-call 中断区分）
+
+### 修复
+- Ctrl-G 帮助面板条目修正
+- aborted 工具在 UI 中区分显示
+
+### 二开影响
+低。2 文件冲突。
+
+| 文件 | 策略 |
+|------|------|
+| `loop/turn-step.ts` | 互补合并 4 块：保留 masking 增强 + 吸收 effectiveTools/recordUsage/recordUnexecutedToolCalls |
+| `profile/default/system.md` | 按 §5 吸收 5 项（Context Management 新章节 / NEVER re-audit / NEVER token budget / Verification 复现闭环 / TodoList 批处理），266→277 行 |
+
+`system.md`: 吸收式合并（本地为基，零覆盖）。fork 核心文件零改动。
 
 ---
 
@@ -1208,3 +1237,45 @@ updated: 2026-07-29
 - `SYSTEM/injection-system.md`：更新变体注册表表格、注入器计数、变体组表、弃用标注、时间戳
 - `SYSTEM/MAP.md`：注入器计数 17→16
 - `SYSTEM-INDEX.md`：移除 persistent-summary.ts 引用
+
+### Phase43 — 修复 compaction 记忆提取 memos.map 崩溃（2026-08-01）
+
+#### 修复
+
+- **parseMemoryMemos 漏 await**：`packages/agent-core/src/agent/compaction/full.ts:738` — `const memos = parseMemoryMemos(summary)` 缺 `await`，`parseMemoryMemos` 为 async（`packages/memory/src/extractor.ts:7`，内部 `await processTags`），返回 `Promise<MemoryMemo[]>` 非数组 → `memos.length === 0` 恒 false → `memos.map` 抛 `TypeError` → 记为 `[compaction.failed]`
+- 压缩主流程未受影响（摘要已生成），崩溃发生在后处理 `extractAndStoreMemos()` 记忆提取阶段
+- 修复：补 `await`，与 `agent/index.ts:650` 同函数正确写法对齐
+
+#### 验证
+
+- `compaction.test.ts`：修复后 7 failed / 55 passed / 1 skipped，与 `git stash` 基线完全一致（预存失败，零回归）
+- `tsdown` 构建 agent-core：Build complete, EXIT 0
+
+#### 文档
+
+- `SYSTEM/pitfalls.md`：新增 2 条踩坑记录（漏 await 根因链 + compaction.failed 排查顺序）
+
+### Phase44 — 接入 scream-life 决策记忆系统 + 中文增强（2026-08-01）
+
+#### 接入
+
+- **clone** `LIUTod/scream-life`（作者第 2 个独立项目，v0.1.0）到 `D:/AI/scream-life`（与 ScreamCode 平级）
+- **依赖**：装 bun（winget 包 ID 错 → 官方脚本 `irm bun.sh/install.ps1 | iex`），`bun install` 5 packages
+- **MCP 注册**：`~/.scream-code/mcp.json` 追加 `scream-life`（stdio + bun 绝对路径 + DB 绝对路径 + `SCREAM_LIFE_INTERCEPT=1`）
+- **全链路验证**：initialize → tools/list（14 工具）→ capture 写入 → query 读取，读写闭环成立（`dec-2026-08-01-2cb914`）
+
+#### 中文增强（fork）
+
+- **根因**：`decision-signals.ts` 作者自注 "English-only signals"，4 组信号表 + 7 个 intent hints 全英文硬编码，中文零识别（capture 中文句 → `kind: none`）
+- **修复**：信号表数组直接追加中文短语（消费方全为 `lower.includes()` 字符串匹配，零侵入）——DECISION/MISS/AGENT/OPEN + intent hints
+- **改动文件**（上游更新合并时需保护）：`D:/AI/scream-life/Core/decision-signals.ts` / `Core/capture.ts` / `tests/classify.test.ts`
+- **验证**：+12 中文用例全过；真实 MCP capture 中文 → `kind: "decision"`、`matched_signals: ["决定"]`；全量 124 pass / 89 fail（基线 112/89，零回归）
+
+#### 关键结论
+
+- **Chroma 无降级**：管道测试 stdin EOF 触发 `stopChroma()` 误杀子进程 → `code=null` 是测试假象；手动 spawn 复现 ready，本地 Python 3.14 + uvx 齐全，向量检索正常
+- **git 全局代理已设**：`http.proxy/https.proxy = 127.0.0.1:7890`（clone 所需，全局生效）
+
+#### 文档
+
+- `SYSTEM/pitfalls.md`：新增 2 条（管道测试 stdin EOF 假象 + English-only 信号中文增强）

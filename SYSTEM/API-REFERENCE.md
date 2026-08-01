@@ -965,10 +965,13 @@ class GrowthPredictor {
 	  // 文本 → token 计数
 	```
 
-	### 7.11 增量 LLM 摘要（compaction/summary.ts）
-	<!-- ref: summary -->
+### 7.11 增量 LLM 摘要（compaction/summary.ts）— 🗑️ 已废弃
 
-	**文件**: `agent/compaction/summary.ts`
+<!-- ref: summary -->
+
+> **Phase42 已删除管线**：`turn/index.ts` 不再调用 `summarizeWithLLM`（splice 断缓存 + 异步 LLM 浪费）。文件残留但零引用（死文件）。归档层 `ArchivalSummaryInjector` 替代。
+
+**文件**: `agent/compaction/summary.ts`
 
 	```typescript
 	summarizeWithLLM(
@@ -984,11 +987,11 @@ class GrowthPredictor {
 	  // 返回格式：emoji bullet list，最多 6 条
 	```
 
-	**触发位置**: `turn/index.ts:updatePersistentSummary()`
-	- beforeStep 中调用，上轮 ≥ 8 步时触发
-	- 走 `system_trigger` → `appendSystemReminder` → 尾部（不破坏缓存前缀）
-	- 注入前 `context.removeSystemRemindersByPrefix('[summary]')` 清理旧摘要
-	- 成本：~$0.0004/次，~$0.02/天（3756 步/天真实数据）
+	**触发位置**: ❌ 已移除（Phase42 从 turn/index.ts 删除）
+	- ~~beforeStep 中调用，上轮 ≥ 8 步时触发~~
+	- ~~走 `system_trigger` → `appendSystemReminder` → 尾部（不破坏缓存前缀）~~
+	- ~~注入前 `context.removeSystemRemindersByPrefix('[summary]')` 清理旧摘要~~
+	- ~~成本：~$0.0004/次，~$0.02/天（3756 步/天真实数据）~~
 
 	### 7.12 knowledge-web / knowledge-store（v0.8.4 upstream）
 	<!-- ref: knowledge-web -->
@@ -1096,8 +1099,11 @@ finalizeToolResult: truncated === true → register(key, toolName, step, ...)
 afterStep: clearStepRecovered(currentStep) → prune(currentStep)
 ```
 
-### 8.2 ArchiveRecoverTool
+### 8.2 ArchiveRecoverTool — 🗑️ 已废弃（Phase39 注销）
+
 <!-- ref: ArchiveRecoverTool -->
+
+> **Phase39 已注销注册**：5 天零调用，训练分布不支持 AI 主动取回。蒸馏塔归档层替代（内容自动送达到 AI 面前）。文件残留但不注册。
 
 **文件**: `packages/agent-core/src/tools/builtin/context/archive-recover.ts`
 
@@ -1376,8 +1382,8 @@ class KnowledgeLookupTool implements StepTool
 
 | 接口 | 文件 | 签名 | 说明 |
 |------|------|------|------|
-| `addDebt` | turn/index.ts (私有方法，已废弃) | `addDebt(reason: string, amount?: number): void` | ⚠️ **已废弃**。被 `audit/debt-ledger.ts` DebtLedger 替代。旧：统一债务累积，所有工具报错加债 + FIX_SUFFIX。新：4 分类(exploration/tool_error/reasoning/gate)独立记债 + 偿还机制 + 分类阻断。 |
-| `FIX_SUFFIX` | turn/index.ts (私有常量) | `Record<string, string>` | 高频工具修复路径映射：Edit→/edit-fix, Bash→换内置工具/explore, Read→Glob/node, Grep→explore, Write→Glob |
+| `addDebt` | turn/index.ts (私有方法，已废弃) | `addDebt(reason: string, amount?: number): void` | 🗑️ **已废弃 Phase42**：DebtLedger 已删，债务模型全部废弃。旧：统一债务累积。 |
+| `FIX_SUFFIX` | turn/index.ts (私有常量) | `Record<string, string>` | ✅ 仍存活。高频工具修复路径映射：Edit→/edit-fix, Bash→换内置工具/explore, Read→Glob/node, Grep→explore, Write→Glob |
 
 ### quality-degrade 消息改写（Phase40）
 
@@ -1405,31 +1411,29 @@ class KnowledgeLookupTool implements StepTool
 
 | 文件 | 说明 |
 |------|------|
-| turn/index.ts finalizeToolResult | Bash 超时（output 含 `timeout`/`grace timeout`/`Premature close`）跳过 addDebt。Win11 环境问题不扣 AI 债务。 |
+| turn/index.ts finalizeToolResult | Bash 超时（output 含 `timeout`/`grace timeout`/`Premature close`）豁免。Win11 环境问题。 |
 
 ### Phase42 — 注意力与偏好系统升级
 
 | 接口 | 文件 | 签名 | 说明 |
 |------|------|------|------|
-| `DebtLedger` | `audit/debt-ledger.ts` | `new DebtLedger(carryover?)` + `addDebt(cat, reason, amount)` + `repay(cat, amount)` + `repayAll()` + `repayGate()` + `shouldBlockTool(name)` + `getBlockedCategories()` | 4 分类债务账本（exploration/tool_error/reasoning/gate）。替代旧 explorationDebt。 |
-| `checkFaithfulness` | `audit/faithfulness.ts` | `checkFaithfulness(reasoningText, toolCounts): FaithfulnessResult` | 被动忠实性检测。检查推理动词 vs 实际工具调用是否一致。 |
-| `computeQualityScore` | `audit/quality-score.ts` | `computeQualityScore(input: QualityScoreInput): QualityScoreResult` | 5 维质量评分。加权合成 qualityIndex（0-100）。 |
-| `writeBaseline` | `audit/quality-baseline.ts` | `writeBaseline(qualityIndex: number): void` | session-end 写 qualityIndex 到 ~/.scream-code/quality-baseline.json。 |
-| `readBaseline` | `audit/quality-baseline.ts` | `readBaseline(): QualityBaselineData` | session-start 读持久化质量基线。 |
-| `getFeedbackInjection` | `audit/quality-baseline.ts` | `getFeedbackInjection(data): string \| null` | 按分生成反馈：<55 加硬约束，<70 给建议，≥85 表扬。 |
+| ~~`DebtLedger`~~ 🗑️ | ~~`audit/debt-ledger.ts`~~ | — | **已删除 Phase42**（216 行送回收站）。旧 addDebt 债务模型全部废弃。 |
+| ~~`checkFaithfulness`~~ 🗑️ | ~~`audit/faithfulness.ts`~~ | — | **已删除 Phase42**（543 行 4 文件之一）。被动忠实性检测废弃。 |
+| ~~`computeQualityScore`~~ 🗑️ | ~~`audit/quality-score.ts`~~ | — | **已删除 Phase42**。5 维质量评分废弃。 |
+| ~~`writeBaseline`/`readBaseline`/`getFeedbackInjection`~~ 🗑️ | ~~`audit/quality-baseline.ts`~~ | — | **已删除 Phase42**。质量基线持久化废弃。 |
 | `KnowledgeMenuInjector` | `injection/knowledge-menu.ts` | `extends DynamicInjector`，step 1 注入 | 8 域知识菜单 + REQUEST: 协议。 |
 | `resolveKnowledgeRequest` | `injection/knowledge-menu.ts` | `resolveKnowledgeRequest(text): string \| null` | REQUEST: 标记解析与知识内容匹配。 |
 | `analyzeActiveDomains` | `injection/domain-analyzer.ts` | `analyzeActiveDomains(input: DomainInput): string[]` | 域分析引擎。从推理关键词+工具名推断活跃域。域门控用。 |
 | `shouldSkipByDomain` | `injection/domain-analyzer.ts` | `shouldSkipByDomain(id, activeDomains): boolean` | 域不匹配时跳过注入器。 |
 | `getOutputConstraint` | `interception/output-constraint.ts` | `getOutputConstraint(toolName): string \| null` | 输出格式约束。Edit/Write/Bash 格式提示。 |
 
-### Phase42b — 工具别名与路径豁免
+### Phase42b — 工具别名（knownPaths/BulkRead 已取消）
 
 | 机制 | 文件 | 说明 |
 |------|------|------|
 | `TOOL_ALIAS` | turn/index.ts A组 | `codegraph_explore`→`mcp__codegraph__codegraph_explore`，`codegraph_node`→`mcp__codegraph__node`。 |
-| `knownPaths` | turn/index.ts 字段 | codegraph/LSP 返回的源码路径不扣探索债。新 turn 清空。 |
-| `[BulkRead]` | turn/index.ts checkFaithfulness | 批量读取标记。`[BulkRead: src/auth/*.ts]` 前缀匹配豁免探索债。 |
+| ~~`knownPaths`~~ 🗑️ | — | **已取消 Phase42**：偏差链降级为软提醒后不再需要路径豁免。 |
+| ~~`[BulkRead]`~~ 🗑️ | — | **已取消 Phase42**：批量读取标记废弃。 |
 
 ### Phase42c — 缓存审计增强
 

@@ -51,6 +51,7 @@
 │   ├─ 踩坑记录    pitfalls.md
 │   ├─ 变更日志    CHANGELOG.md
 │   ├─ 合并上游SOP 合并上游仓库SOP.md
+│   ├─ 合并scream-lifeSOP 合并scream-life上游SOP.md
 │   └─ 维护SOP    系统说明书维护SOP.md
 └─ 专题/Phase文档
     ├─ Phase14     phase14-可执行优化.md
@@ -203,6 +204,7 @@
 | 问题 | 先查这个文件 |
 |------|-------------|
 | **合并上游完整流程（推荐）** | **`SYSTEM/合并上游仓库SOP.md`** |
+| **合并 scream-life 上游** | **`SYSTEM/合并scream-life上游SOP.md`**（含 3 文件 fork 保护清单） |
 | **system.md ⚠️ 保护+同步规则** | **`SYSTEM/合并上游仓库SOP.md` §7** |
 | 作者 force-push 后怎么合并 | `SYSTEM/pitfalls.md` §Git 与仓库管理 |
 | Cherry-pick 后文件缺失 | `SYSTEM/pitfalls.md` §被抹掉的文件要主动从旧历史恢复 |

@@ -55,7 +55,7 @@ L1 核心执行层 —— 同一执行引擎的 4 个视图
   turn-control.md
   └─ 回合调度：runOneTurn → afterStep → convergenceGate
      ├── attention-system.md — 注意力决策（残差→预算→位置→检测）
-     ├── injection-system.md — 内容执行（15 injector + router + manager）
+     ├── injection-system.md — 内容执行（16 injector + router + manager）
      └── context-management.md — 数据管理（存档·审计·截断恢复）
 
 L2 支撑层 —— 被 L1 调用的功能模块
@@ -76,7 +76,7 @@ L4 独立层 —— 不参与执行，独立参考
 |:-----------|---------|
 | turn-control.md | `turn/` (+`detectors/` +`injection/`) |
 | attention-system.md | `turn/variant-registry.ts` + `facts.ts` + `budget.ts` + `detectors/` |
-| injection-system.md | `injection/` (15 injector + router + manager) |
+| injection-system.md | `injection/` (16 injector + router + manager) |
 | context-management.md | `context/` + `audit/` + `turn/index.ts` (FAA) |
 | interception-system.md | `turn/guard-engine.ts` + `interception/` 9 detectors + `turn/index.ts` (偏差链+收敛门) |
 
@@ -155,7 +155,7 @@ runOneTurn()
 
 Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）。
 
-### 2.5 注意力管理 + 债务模型 (Attention + Debt)
+### 2.5 注意力管理 (Attention)
 
 **文件**: `packages/agent-core/src/agent/turn/variant-registry.ts` + `packages/agent-core/src/agent/injection/domain-analyzer.ts` | **系统说明书**: `SYSTEM/attention-system.md`
 
@@ -166,11 +166,9 @@ Guard 已包装为 `GuardInjector(DynamicInjector)`（路径 A 迁移完成）�
 - **域门控 Domain Gating**（Phase42）：推理关键词+工具调用→活跃域→跳过不相关注入器+域匹配优先级提升。见 `attention-system.md` §⑥。
 - **知识菜单 REQUEST:**（Phase42）：step 1 注入 8 域菜单，AI 主动请求知识。见 `knowledge-menu.ts`。
 - **偏差链软提醒**：tool-pattern detector + deviation_chain_intercept 注入(weight 0.5) + 收敛门注入，不阻断工具
-- **qualityIndex 质量反馈**（Phase42）：5 维评分 + session-end 持久化 + session-start 按分注入反馈。见 `quality-score.ts` + `quality-baseline.ts`。
 - **工具别名映射 TOOL_ALIAS**（Phase42b）：`codegraph_explore`→MCP 全名，消除 "Tool not found" 报错。
-- **路径豁免 knownPaths + [BulkRead]**（Phase42b）：codegraph/LSP 返回的路径及批量读取豁免探索债。
 
-> ~~旧 `addDebt` 已废弃~~，被 DebtLedger 替代。
+> 🗑️ **Phase42 已删除**：DebtLedger / quality-score / quality-baseline / faithfulness（4 个 audit 死代码文件送回收站，543 行）。knownPaths 路径豁免 + [BulkRead] 批量标记已取消（偏差链降级为软提醒后不再需要）。旧 `addDebt` 债务模型全部废弃。
 
 ---
 
@@ -469,7 +467,7 @@ T = 动态阈值（每次注入后 T *= thresholdDecay）
 | **可选子系统** | memoStore / knowledgeStore / FAA / eventLog 只有主 agent 有 |
 | **每层可独立替换** | tools/、injectors/、compaction/ 可单独增删 |
 | **收敛门而非固定轮数** | 每步末根据上下文质量决定继续/停止 |
-| **资源敏感的压缩** | headroom < 40% Micro、< 25% Full，动态触发 |
+| **资源敏感的压缩** | headroom < 40% 触发蒸馏塔遮蔽（maskToolObservations），< 25% Full Compaction，动态触发 |
 
 ---
 

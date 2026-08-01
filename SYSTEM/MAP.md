@@ -55,7 +55,7 @@ updated: 2026-07-29
 
 ├─ CLI/TUI/Web
 │   ├─ cli-tui.md                 — dispatch→scream-tui→dialog链路
-│   └─ web-server.md 🆕 v0.11.2  — Vue3 SPA + WebSocket 实时通信（`/web` 命令、三栏工作台、多会话持久化）
+│   └─ web-server.md 🆕 v0.11.2  — Vue3 SPA + WebSocket 实时通信（CLI `scream web` 启动；`/web` 斜杠命令为二开增强）
 
 ├─ 拦截日志
 │   └─ interception.md            — 环形缓冲区/W驱动采样/磁盘持久化

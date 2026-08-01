@@ -1,7 +1,7 @@
 ---
 tags: [type/reference, domain/pitfalls, status/final]
 keywords: [踩坑, pitfalls, 经验, 教训, 问题排查]
-updated: 2026-07-23
+updated: 2026-08-01
 ---
 
 <!-- maintain: 系统说明书维护SOP → SYSTEM/系统说明书维护SOP.md -->
@@ -938,6 +938,60 @@ buildAuditEntry({ summaryTriggered: ... })    // ④ 写日志 → 永远 false
 **解决**：`git checkout --ours` 保留 HEAD 版本，保持 fork 增强的 9 个 tags 导出函数。
 
 **教训**：合并 `memory/index.ts` 时先 diff 双方的导出列表，不要假设上游不会砍导出。如果 exports 差距大，一律取 ours。
+
+### parseMemoryMemos 漏 await → memos.map is not a function（compaction.failed）
+
+**现象**：手动压缩上下文后报 `[compaction.failed] TypeError: memos.map is not a function`，但压缩主流程已完成（摘要已生成），崩溃发生在压缩后处理阶段。
+
+**根因**：`full.ts:738` `const memos = parseMemoryMemos(summary);` 漏 `await` — `parseMemoryMemos` 是 async 函数（`extractor.ts:7` 内部 `await processTags(...)`），返回 `Promise<MemoryMemo[]>` 而非数组。`memos.length === 0` 对 Promise 恒为 false 不提前 return → 走到 `memos.map(...)` 抛 TypeError。对照同函数正确写法 `index.ts:650` 带 `await`。
+
+**修复**：`full.ts:738` 补 `await`：`const memos = await parseMemoryMemos(summary);`
+
+**教训**：
+1. async 函数返回值是 Promise，漏 await 后 `array.length === 0` 判断不会抛错但永不成立，直到底层 `.map()` 才炸——类型不匹配错误藏在调用深处
+2. 修复后必须 `git stash` 基线对比测试，区分预存失败 vs 新引入（本次 7 failed 预存，与修复无关）
+
+### compaction.failed 优先查记忆提取链路
+
+**现象**：`[compaction.failed]` 事件出现，但压缩本身"完成"了。
+
+**根因**：`compact()` 主流程成功 → 后处理 `extractAndStoreMemos()` 崩溃 → 事件记为 compaction.failed。压缩内容未丢，丢的是记忆提取。
+
+**修复**：报错定位顺序：`compaction.failed` 事件 → `extractAndStoreMemos` 调用链 → 内部 async 调用逐一检查 await。
+
+**预防**：压缩后处理链路（记忆提取/持久化摘要）任何 async 调用都写 `await`，review 时重点看 Promise 返回值被当数组/对象用的情况。
+
+### MCP 管道测试 stdin EOF → 误杀子进程 → 误判功能降级（scream-life Chroma）
+
+**现象**：验证 scream-life 时 `Chroma process exited (code=null)`，误以为本地无 Python 环境、向量检索降级为 TF-IDF。实际本地 Python 3.14 + uvx 齐全，手动 spawn 完全正常。
+
+**根因**：`mcp-server.ts` 的 `readStdin()` 在 stdin `end/close` 事件后立即 `stopChroma()` 杀子进程。用 `printf ... | timeout N bun Core/mcp-server.ts` 做管道测试时，printf 喂完 JSON 即 EOF → stdin close → Chroma 陪葬 → `code=null`。**真实 MCP 客户端连接时 stdin 长驻，EOF 不会发生**。
+
+**修复**：无（代码正确）。验证方法改为：手动 `bun spawn uvx chroma_helper.py` 复现（确认 ready），或保持 stdin 打开的交互式测试。
+
+**教训**：
+1. **管道测试 stdio server 必踩坑**：printf 喂完即 EOF 会触发 server 的清理逻辑（stopChroma/stopWatcher），把"测试假象"误判为"功能缺陷"
+2. 怀疑功能降级时先做**最小复现**（手动 spawn 同一命令），别急着归因环境
+3. 报错 `code=null` 语义 = 子进程被信号杀或 spawn 失败，**不代表程序崩溃**——要区分"自己退出"还是"被清理代码杀"
+
+### English-only 决策信号 → 中文用户零识别（scream-life v0.1.0）
+
+**现象**：capture 测试中文"我决定接入 scream-life"返回 `kind: none`，中文完全不触发决策记录；英文"I decided..."正常。
+
+**根因**：`decision-signals.ts` 文件头作者自注 **"English-only signals"** —— 决策/错过/agent 声音/中断 4 组信号表 + capture.ts 的 7 个 intent hint 数组全硬编码英文短语。检测机制是 `text.toLowerCase().includes(短语)` 纯字符串匹配，无 NLP/LLM，中文零命中。这是 v0.1.0 早期设计，不是配置问题。
+
+**修复**（fork 增强，零侵入）：在信号表**数组里直接追加中文短语**——消费方全部是 `lower.includes()` 字符串匹配，加项即生效，无需改逻辑：
+- `DECISION_SIGNALS`：决定/纠结/该不该/要不要/考虑/换工作/买房/投资…
+- `MISS_OPPORTUNITY_SIGNALS`：决定不/太冒险/买不起/太贵/错过了/放弃了…
+- `AGENT_PATTERNS`：我建议/你应该/从技术角度看…（防止 AI 建议被当用户决策）
+- `capture.ts` 7 个 intent hints：怎么选/我之前/模式/偏见/勇气报告/画像…
+
+**验证**：新增 12 个中文用例全过；真实 MCP capture 中文句 → `kind: "decision"`、`matched_signals: ["决定"]`；全量 124 pass / 89 fail（基线 112/89，零回归）。
+
+**教训**：
+1. **中文产品必须验证中文输入**——英文信号表的项目对中文用户等于没检测
+2. 信号/规则类硬编码表加中文时，利用 `includes()` 匹配的开放性**直接加数组项**，零侵入最安全
+3. 这类 fork 增强要 grep 确认消费方都是字符串匹配，若有正则/NLP 则需改逻辑
 
 
 ## 缓存与上下文管理
