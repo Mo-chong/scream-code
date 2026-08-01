@@ -15,14 +15,15 @@ import { maskingStats, type MaskingStats } from '../utils/masking-stats';
 /** Session-wide checkpoint safety net for file rewind/forward. */
 export const checkpoint = new CheckpointManager();
 
-import type { TokenUsage } from '@scream-code/ltod';
+import { isImageFormatError, isRecoverableRequestStructureError, isRequestTooLargeError, type TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
 
 import type { LoopEventDispatcher } from './events';
 import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
+import { degradeMedia, stripMedia } from './media-projection';
 import { chatWithRetry } from './retry';
-import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
-import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
+import { runToolCallBatch, recordUnexecutedToolCalls, type ToolCallStepContext } from './tool-call';
+import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason, MediaProjectionState, RecordStepUsageResult } from './types';
 import { maskToolObservations } from '../utils/mask-tool-observations';
 
 type ChatStreamingCallbacks = Pick<
@@ -37,12 +38,20 @@ export interface ExecuteLoopStepDeps {
   readonly dispatchEvent: LoopEventDispatcher;
   readonly llm: LLM;
   readonly tools?: readonly ExecutableTool[] | undefined;
+  /**
+   * Per-step tool table builder. When present it wins over `tools` and is
+   * re-invoked before every step, so a tool loaded mid-turn is dispatchable
+   * on the very next step and runtime tool visibility stays fresh.
+   */
+  readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly currentStep: number;
   readonly maxRetryAttempts?: number;
-  readonly recordUsage: (usage: TokenUsage) => void;
+  readonly recordUsage:
+    (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  readonly mediaProjection?: MediaProjectionState | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -56,11 +65,13 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     dispatchEvent,
     llm,
     tools,
+    buildTools,
     hooks,
     log,
     currentStep,
     maxRetryAttempts,
     recordUsage,
+    mediaProjection,
   } = deps;
 
   checkpoint.beginTurn(currentStep);
@@ -78,6 +89,11 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   }
 
   signal.throwIfAborted();
+
+  // Resolve the tool table AFTER beforeStep so it reflects the same state as
+  // the messages built below (beforeStep can run compaction, which discards
+  // loaded dynamic tool schemas). buildTools wins over the static snapshot.
+  const effectiveTools = buildTools !== undefined ? buildTools() : tools;
 
   let messages = await buildMessages();
   // Observation masking: replace old tool results with a placeholder
@@ -121,7 +137,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   const stepUuid = randomUUID();
 
   const step: ToolCallStepContext = {
-    tools,
+    tools: effectiveTools,
     hooks,
     log,
     dispatchEvent,
@@ -140,9 +156,18 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     step: currentStep,
   });
 
+  // Apply sticky media projection from a previous step's recovery (so the
+  // same degradation is used without a wasted failed request per step).
+  let effectiveMessages = messages;
+  if (mediaProjection?.mode === 'degraded') {
+    effectiveMessages = degradeMedia(messages);
+  } else if (mediaProjection?.mode === 'stripped') {
+    effectiveMessages = stripMedia(messages);
+  }
+
   const chatParams: LLMChatParams = {
-    messages,
-    tools: tools ?? [],
+    messages: effectiveMessages,
+    tools: effectiveTools ?? [],
     signal,
     ...createChatStreamingCallbacks({
       dispatchEvent,
@@ -151,18 +176,88 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       stepUuid,
     }),
   };
-  const response: LLMChatResponse = await chatWithRetry({
-    llm,
-    params: chatParams,
-    dispatchEvent,
-    turnId,
-    currentStep,
-    stepUuid,
-    maxAttempts: maxRetryAttempts,
-    log,
-  });
+
+  let response: LLMChatResponse;
+  try {
+    response = await chatWithRetry({
+      llm,
+      params: chatParams,
+      dispatchEvent,
+      turnId,
+      currentStep,
+      stepUuid,
+      maxAttempts: maxRetryAttempts,
+      log,
+    });
+  } catch (error) {
+    // Media degradation recovery: if the provider rejects the request
+    // because of media (too large or bad format), transform the messages
+    // and retry once. The sticky `mediaProjection` state ensures
+    // subsequent steps in the same turn use the degraded projection
+    // directly without re-failing.
+    if (mediaProjection !== undefined && !signal.aborted) {
+      if (
+        isRequestTooLargeError(error) &&
+        mediaProjection.mode !== 'degraded' &&
+        mediaProjection.mode !== 'stripped'
+      ) {
+        mediaProjection.mode = 'degraded';
+        effectiveMessages = degradeMedia(messages);
+        log?.warn('request too large - retrying with media degraded');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else if (
+        isRequestTooLargeError(error) &&
+        mediaProjection.mode === 'degraded'
+      ) {
+        mediaProjection.mode = 'stripped';
+        effectiveMessages = stripMedia(messages);
+        log?.warn('request still too large with degraded media - retrying with all media stripped');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else if (
+        isImageFormatError(error) &&
+        mediaProjection.mode !== 'stripped'
+      ) {
+        mediaProjection.mode = 'stripped';
+        effectiveMessages = stripMedia(messages);
+        log?.warn('image format error - retrying with all media stripped');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
   const usage = response.usage;
-  recordUsage(usage);
+  const usageResult = await recordUsage(usage);
+  const stopTurnAfterUsage = usageResult?.stopTurn === true;
   // Log cache metrics for observability — the baseline we need before
   // evaluating whether further cache_control tuning is warranted.
   if (log !== undefined) {
@@ -179,8 +274,9 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // step. Provider terminal diagnostics such as filtering or truncation must
   // not trigger side-effecting tool execution even if a malformed response also
   // contains tool calls.
-  let effectiveStopReason = stopReason;
-  if (stopReason === 'tool_use') {
+  let effectiveStopReason: LoopStepStopReason =
+    stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
+  if (effectiveStopReason === 'tool_use') {
     // Pre-execution checkpoint: snapshot files before writer tools
     for (const tc of response.toolCalls ?? []) {
       const toolName = tc.name ?? tc.function?.name;
@@ -190,6 +286,16 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     }
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
+  } else if (
+    (stopReason === 'paused' || stopReason === 'unknown' || stopReason === 'max_tokens') &&
+    response.toolCalls.length > 0
+  ) {
+    // The provider stream broke off (paused / overloaded / token limit) while
+    // the response still carries tool calls - possibly cut off mid-arguments.
+    // Record each call and close it with a synthetic interrupted result:
+    // dropping them would lose the model's intent and can persist an
+    // assistant message strict providers reject as empty.
+    await recordUnexecutedToolCalls(step, response);
   }
 
   // When a tool batch runs, it drains paired `tool.result` events even when
@@ -208,9 +314,10 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     ...stepEndProviderDiagnostics(response, effectiveStopReason),
   });
 
+  let stopTurnAfterStep = stopTurnAfterUsage;
   if (hooks?.afterStep !== undefined) {
     try {
-      await hooks.afterStep({
+      const afterStep = await hooks.afterStep({
         turnId,
         stepNumber: currentStep,
         usage,
@@ -218,12 +325,17 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
         signal,
         llm,
       });
+      stopTurnAfterStep = stopTurnAfterStep || afterStep?.stopTurn === true;
     } catch {
       // The step is already sealed; observer hooks cannot change the result.
     }
   }
 
-  return { usage, stopReason: effectiveStopReason };
+  return {
+    usage,
+    stopReason:
+      stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
+  };
 }
 
 function deriveStepStopReason(response: LLMChatResponse): LoopStepStopReason {

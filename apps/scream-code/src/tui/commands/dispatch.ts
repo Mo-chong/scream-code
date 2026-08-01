@@ -253,7 +253,7 @@ async function handleBuiltInSlashCommand(
       handleLanguageCommand(host);
       return;
     case 'model':
-      handleModelCommand(host, args);
+      await handleModelCommand(host, args);
       return;
     case 'permission':
       showPermissionPicker(host);
